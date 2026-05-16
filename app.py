@@ -288,8 +288,16 @@ def get_time_of_day(hour: int) -> str:
 
 
 def fetch_auto_context() -> str:
-    # ip-api.com：免費、無需 API key、45 req/min
-    geo = requests.get("https://ipwho.is/", timeout=10).json()
+    # 取得使用者真實 IP（雲端部署時 Streamlit 伺服器 IP 會是美國）
+    try:
+        forwarded = st.context.headers.get("X-Forwarded-For", "")
+        client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+    except Exception:
+        client_ip = ""
+    ip_segment = f"/{client_ip}" if client_ip else ""
+
+    # ipwho.is：免費、HTTPS、無需 API key
+    geo = requests.get(f"https://ipwho.is{ip_segment}", timeout=10).json()
     city = geo.get("city", "未知"); country = geo.get("country", "")
     lat = geo.get("latitude"); lon = geo.get("longitude")
 
@@ -338,8 +346,8 @@ def build_prompt(
     genres: list[str] | None = None,
     history: list[dict] | None = None,
 ) -> str:
-    heard_titles_str  = "\n".join(f"- {t}" for t in profile["heard_titles"][:80])
-    heard_artists_str = ", ".join(profile["heard_artists"][:60])
+    heard_titles_str  = "\n".join(f"- {t}" for t in profile["heard_titles"])
+    heard_artists_str = ", ".join(profile["heard_artists"])
     traits_block = f"\n## 使用者個人特質與當下狀態\n{user_traits}\n" if user_traits else ""
 
     new_count = round(num_songs * new_ratio / 100)
@@ -473,46 +481,65 @@ def get_recommendations(
     genres: list[str] | None = None,
     history: list[dict] | None = None,
 ) -> dict:
+    import time
     client = genai.Client(api_key=_get_env("GEMINI_API_KEY"))
     prompt = build_prompt(
         profile, context, num_songs, new_ratio, user_traits,
         languages=languages, genres=genres, history=history,
     )
 
-    # 第一次：要求 JSON mime type（更穩定的 JSON 輸出）
-    resp = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
-    )
-    text = (resp.text or "").strip()
+    def _call_gemini(with_mime: bool) -> str:
+        cfg = types.GenerateContentConfig(response_mime_type="application/json") if with_mime else None
+        kwargs = {"model": GEMINI_MODEL, "contents": prompt}
+        if cfg:
+            kwargs["config"] = cfg
+        resp = client.models.generate_content(**kwargs)
+        return (resp.text or "").strip()
 
-    # 若回傳空字串，fallback：不指定 mime type，讓模型自由輸出
-    if not text:
-        resp = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-        )
-        text = (resp.text or "").strip()
-
-    if not text:
-        raise ValueError("Gemini 回傳空回應，請稍後再試")
-
-    return _parse_json_robust(text)
+    # 最多重試 3 次（含 503 過載）
+    for attempt in range(3):
+        try:
+            text = _call_gemini(with_mime=True)
+            if not text:
+                text = _call_gemini(with_mime=False)
+            if text:
+                return _parse_json_robust(text)
+        except Exception as e:
+            err = str(e)
+            is_503 = "503" in err or "UNAVAILABLE" in err
+            if is_503 and attempt < 2:
+                time.sleep(8 * (attempt + 1))  # 8s, 16s
+                continue
+            if attempt == 2:
+                raise
+    raise ValueError("Gemini 回傳空回應，請稍後再試")
 
 
 def _norm(s: str) -> str:
     return (s or "").strip().lower()
 
 
-def dedupe_tracks(tracks: list[dict], history: list[dict] | None = None) -> list[dict]:
+def dedupe_tracks(
+    tracks: list[dict],
+    history: list[dict] | None = None,
+    profile: dict | None = None,
+    new_ratio: int = 70,
+) -> list[dict]:
     """同次推薦內以 (title, artist) 去重，且同藝人最多 MAX_TRACKS_PER_ARTIST 首；
-    同時排除 session 歷史中已推薦過的曲目。
+    同時排除 session 歷史；並依使用者 profile 硬性過濾：
+      - 任何模式下：歌名出現在 heard_titles 直接排除
+      - new_ratio == 100：藝人（含合作藝人）出現在 heard_artists 直接排除
     """
     history = history or []
     seen_pairs: set[tuple[str, str]] = {
         (_norm(h["title"]), _norm(h["artist"])) for h in history
     }
+    heard_titles_norm: set[str] = set()
+    heard_artists_norm: set[str] = set()
+    if profile:
+        heard_titles_norm = {_norm(t) for t in profile.get("heard_titles", [])}
+        heard_artists_norm = {_norm(a) for a in profile.get("heard_artists", [])}
+
     artist_count: dict[str, int] = {}
     deduped: list[dict] = []
     for t in tracks:
@@ -521,9 +548,15 @@ def dedupe_tracks(tracks: list[dict], history: list[dict] | None = None) -> list
         key = (_norm(title), _norm(artist))
         if key in seen_pairs:
             continue
+        # 硬性過濾：歌名在已聽過清單裡直接排除
+        if _norm(title) in heard_titles_norm:
+            continue
         ak = _norm(artist)
-        # 多藝人合作（A, B）只看主要藝人
-        primary = ak.split(",")[0].strip()
+        all_artists = [a.strip() for a in ak.split(",") if a.strip()]
+        primary = all_artists[0] if all_artists else ""
+        # 100% 新藝人模式：任一合作藝人在 heard_artists 中就排除
+        if new_ratio == 100 and any(a in heard_artists_norm for a in all_artists):
+            continue
         if artist_count.get(primary, 0) >= MAX_TRACKS_PER_ARTIST:
             continue
         seen_pairs.add(key)
@@ -835,7 +868,8 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                         not_found.append(f"{rec['title']} - {rec['artist']}")
 
                 # 後處理：以 Spotify 回傳的官方名稱再去重 + 同藝人最多 N 首 + 排除歷史
-                found = dedupe_tracks(found, history=history)
+                # + 硬性過濾 profile 中已聽過的歌（new_ratio==100 時連藝人也過濾）
+                found = dedupe_tracks(found, history=history, profile=profile, new_ratio=new_ratio)
 
                 # 更新 session 歷史
                 new_history = history + [
