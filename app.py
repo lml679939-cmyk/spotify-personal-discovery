@@ -288,8 +288,16 @@ def get_time_of_day(hour: int) -> str:
 
 
 def fetch_auto_context() -> str:
+    # 取得使用者真實 IP（雲端部署時 Streamlit 伺服器 IP 會是美國）
+    try:
+        forwarded = st.context.headers.get("X-Forwarded-For", "")
+        client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+    except Exception:
+        client_ip = ""
+    ip_segment = f"/{client_ip}" if client_ip else ""
+
     # ip-api.com：免費、無需 API key、45 req/min
-    geo = requests.get("http://ip-api.com/json/?fields=city,country,lat,lon", timeout=10).json()
+    geo = requests.get(f"http://ip-api.com/json{ip_segment}?fields=city,country,lat,lon", timeout=10).json()
     city = geo.get("city", "未知"); country = geo.get("country", "")
     lat = geo.get("lat"); lon = geo.get("lon")
 
