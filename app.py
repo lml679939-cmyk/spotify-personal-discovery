@@ -289,9 +289,9 @@ def get_time_of_day(hour: int) -> str:
 
 def fetch_auto_context() -> str:
     # ip-api.com：免費、無需 API key、45 req/min
-    geo = requests.get("http://ip-api.com/json/?fields=city,country,lat,lon", timeout=10).json()
+    geo = requests.get("https://ipwho.is/", timeout=10).json()
     city = geo.get("city", "未知"); country = geo.get("country", "")
-    lat = geo.get("lat"); lon = geo.get("lon")
+    lat = geo.get("latitude"); lon = geo.get("longitude")
 
     w = requests.get("https://api.open-meteo.com/v1/forecast", params={
         "latitude": lat, "longitude": lon,
@@ -596,6 +596,7 @@ with st.expander("🧠 關於你（選填，讓 AI 更懂你）", expanded=False
 
 st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
 auto_ctx = st.toggle("自動偵測位置與天氣", value=True)
+st.caption("啟用時會透過 [ipwho.is](https://ipwho.is) 取得 IP 地理位置，僅用於判斷天氣與時區，不儲存。")
 
 col1, col2 = st.columns(2)
 
@@ -610,7 +611,7 @@ with col2:
     uploaded = st.file_uploader(
         "上傳情境圖片（選填）",
         type=["jpg", "jpeg", "png", "webp"],
-        help="上傳一張能代表你當下心情或環境的照片",
+        help="上傳一張能代表你當下心情或環境的照片，最大 10 MB",
     )
     if uploaded:
         st.image(uploaded, use_container_width=True)
@@ -754,11 +755,14 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                 if uploaded:
                     st.write("🖼️ 分析圖片氛圍...")
                     try:
-                        img_bytes = uploaded.read()
-                        mime = uploaded.type or "image/jpeg"
-                        img_ctx = analyze_image(img_bytes, mime)
-                        context_parts.append(f"圖片分析：{img_ctx}")
-                        st.write(f"🎨 {img_ctx}")
+                        if uploaded.size > 10 * 1024 * 1024:
+                            st.warning(f"圖片過大（{uploaded.size / 1024 / 1024:.1f} MB），請上傳 10 MB 以內的圖片。")
+                        else:
+                            img_bytes = uploaded.read()
+                            mime = uploaded.type or "image/jpeg"
+                            img_ctx = analyze_image(img_bytes, mime)
+                            context_parts.append(f"圖片分析：{img_ctx}")
+                            st.write(f"🎨 {img_ctx}")
                     except Exception as e:
                         st.warning(f"圖片分析失敗：{e}")
 
