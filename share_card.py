@@ -12,6 +12,9 @@ from __future__ import annotations
 import io
 import random
 from datetime import datetime
+from pathlib import Path
+
+_FONTS_DIR = Path(__file__).parent / "fonts"
 
 import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -112,23 +115,26 @@ def pick_palette(seed: str | None = None) -> dict:
 
 # ── Font loading ──────────────────────────────────────────────
 def _load_font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    """Try Windows CJK fonts first, fall back to defaults."""
-    candidates = (
-        [
+    """Load font: bundled fonts/  >  Windows fonts  >  PIL default."""
+    if bold:
+        candidates = [
+            _FONTS_DIR / "NotoSansTC-Bold.ttf",
+            _FONTS_DIR / "NotoSansTC-VariableFont_wght.ttf",
             "C:/Windows/Fonts/msjhbd.ttc",
             "C:/Windows/Fonts/msyhbd.ttc",
             "C:/Windows/Fonts/arialbd.ttf",
         ]
-        if bold
-        else [
+    else:
+        candidates = [
+            _FONTS_DIR / "NotoSansTC-Regular.ttf",
+            _FONTS_DIR / "NotoSansTC-VariableFont_wght.ttf",
             "C:/Windows/Fonts/msjh.ttc",
             "C:/Windows/Fonts/msyh.ttc",
             "C:/Windows/Fonts/arial.ttf",
         ]
-    )
     for path in candidates:
         try:
-            return ImageFont.truetype(path, size)
+            return ImageFont.truetype(str(path), size)
         except OSError:
             continue
     return ImageFont.load_default()
