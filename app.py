@@ -303,6 +303,8 @@ def fetch_auto_context() -> str:
     geo = requests.get(f"https://ipwho.is{ip_segment}", timeout=10).json()
     city = geo.get("city", "未知"); country = geo.get("country", "")
     lat = geo.get("latitude"); lon = geo.get("longitude")
+    tz_offset_sec = geo.get("timezone", {}).get("offset", 28800)  # 預設 UTC+8
+    st.session_state["geo_tz_offset"] = tz_offset_sec
 
     w = requests.get("https://api.open-meteo.com/v1/forecast", params={
         "latitude": lat, "longitude": lon,
@@ -1180,14 +1182,17 @@ if "found" in st.session_state and st.session_state.found:
         )
         if st.button("🎨 生成分享圖", use_container_width=True, key="gen_share"):
             import time
+            from datetime import timezone, timedelta
             seed = str(time.time())
+            _tz_sec = st.session_state.get("geo_tz_offset", 28800)
+            _local_now = datetime.now(timezone(timedelta(seconds=_tz_sec)))
             with st.spinner("正在生成圖卡..."):
                 ctx_interp = st.session_state.get("context_interp", "")
                 if share_mode == "單張總合卡":
-                    img, palette_name = share_card.generate_single(found, ctx_interp, seed=seed)
+                    img, palette_name = share_card.generate_single(found, ctx_interp, seed=seed, local_now=_local_now)
                     st.session_state["share_images"] = [("總合卡", img)]
                 else:
-                    slides, palette_name = share_card.generate_deck(found, ctx_interp, seed=seed)
+                    slides, palette_name = share_card.generate_deck(found, ctx_interp, seed=seed, local_now=_local_now)
                     st.session_state["share_images"] = slides
                 st.session_state["share_palette"] = palette_name
 

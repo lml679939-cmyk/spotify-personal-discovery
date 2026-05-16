@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import io
 import random
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 _FONTS_DIR = Path(__file__).parent / "fonts"
@@ -247,12 +247,14 @@ def _draw_cover_with_border(canvas: Image.Image, cover: Image.Image, x: int, y: 
 
 # ── Slide builders ────────────────────────────────────────────
 def _build_cover_slide(palette: dict, context_interp: str, tracks: list[dict],
-                        rng: random.Random) -> Image.Image:
+                        rng: random.Random,
+                        local_now: datetime | None = None) -> Image.Image:
     num_tracks = len(tracks)
+    now = local_now or datetime.now()
     img, draw = _new_canvas(palette)
     _sparkles(draw, palette, rng, count=22,
               region=(60, 60, CANVAS_W - 60, CANVAS_H - 260),
-              avoid=(50, 220, 760, 600))
+              avoid=(50, 220, 760, 900))
 
     # ── Title block ──
     title_font = _load_font(132, bold=True)
@@ -339,8 +341,8 @@ def _build_cover_slide(palette: dict, context_interp: str, tracks: list[dict],
 
     stats = [
         (str(num_tracks), "TRACKS"),
-        (datetime.now().strftime("%m.%d"), "DATE"),
-        (datetime.now().strftime("%H:%M"), "TIME"),
+        (now.strftime("%m.%d"), "DATE"),
+        (now.strftime("%H:%M"), "TIME"),
     ]
     section_w = CANVAS_W // len(stats)
     for i, (value, lbl) in enumerate(stats):
@@ -528,12 +530,13 @@ def _build_quote_slide(palette: dict, context_interp: str, rng: random.Random) -
 
 # ── Public API ────────────────────────────────────────────────
 def generate_deck(tracks: list[dict], context_interp: str,
-                   seed: str | None = None) -> list[tuple[str, Image.Image]]:
+                   seed: str | None = None,
+                   local_now: datetime | None = None) -> list[tuple[str, Image.Image]]:
     """Returns 4 named slides as (name, PIL.Image) tuples."""
     palette = pick_palette(seed)
     rng = random.Random(seed) if seed else random.Random()
     return [
-        ("封面", _build_cover_slide(palette, context_interp, tracks, rng)),
+        ("封面", _build_cover_slide(palette, context_interp, tracks, rng, local_now=local_now)),
         ("Top Picks", _build_grid_slide(palette, tracks, rng)),
         ("推薦清單", _build_tracklist_slide(palette, tracks, rng)),
         ("Gemini 解讀", _build_quote_slide(palette, context_interp, rng)),
@@ -541,7 +544,8 @@ def generate_deck(tracks: list[dict], context_interp: str,
 
 
 def generate_single(tracks: list[dict], context_interp: str,
-                     seed: str | None = None) -> tuple[Image.Image, str]:
+                     seed: str | None = None,
+                     local_now: datetime | None = None) -> tuple[Image.Image, str]:
     """One combined 1080x1920 card: cover mosaic as background, tracklist on top, Gemini box."""
     palette = pick_palette(seed)
     rng = random.Random(seed) if seed else random.Random()
