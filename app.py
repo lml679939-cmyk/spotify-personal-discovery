@@ -39,8 +39,11 @@ def _get_env(key: str, default: str | None = None) -> str | None:
 GEMINI_MODEL = "gemini-2.5-flash"
 SCOPES = (
     "user-top-read user-read-recently-played user-library-read "
-    "playlist-modify-public playlist-modify-private"
+    "playlist-read-private playlist-modify-public playlist-modify-private"
 )
+
+# 跨 session 歷史（存在 Spotify 私人歌單裡）
+HISTORY_PLAYLIST_NAME = "🤖 AI Discovery History (請勿手動刪除)"
 
 MBTI_TYPES = [
     "不指定",
@@ -565,6 +568,144 @@ def dedupe_tracks(
     return deduped
 
 
+# ── 跨 session 歷史（持久化在 Spotify 私人歌單） ────────────
+def _has_scope(scope_name: str) -> bool:
+    """檢查目前 token 是否含某個 scope。"""
+    token = st.session_state.get("spotify_token") or {}
+    return scope_name in (token.get("scope") or "")
+
+
+def _get_history_playlist_id() -> str | None:
+    """找出（或建立）這位使用者的自動管理歷史歌單，回傳 playlist id。
+    若使用者尚未授權 playlist-read-private，回傳 None（避免重複建立歌單）。
+    """
+    if not _has_scope("playlist-read-private"):
+        return None
+    sp = get_spotify_client()
+    cache_key = "history_playlist_id"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    user_id = sp.current_user()["id"]
+    results = sp.current_user_playlists(limit=50)
+    while results:
+        for pl in results["items"]:
+            if pl and pl.get("name") == HISTORY_PLAYLIST_NAME and pl["owner"]["id"] == user_id:
+                st.session_state[cache_key] = pl["id"]
+                return pl["id"]
+        if results.get("next"):
+            results = sp.next(results)
+        else:
+            break
+
+    new_pl = sp._post(
+        "me/playlists",
+        payload={
+            "name": HISTORY_PLAYLIST_NAME,
+            "public": False,
+            "description": "Spotify Personal Discovery 自動管理：記錄推薦過的歌曲以避免重複。可以在 App 內按「清除歷史」清空。",
+        },
+    )
+    st.session_state[cache_key] = new_pl["id"]
+    return new_pl["id"]
+
+
+def load_persistent_history() -> list[dict]:
+    """讀取持久化歷史，回傳 [{title, artist}, ...]；失敗回空 list。"""
+    try:
+        pid = _get_history_playlist_id()
+    except Exception:
+        return []
+    if not pid:
+        return []
+
+    cache_key = f"persistent_history::{pid}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    sp = get_spotify_client()
+    items: list[dict] = []
+    try:
+        results = sp.playlist_items(pid, fields="items(track(name,artists(name))),next", limit=100)
+        while results:
+            for it in results["items"]:
+                track = it.get("track") or {}
+                name = track.get("name")
+                if not name:
+                    continue
+                items.append({
+                    "title": name,
+                    "artist": ", ".join(a["name"] for a in track.get("artists", []) if a.get("name")),
+                })
+            if results.get("next"):
+                results = sp.next(results)
+            else:
+                break
+    except Exception:
+        return []
+
+    st.session_state[cache_key] = items
+    return items
+
+
+def append_to_persistent_history(tracks: list[dict]) -> None:
+    """把新推薦的曲目 append 到歷史歌單。失敗時靜默忽略。"""
+    try:
+        pid = _get_history_playlist_id()
+    except Exception:
+        return
+    if not pid:
+        return
+    sp = get_spotify_client()
+    uris = [t["uri"] for t in tracks if t.get("uri")]
+    if not uris:
+        return
+    try:
+        for i in range(0, len(uris), 100):
+            sp._post(f"playlists/{pid}/items", payload={"uris": uris[i:i+100]})
+    except Exception:
+        return
+    cache_key = f"persistent_history::{pid}"
+    if cache_key in st.session_state:
+        for t in tracks:
+            st.session_state[cache_key].append({
+                "title": t.get("name", ""),
+                "artist": t.get("artist", ""),
+            })
+
+
+def clear_persistent_history() -> int:
+    """清空歷史歌單裡的所有曲目，回傳清掉的數量。"""
+    try:
+        pid = _get_history_playlist_id()
+    except Exception:
+        return 0
+    if not pid:
+        return 0
+    sp = get_spotify_client()
+    all_uris: list[str] = []
+    try:
+        results = sp.playlist_items(pid, fields="items(track(uri)),next", limit=100)
+        while results:
+            for it in results["items"]:
+                uri = (it.get("track") or {}).get("uri")
+                if uri:
+                    all_uris.append(uri)
+            if results.get("next"):
+                results = sp.next(results)
+            else:
+                break
+        for i in range(0, len(all_uris), 100):
+            chunk = [{"uri": u} for u in all_uris[i:i+100]]
+            sp._delete(f"playlists/{pid}/tracks", payload={"tracks": chunk})
+    except Exception:
+        pass
+    cache_key = f"persistent_history::{pid}"
+    if cache_key in st.session_state:
+        st.session_state[cache_key] = []
+    return len(all_uris)
+
+
 # ── UI ────────────────────────────────────────────────────
 st.set_page_config(page_title="Spotify Personal Discovery", page_icon="🎵", layout="wide")
 
@@ -699,7 +840,7 @@ if "projective_q" not in st.session_state:
 
 proj_col1, proj_col2 = st.columns([5, 1])
 with proj_col1:
-    st.markdown(f"**🎲 隨機投射問題（選填）**　{st.session_state['projective_q']}")
+    st.markdown(f"**🎲 隨機投射問題（選填）**  \n{st.session_state['projective_q']}")
 with proj_col2:
     if st.button("換一題", use_container_width=True):
         current = st.session_state["projective_q"]
@@ -730,19 +871,31 @@ with col_mode:
 
 st.divider()
 
-# 推薦歷史狀態列 + 清除歷史
-_hist_n = len(st.session_state.get("recommend_history", []))
+# 推薦歷史狀態列 + 清除歷史（session + 跨 session 合計）
+_session_hist_n = len(st.session_state.get("recommend_history", []))
+_persistent_hist = load_persistent_history()
+_persistent_hist_n = len(_persistent_hist)
+_total_hist_n = _session_hist_n + _persistent_hist_n
 hist_col1, hist_col2 = st.columns([4, 1])
 with hist_col1:
-    if _hist_n > 0:
+    if _total_hist_n > 0:
         st.caption(
-            f"🧠 已記住本次 session 推薦過的 **{_hist_n}** 首歌，下次生成會自動避開重複。"
+            f"🧠 已記住推薦過的 **{_total_hist_n}** 首歌"
+            f"（本次 {_session_hist_n}・過往 {_persistent_hist_n}），下次生成會自動避開。"
         )
+    elif _has_scope("playlist-read-private"):
+        st.caption("🧠 尚未有推薦歷史。每次生成後會記住，跨 session 都不重複推薦。")
     else:
-        st.caption("🧠 尚未有推薦歷史。每次生成後會記住，避免下一輪重複推薦。")
+        st.caption("🧠 想跨 session 記住推薦歷史？請從側邊欄登出後重新登入授權。")
 with hist_col2:
-    if st.button("🗑 清除歷史", use_container_width=True, disabled=_hist_n == 0):
+    if st.button("🗑 清除歷史", use_container_width=True, disabled=_total_hist_n == 0):
         st.session_state["recommend_history"] = []
+        try:
+            n = clear_persistent_history()
+            if n > 0:
+                st.toast(f"已清除 {n} 首過往推薦歷史")
+        except Exception:
+            pass
         st.rerun()
 
 # 生成按鈕
@@ -824,8 +977,10 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                     )
                 user_traits = "\n".join(traits_parts)
 
-                # 歷史推薦（同 session 內避免重複）
-                history = st.session_state.get("recommend_history", [])
+                # 歷史推薦：session 內 + 跨 session（從 Spotify 歷史歌單讀回）
+                session_history = st.session_state.get("recommend_history", [])
+                persistent_history = load_persistent_history()
+                history = session_history + persistent_history
                 lang_msg = "、".join(languages) if languages else "不限"
                 genre_msg = "、".join(genres) if genres else "不限"
                 st.write(
@@ -869,14 +1024,19 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
 
                 # 後處理：以 Spotify 回傳的官方名稱再去重 + 同藝人最多 N 首 + 排除歷史
                 # + 硬性過濾 profile 中已聽過的歌（new_ratio==100 時連藝人也過濾）
-                found = dedupe_tracks(found, history=history, profile=profile, new_ratio=new_ratio)
+                found = dedupe_tracks(found, history=history, profile=profile, new_ratio=new_artist_ratio)
 
                 # 更新 session 歷史
-                new_history = history + [
+                new_session = session_history + [
                     {"title": t["name"], "artist": t["artist"]} for t in found
                 ]
-                # 上限保護
-                st.session_state["recommend_history"] = new_history[-HISTORY_KEEP * 4:]
+                st.session_state["recommend_history"] = new_session[-HISTORY_KEEP * 4:]
+
+                # 持久化到 Spotify 私人歷史歌單（跨 session 記住）
+                try:
+                    append_to_persistent_history(found)
+                except Exception:
+                    pass
 
                 status.update(label=f"✅ 完成！找到 {len(found)} 首推薦", state="complete")
 
