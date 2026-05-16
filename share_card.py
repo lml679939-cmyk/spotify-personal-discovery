@@ -581,6 +581,16 @@ def generate_single(tracks: list[dict], context_interp: str,
     draw.text((70, 200), "Personal Discovery", font=sub_title_font, fill=palette["text"])
     draw.rectangle([(70, 280), (340, 296)], fill=palette["accent3"])
 
+    # ── Semi-transparent panel behind tracklist for readability ──
+    _panel = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(_panel).rounded_rectangle(
+        [(50, 300), (CANVAS_W - 50, 1548)],
+        radius=18,
+        fill=(*palette["bg"], 185),
+    )
+    img = Image.alpha_composite(img.convert("RGBA"), _panel).convert("RGB")
+    draw = ImageDraw.Draw(img)
+
     # ── Tracklist (y: 315–1535) ── moved up; dynamic sizing to fit all tracks
     sect_font = _load_font(52, bold=True)
     draw.text((70, 315), "TRACKLIST", font=sect_font, fill=palette["accent1"])
