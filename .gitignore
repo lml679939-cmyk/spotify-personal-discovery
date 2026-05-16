@@ -9,3 +9,6 @@ venv/
 
 # Streamlit secrets — never commit real values
 .streamlit/secrets.toml
+
+# Claude Code local settings
+.claude/
