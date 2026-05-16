@@ -1,0 +1,11 @@
+.env
+.cache
+.cache-*
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Streamlit secrets — never commit real values
+.streamlit/secrets.toml
