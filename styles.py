@@ -97,8 +97,15 @@ def _build_global_css():
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
     background-color: var(--y2k-cream) !important;
 }}
-[data-testid="stDecoration"] {{
+[data-testid="stDecoration"],
+[data-testid="stDecorationLine"],
+header [data-testid="stToolbar"] + div,
+header::after,
+.stDecorationLine,
+div[class*="decoration"] {{
     display: none !important;
+    height: 0 !important;
+    visibility: hidden !important;
 }}
 [data-testid="stHeader"] {{
     display: none !important;
