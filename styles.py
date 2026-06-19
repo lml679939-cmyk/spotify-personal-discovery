@@ -365,8 +365,8 @@ def login_hero_html():
 
 def _method_card_html(title, description, border_color, icon_svg):
     return f"""<div style="border:3px solid #2D1B4E;border-left:6px solid {border_color};
-  border-radius:18px;padding:1.2rem 1.4rem 0.6rem 1.4rem;margin:0.8rem 0;
-  height:130px;box-sizing:border-box;
+  border-radius:18px;padding:1.2rem 1.4rem 0.8rem 1.4rem;margin:0.8rem 0;
+  min-height:130px;box-sizing:border-box;
   box-shadow:4px 4px 0px {border_color}33;background:white">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:0.4rem">
     <span style="display:inline-block;width:36px">{icon_svg}</span>
