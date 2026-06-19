@@ -108,7 +108,7 @@ div[class*="decoration"] {{
     visibility: hidden !important;
 }}
 [data-testid="stHeader"],
-header {
+header {{
     display: none !important;
     height: 0 !important;
     overflow: hidden !important;

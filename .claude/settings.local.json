@@ -10,7 +10,12 @@
       "Bash(ngrok version *)",
       "Bash(python -m py_compile share_card.py)",
       "Bash(python -m py_compile app.py share_card.py)",
-      "Bash(Get-Content \"C:\\\\Users\\\\user\\\\Downloads\\\\生成式AI人文導論\\\\Spotify音樂推薦_個人專案\\\\.env\")"
+      "Bash(Get-Content \"C:\\\\Users\\\\user\\\\Downloads\\\\生成式AI人文導論\\\\Spotify音樂推薦_個人專案\\\\.env\")",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }

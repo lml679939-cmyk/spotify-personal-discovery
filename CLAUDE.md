@@ -63,8 +63,20 @@ _get_credential(key)
 - `_render_api_key_settings()` 在登入頁和 sidebar 共用，但因 `st.stop()` 機制，兩者不會同時渲染
 - Streamlit widget key 以 `custom_` 前綴存在 session_state，例如 `custom_SPOTIFY_CLIENT_ID`
 
+### UI 主題系統（Y2K / Retro Pop）
+- **`styles.py`**：集中管理所有 CSS、SVG 素材、HTML 輔助函數
+  - `inject_global_css()` — 在 `app.py` 頂部呼叫，注入全域 CSS
+  - CSS 變數定義在 `:root`（`--y2k-cyan`, `--y2k-pink`, `--y2k-yellow`, `--y2k-purple` 等）
+  - 5 個內嵌 SVG 常數：`SVG_CASSETTE`, `SVG_VINYL`, `SVG_NOTES`, `SVG_BOOMBOX`, `SVG_SPARKLE`
+  - HTML helpers：`login_hero_html()`, `login_spotify_card()`, `login_guest_card()`, `track_card_html()`, `track_list_html()`, `results_header_html()`, `context_interpretation_html()`, `section_header_html()`, `divider_html()`
+- **`.streamlit/config.toml`**：Streamlit 原生主題設定（primaryColor, backgroundColor 等）
+- **強制亮色模式**，不支援暗色主題
+- 修改樣式時只改 `styles.py` + `config.toml`，不要在 `app.py` 中混入 CSS
+- CSS 選擇器依賴 Streamlit 的 `data-testid` 屬性，升級 Streamlit 版本時需驗證
+- `span` 的 font-family 排除了 Material Symbols icon（`:not(.material-symbols-rounded)` 等），避免破壞圖示渲染
+
 ### 分享圖卡
-- `share_card.py`：7 色系（Burgundy/Indigo/Rose/Mustard/Sage/Lilac/Ocean）
+- `share_card.py`：9 色系（原 7 + Neon Pop + Cyber Y2K）
 - 兩種模式：單張總合卡（`generate_single`）/ 4 張分頁（`generate_deck`）
 - 需要 `fonts/NotoSansTC-*.ttf` 字型檔
 
@@ -93,6 +105,7 @@ Streamlit Cloud 會自動偵測 push 並重新部署。
 | 檔案 | 用途 | 常改？ |
 |---|---|---|
 | `app.py` | 主程式 Streamlit UI | 是 |
+| `styles.py` | Y2K 主題 CSS/SVG/HTML helpers | 偶爾 |
 | `share_card.py` | IG Story 圖卡生成 | 偶爾 |
 | `m1_top_tracks.py` | CLI：OAuth 測試 | 否 |
 | `m2_create_playlist.py` | CLI：歌單寫入測試 | 否 |
@@ -100,4 +113,5 @@ Streamlit Cloud 會自動偵測 push 並重新部署。
 | `m4_contextual_recommend.py` | CLI：情境推薦測試 | 否 |
 | `requirements.txt` | pip 依賴 | 偶爾 |
 | `.env` / `.env.example` | 本地 credentials | 否 |
+| `.streamlit/config.toml` | Streamlit 主題設定（Y2K 色彩） | 偶爾 |
 | `.streamlit/secrets.toml.example` | 雲端 credentials 範例 | 否 |
