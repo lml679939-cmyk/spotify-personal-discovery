@@ -107,8 +107,12 @@ div[class*="decoration"] {{
     height: 0 !important;
     visibility: hidden !important;
 }}
-[data-testid="stHeader"] {{
+[data-testid="stHeader"],
+header {
     display: none !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
 }}
 .main .block-container {{
     max-width: 1000px;
