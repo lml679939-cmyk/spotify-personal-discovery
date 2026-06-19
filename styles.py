@@ -97,6 +97,9 @@ def _build_global_css():
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
     background-color: var(--y2k-cream) !important;
 }}
+[data-testid="stDecoration"] {{
+    display: none !important;
+}}
 .main .block-container {{
     max-width: 1000px;
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
