@@ -354,7 +354,7 @@ def login_hero_html():
   <h1 style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:2.4rem;
     background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-    margin:0 0 0.3rem 0;line-height:1.2">
+    margin:0 0 0.3rem 0;line-height:1.2;text-align:center">
     Spotify Personal Discovery
   </h1>
   <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0;text-align:center">
