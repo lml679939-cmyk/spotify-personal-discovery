@@ -100,10 +100,13 @@ def _build_global_css():
 [data-testid="stDecoration"] {{
     display: none !important;
 }}
+[data-testid="stHeader"] {{
+    display: none !important;
+}}
 .main .block-container {{
     max-width: 1000px;
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
-    padding-top: 0.5rem !important;
+    padding-top: 0 !important;
 }}
 h1, h2, h3, [data-testid="stHeading"] {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
