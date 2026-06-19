@@ -100,7 +100,7 @@ def _build_global_css():
 .main .block-container {{
     max-width: 1000px;
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
-    padding-top: 1rem !important;
+    padding-top: 0.5rem !important;
 }}
 h1, h2, h3, [data-testid="stHeading"] {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
@@ -357,7 +357,7 @@ def login_hero_html():
     margin:0 0 0.3rem 0;line-height:1.2">
     Spotify Personal Discovery
   </h1>
-  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0">
+  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0;text-align:center">
     {_sparkle('#FFD700', 16)} 根據你的聆聽習慣與當下情境，發現從未聽過的好歌 {_sparkle('#FF69B4', 16)}
   </p>
 </div>"""
