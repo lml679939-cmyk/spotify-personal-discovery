@@ -482,6 +482,7 @@ def build_prompt(
     languages: list[str] | None = None,
     genres: list[str] | None = None,
     history: list[dict] | None = None,
+    fav_artists: list[str] | None = None,
 ) -> str:
     heard_titles_str  = "\n".join(f"- {t}" for t in profile["heard_titles"])
     heard_artists_str = ", ".join(profile["heard_artists"])
@@ -530,6 +531,17 @@ def build_prompt(
     else:
         genre_block = "## 曲風偏好\n- 不限曲風，依情境自由選擇\n"
 
+    # 指定歌手偏好
+    if fav_artists:
+        fav_block = (
+            "## 使用者指定歌手（高優先）\n"
+            f"- 使用者特別想聽這些歌手：{', '.join(fav_artists)}\n"
+            "- 請盡量從這些歌手中挑選歌曲（至少一半推薦來自這裡），但仍要避開已聽清單\n"
+            "- 若這些歌手的歌與情境不符，可部分推薦其他符合情境的歌手\n"
+        )
+    else:
+        fav_block = ""
+
     # 歷史推薦（避免重複）
     if history:
         recent = history[-HISTORY_KEEP:]
@@ -550,7 +562,7 @@ def build_prompt(
 喜愛藝人：{", ".join(profile["top_artists"])}
 風格：{", ".join(profile["top_genres"][:8]) if profile["top_genres"] else "pop, indie pop"}
 {traits_block}
-## 當下情境（最高優先）
+{fav_block}## 當下情境（最高優先）
 {context}
 
 {lang_block}
@@ -583,6 +595,7 @@ def build_guest_prompt(
     languages: list[str] | None = None,
     genres: list[str] | None = None,
     history: list[dict] | None = None,
+    fav_artists: list[str] | None = None,
 ) -> str:
     """訪客模式 prompt：沒有個人聆聽資料，純靠情境推薦。"""
     if languages:
@@ -615,11 +628,22 @@ def build_guest_prompt(
 
     traits_block = f"\n## 使用者個人特質與當下狀態\n{user_traits}\n" if user_traits else ""
 
+    # 指定歌手偏好
+    if fav_artists:
+        fav_block = (
+            "## 使用者指定歌手（高優先）\n"
+            f"- 使用者特別想聽這些歌手：{', '.join(fav_artists)}\n"
+            "- 請盡量從這些歌手中挑選歌曲（至少一半推薦來自這裡）\n"
+            "- 若這些歌手的歌與情境不符，可部分推薦其他符合情境的歌手\n"
+        )
+    else:
+        fav_block = ""
+
     return f"""你是專業音樂推薦 AI。根據使用者描述的情境與偏好，推薦 {num_songs} 首歌。
 
 注意：這位使用者沒有提供個人聆聽紀錄，所以請完全根據情境推薦。
 {traits_block}
-## 當下情境（最高優先）
+{fav_block}## 當下情境（最高優先）
 {context}
 
 {lang_block}
@@ -676,6 +700,7 @@ def get_recommendations(
     languages: list[str] | None = None,
     genres: list[str] | None = None,
     history: list[dict] | None = None,
+    fav_artists: list[str] | None = None,
 ) -> dict:
     import time
     client = genai.Client(api_key=_get_credential("GEMINI_API_KEY"))
@@ -683,11 +708,13 @@ def get_recommendations(
         prompt = build_guest_prompt(
             context, num_songs, user_traits,
             languages=languages, genres=genres, history=history,
+            fav_artists=fav_artists,
         )
     else:
         prompt = build_prompt(
             profile, context, num_songs, new_ratio, user_traits,
             languages=languages, genres=genres, history=history,
+            fav_artists=fav_artists,
         )
 
     def _call_gemini(with_mime: bool) -> str:
@@ -1043,6 +1070,16 @@ genres = st.pills(
     key="genre_pills",
 )
 
+st.markdown("<div style='margin-top: 0.8rem;'></div>", unsafe_allow_html=True)
+fav_artists_raw = st.text_input(
+    "🎤 想聽哪些歌手的歌？（選填，用逗號分隔）",
+    key="fav_artists_input",
+    placeholder="例：周杰倫, Taylor Swift, NewJeans, 陳奕迅",
+    help="填入後 AI 會優先從這些歌手中推薦，同時兼顧你的情境偏好。",
+)
+# 解析成清單，過濾空白
+fav_artists = [a.strip() for a in fav_artists_raw.replace('，', ',').split(',') if a.strip()] or None
+
 st.markdown("<div style='margin-top: 2.4rem;'></div>", unsafe_allow_html=True)
 # 隨機投射問題
 if "projective_q" not in st.session_state:
@@ -1226,6 +1263,7 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                         languages=languages or None,
                         genres=genres or None,
                         history=history or None,
+                        fav_artists=fav_artists,
                     )
                 except Exception as e:
                     st.error(f"推薦生成失敗：{e}")
