@@ -20,6 +20,7 @@ from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from spotipy.cache_handler import MemoryCacheHandler
 from google import genai
 from google.genai import types
+import styles
 
 import share_card
 
@@ -199,11 +200,11 @@ def _get_guest_spotify_client() -> spotipy.Spotify | None:
 def show_login_required() -> None:
     """未登入時顯示的歡迎/登入頁：Spotify 登入 + 訪客模式 + BYOK 設定。"""
 
+    # ── Hero ──
+    st.markdown(styles.login_hero_html(), unsafe_allow_html=True)
+
     # ── 方式一：Spotify 登入 ──
-    st.subheader("🎧 方式一：用 Spotify 登入（個人化推薦）")
-    st.markdown(
-        "讀取你的聆聽紀錄，交給 Gemini AI 生成「你沒聽過、但會喜歡」的推薦。"
-    )
+    st.markdown(styles.login_spotify_card(), unsafe_allow_html=True)
 
     has_spotify_creds = bool(
         _get_credential("SPOTIFY_CLIENT_ID")
@@ -214,64 +215,56 @@ def show_login_required() -> None:
     if has_spotify_creds:
         auth_manager = _get_auth_manager()
         auth_url = auth_manager.get_authorize_url()
-        left, _ = st.columns([1, 1])
-        with left:
-            st.link_button(
-                "🎧 用 Spotify 登入",
-                auth_url,
-                type="primary",
-                use_container_width=True,
-            )
+        st.link_button(
+            "🎧 用 Spotify 登入",
+            auth_url,
+            type="primary",
+            use_container_width=True,
+        )
     else:
         st.warning("尚未設定 Spotify API Keys，請在下方「自訂 API Keys」區填入後即可登入。")
 
-    st.markdown(
-        "🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。"
-    )
+    st.caption("🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。")
 
     # ── 方式二：訪客模式 ──
-    st.markdown("---")
-    st.subheader("🎶 方式二：不登入，直接推薦（訪客模式）")
-    st.markdown(
-        "不需要 Spotify 帳號，根據你描述的情境與偏好推薦音樂。\n"
-        "（不會根據個人聆聽歷史做個人化，也無法建立 Spotify 歌單）"
-    )
+    st.markdown(styles.divider_html(), unsafe_allow_html=True)
+    st.markdown(styles.login_guest_card(), unsafe_allow_html=True)
 
     has_gemini = bool(_get_credential("GEMINI_API_KEY"))
-    left2, _ = st.columns([1, 1])
-    with left2:
-        if has_gemini:
-            if st.button("🎶 不登入，直接推薦", type="primary", use_container_width=True):
-                enter_guest_mode()
-        else:
-            st.warning("訪客模式需要 Gemini API Key，請在下方「自訂 API Keys」區填入。")
+    if has_gemini:
+        if st.button("🎶 不登入，直接推薦", type="primary", use_container_width=True):
+            enter_guest_mode()
+    else:
+        st.warning("訪客模式需要 Gemini API Key，請在下方「自訂 API Keys」區填入。")
 
     # ── BYOK 設定區 ──
-    st.markdown("---")
+    st.markdown(styles.divider_html(), unsafe_allow_html=True)
     _render_api_key_settings(expanded=not has_spotify_creds and not has_gemini)
 
 
 def _render_api_key_settings(expanded: bool = False) -> None:
     """渲染 API Keys 設定區（登入頁 + sidebar 共用）。"""
-    with st.expander("⚙️ 自訂 API Keys（讓更多人使用 / 用自己的額度）", expanded=expanded):
-        st.markdown(
-            "**為什麼要填自己的 Keys？**\n"
-            "- Spotify Development Mode 限制只有少數人能登入。"
-            "用自己的 Spotify API，就不受這個限制！\n"
-            "- Gemini API 免費額度有限，用自己的 Key 就不用共享額度"
-        )
-        st.markdown("---")
+    default_redirect = _get_env("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8501/"
 
-        st.markdown("**Spotify API** "
-                     "（[申請教學](https://developer.spotify.com/documentation/web-api/concepts/apps)）")
+    with st.expander("⚙️ 自訂 API Keys — 讓所有人都能使用", expanded=expanded):
+
+        # ── 說明標語 ──
         st.markdown(
-            "1. 到 [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) "
-            "→ Create App\n"
-            "2. 填寫 App Name、Description（隨意）\n"
-            '3. Redirect URI 填入：`' + (_get_env("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8501/") + '`\n'
-            "4. 勾選 Web API\n"
-            "5. 複製 Client ID 和 Client Secret 貼到下方"
+            "<div style=\"font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.92rem;"
+            "color:#2D1B4E;line-height:1.7;padding:4px 0 8px 0\">"
+            "填入自己的 API Keys 後，你就<strong>不受 Spotify 用戶數限制</strong>，"
+            "也能使用自己的 Gemini 免費額度。每個人申請都只需要 <strong>3-5 分鐘</strong>。"
+            "</div>",
+            unsafe_allow_html=True,
         )
+
+        # ── Spotify 步驟卡 ──
+        st.markdown(
+            styles.byok_spotify_steps_html(default_redirect),
+            unsafe_allow_html=True,
+        )
+
+        # ── Spotify 輸入欄 ──
         c1, c2 = st.columns(2)
         with c1:
             st.text_input(
@@ -288,19 +281,32 @@ def _render_api_key_settings(expanded: bool = False) -> None:
                 placeholder="貼上你的 Client Secret",
             )
 
-        default_redirect = _get_env("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8501/"
-        st.text_input(
-            "Redirect URI（需與 Spotify Dashboard 設定一致）",
-            key="custom_SPOTIFY_REDIRECT_URI",
-            placeholder=default_redirect,
-            help=f"通常填：{default_redirect}",
+        # Redirect URI：自動帶入正確值，不再需要使用者手動填寫
+        # 若 session 中沒有自訂值，就用環境變數預設值
+        if not st.session_state.get("custom_SPOTIFY_REDIRECT_URI"):
+            st.session_state["custom_SPOTIFY_REDIRECT_URI"] = default_redirect
+
+        st.caption(
+            f"✅ Redirect URI 已自動設定為：`{default_redirect}`　"
+            "（如需修改請展開進階設定）"
+        )
+        with st.expander("🔧 進階：手動修改 Redirect URI", expanded=False):
+            st.text_input(
+                "Redirect URI（需與 Spotify Dashboard 設定一致）",
+                key="custom_SPOTIFY_REDIRECT_URI",
+                placeholder=default_redirect,
+                help=f"通常不需要改動，預設值：{default_redirect}",
+            )
+
+        st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+
+        # ── Gemini 步驟卡 ──
+        st.markdown(
+            styles.byok_gemini_section_html(),
+            unsafe_allow_html=True,
         )
 
-        st.markdown("---")
-        st.markdown(
-            "**Gemini API** "
-            "（[免費申請](https://aistudio.google.com/apikey)）"
-        )
+        # ── Gemini 輸入欄 ──
         st.text_input(
             "Gemini API Key",
             key="custom_GEMINI_API_KEY",
@@ -308,7 +314,8 @@ def _render_api_key_settings(expanded: bool = False) -> None:
             placeholder="貼上你的 Gemini API Key",
         )
 
-        st.caption("🔒 所有 Keys 只存在本次瀏覽器分頁的記憶體中，關掉就消失，不會傳到伺服器。")
+        # ── 隱私說明 ──
+        st.markdown(styles.byok_privacy_badge_html(), unsafe_allow_html=True)
 
 
 def get_spotify_client() -> spotipy.Spotify:
@@ -900,9 +907,9 @@ def clear_persistent_history() -> int:
 
 # ── UI ────────────────────────────────────────────────────
 st.set_page_config(page_title="Spotify Personal Discovery", page_icon="🎵", layout="wide")
+styles.inject_global_css()
 
-st.title("🎵 Spotify Personal Discovery")
-st.caption("根據你的聆聽習慣與當下情境，發現從未聽過的好歌")
+
 
 # ── OAuth callback 處理 + 登入閘門 ─────────────────────
 consume_oauth_callback()
@@ -1299,7 +1306,10 @@ if "found" in st.session_state and st.session_state.found:
     not_found = st.session_state.not_found
 
     if st.session_state.context_interp:
-        st.info(f"**Gemini 對你此刻情境的理解：** {st.session_state.context_interp}")
+        st.markdown(
+            styles.context_interpretation_html(st.session_state.context_interp),
+            unsafe_allow_html=True,
+        )
 
     # 加入 Spotify 歌單按鈕（訪客模式隱藏）
     save_clicked = False
@@ -1347,7 +1357,7 @@ if "found" in st.session_state and st.session_state.found:
                 else:
                     st.error(f"寫入失敗：{e}")
 
-    st.subheader(f"推薦歌單（{len(found)} 首）")
+    st.markdown(styles.results_header_html(len(found)), unsafe_allow_html=True)
     view_col, slider_col = st.columns([2, 3])
     with view_col:
         view_mode = st.radio(
@@ -1365,37 +1375,26 @@ if "found" in st.session_state and st.session_state.found:
         for i in range(0, len(found), cols_per_row):
             cols = st.columns(cols_per_row)
             for j, col in enumerate(cols):
-                if i + j < len(found):
-                    track = found[i + j]
+                idx = i + j
+                if idx < len(found):
+                    track = found[idx]
                     with col:
-                        if track.get("cover"):
-                            st.image(track["cover"], use_container_width=True)
-                        else:
-                            st.markdown("🎵")
-                        st.markdown(f"**{track['name']}**")
-                        st.caption(f"{track['artist']}")
-                        if cols_per_row <= 5:
-                            if track.get("album"):
-                                st.caption(f"💿 {track['album']}")
-                            st.caption(f"💡 {track['reason']}")
+                        show_album = cols_per_row <= 5
+                        card_track = track if show_album else {**track, "album": "", "reason": ""}
+                        st.markdown(
+                            styles.track_card_html(card_track, idx),
+                            unsafe_allow_html=True,
+                        )
                         btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
                         st.link_button(btn_label, track["url"], use_container_width=True)
     else:
-        # 條列式
-        for i, track in enumerate(found, 1):
-            c1, c2, c3 = st.columns([1, 8, 2])
-            with c1:
-                if track.get("cover"):
-                    st.image(track["cover"], width=70)
-                else:
-                    st.markdown("🎵")
-            with c2:
-                st.markdown(f"**{i}. {track['name']}** — {track['artist']}")
-                album_part = f"💿 {track['album']}　·　" if track.get("album") else ""
-                st.caption(f"{album_part}💡 {track['reason']}")
-            with c3:
-                btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
-                st.link_button(btn_label, track["url"], use_container_width=True)
+        for i, track in enumerate(found):
+            st.markdown(
+                styles.track_list_html(track, i),
+                unsafe_allow_html=True,
+            )
+            btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
+            st.link_button(btn_label, track["url"], use_container_width=True)
 
     if not_found:
         with st.expander("Spotify 找不到的推薦"):
