@@ -246,14 +246,14 @@ def _render_api_key_settings(expanded: bool = False) -> None:
     """渲染 API Keys 設定區（登入頁 + sidebar 共用）。"""
     default_redirect = _get_env("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8501/"
 
-    with st.expander("⚙️ 自訂 API Keys — 讓所有人都能使用", expanded=expanded):
+    with st.expander("🔑 填入你的 API Keys（必填）", expanded=expanded):
 
         # ── 說明標語 ──
         st.markdown(
             "<div style=\"font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.92rem;"
             "color:#2D1B4E;line-height:1.7;padding:4px 0 8px 0\">"
-            "填入自己的 API Keys 後，你就<strong>不受 Spotify 用戶數限制</strong>，"
-            "也能使用自己的 Gemini 免費額度。每個人申請都只需要 <strong>3-5 分鐘</strong>。"
+            "本網站<strong>不提供共用 API Keys</strong>，請填入自己申請的 Keys 才能使用。"
+            "每個人申請都只需要 <strong>3-5 分鐘</strong>，且 Gemini 有免費額度，基本上不花錢。"
             "</div>",
             unsafe_allow_html=True,
         )
