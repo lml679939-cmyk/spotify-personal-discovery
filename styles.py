@@ -686,7 +686,7 @@ def byok_gemini_section_html() -> str:
 def byok_privacy_badge_html() -> str:
     return """
 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;
-  border-radius:12px;background:#F0FFF8;border:2px solid #00D4AA;margin-top:8px">
+  border-radius:12px;background:#F0FFF8;margin-top:8px">
   <span style="font-size:1.2rem">🔒</span>
   <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.83rem;
     color:#2D1B4E;line-height:1.5">
