@@ -39,11 +39,11 @@ def _get_env(key: str, default: str | None = None) -> str | None:
 
 
 def _get_credential(key: str) -> str | None:
-    """User-provided key only (BYOK form). No shared-key fallback."""
+    """User-provided key (session_state) → env/secrets fallback."""
     custom = st.session_state.get(f"custom_{key}")
     if custom and custom.strip():
         return custom.strip()
-    return None
+    return _get_env(key)
 
 GEMINI_MODEL = "gemini-2.5-flash"
 SCOPES = (
