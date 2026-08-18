@@ -36,11 +36,11 @@ _get_credential(key)
 
 ### 推薦流程
 1. `fetch_user_profile()` — 讀 Spotify 資料（訪客模式跳過）
-2. `fetch_auto_context()` — IP 定位 + 天氣
+2. `fetch_auto_context()` — IP 定位 + 天氣（`_fetch_geo_weather()` 快取 `AUTO_CONTEXT_TTL=600` 秒；時刻每次即時算）
 3. `analyze_image()` — Gemini Vision 圖片分析（選用）
 4. `build_prompt()` / `build_guest_prompt()` — 組裝 LLM prompt
 5. `get_recommendations()` — 呼叫 Gemini，解析 JSON
-6. `search_track()` — Spotify Search API 解析曲目
+6. `_search_tracks_parallel()` — ThreadPoolExecutor 8 workers 並行呼叫 `search_track()`；token 需在主執行緒先用 `_get_search_token()` 取得（worker thread 不能碰 session_state），單首失敗以 fallback 搜尋卡呈現、不中斷整批
 7. `dedupe_tracks()` — 後處理去重
 
 ### 推薦 Prompt 參數（兩個函式都有）
@@ -58,6 +58,8 @@ _get_credential(key)
 - **Session 內**：`st.session_state["recommend_history"]`
 - **跨 Session**（僅登入模式）：寫入 Spotify 私人歌單 `🤖 AI Discovery History`
 - 訪客模式只有 session 內歷史
+- 歷史歌單上限 `PERSISTENT_HISTORY_MAX=500` 首，超過時 `_trim_persistent_history()` 自動修剪最舊的
+- 清空/修剪都用 `_playlist_replace_items()`：`PUT /playlists/{id}/items` 整批取代（失敗 fallback 舊 `/tracks` 路徑）
 
 ## UI 主題系統（Y2K / Retro Pop）
 
@@ -201,6 +203,12 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| `cd90b79` | fix: 移除 not_found 死代碼、fallback 連結 URL encoding；perf: 天氣/定位快取 10 分鐘、歷史歌單上限 500 首自動修剪 |
+| `749d847` | fix: 清除歷史改用 PUT /items（舊 DELETE /tracks 已失效）、專輯無封面防呆；perf: Spotify 搜尋並行化（ThreadPoolExecutor 8 workers） |
+| `c8dd345` | fix: restore env/secrets fallback in _get_credential — BYOK optional |
+| `e9261e3` | fix: remove double border on privacy badge inside BYOK expander |
+| `9c504a1` | fix: remove env/secrets fallback in _get_credential — BYOK only |
+| `30f29eb` | feat: require BYOK — remove shared key fallback messaging |
 | `7c12fe6` | fix: f-string brace escaping in styles.py |
 | `f750931` | fix: push config.toml to git; use `header` tag selector |
 | `562a97d` | feat: 新增「指定歌手」輸入欄位 + prompt 注入 |
