@@ -7,6 +7,8 @@ import mimetypes
 import os
 import random
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -386,11 +388,9 @@ def create_playlist_with_tracks(playlist_name: str, track_uris: list[str]) -> di
     return playlist
 
 
-def search_track(title: str, artist: str) -> dict | None:
-    if is_authenticated():
-        sp = get_spotify_client()
-    else:
-        sp = _get_guest_spotify_client()
+def search_track(title: str, artist: str, sp: spotipy.Spotify | None = None) -> dict | None:
+    if sp is None:
+        sp = get_spotify_client() if is_authenticated() else _get_guest_spotify_client()
     if sp is None:
         return None
     results = sp.search(q=f"track:{title} artist:{artist}", type="track", limit=1)
@@ -401,14 +401,50 @@ def search_track(title: str, artist: str) -> dict | None:
     if not items:
         return None
     t = items[0]
+    images = t["album"].get("images") or []
     return {
         "name": t["name"],
         "artist": ", ".join(a["name"] for a in t["artists"]),
         "album": t["album"]["name"],
         "url": t["external_urls"]["spotify"],
         "uri": t["uri"],
-        "cover": t["album"]["images"][1]["url"] if len(t["album"]["images"]) > 1 else t["album"]["images"][0]["url"],
+        "cover": images[1]["url"] if len(images) > 1 else (images[0]["url"] if images else ""),
     }
+
+
+def _get_search_token() -> str | None:
+    """取得可供搜尋用的 access token。必須在主執行緒呼叫（會碰 session_state）。"""
+    if is_authenticated():
+        get_spotify_client()  # 觸發必要的 token refresh
+        return st.session_state["spotify_token"]["access_token"]
+    cid = _get_credential("SPOTIFY_CLIENT_ID")
+    csec = _get_credential("SPOTIFY_CLIENT_SECRET")
+    if not cid or not csec:
+        return None
+    try:
+        auth = SpotifyClientCredentials(client_id=cid, client_secret=csec)
+        return auth.get_access_token(as_dict=False)
+    except Exception:
+        return None
+
+
+def _search_tracks_parallel(recs: list[dict], token: str, max_workers: int = 8) -> list[dict | None]:
+    """並行搜尋 Spotify，保持輸入順序。單首失敗視為找不到（回 None），不中斷整批。
+    每個 worker thread 用自己的 Spotify client（requests.Session 非 thread-safe）。"""
+    tls = threading.local()
+
+    def _worker(rec: dict) -> dict | None:
+        sp = getattr(tls, "sp", None)
+        if sp is None:
+            sp = spotipy.Spotify(auth=token)
+            tls.sp = sp
+        try:
+            return search_track(rec["title"], rec["artist"], sp=sp)
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(recs)))) as ex:
+        return list(ex.map(_worker, recs))
 
 
 # ── Context helpers ───────────────────────────────────────
@@ -921,11 +957,16 @@ def clear_persistent_history() -> int:
                 results = sp.next(results)
             else:
                 break
-        for i in range(0, len(all_uris), 100):
-            chunk = [{"uri": u} for u in all_uris[i:i+100]]
-            sp._delete(f"playlists/{pid}/tracks", payload={"tracks": chunk})
     except Exception:
-        pass
+        return 0
+    if not all_uris:
+        return 0
+    # 用「整批取代為空」清空歌單：新 endpoint PUT /playlists/{id}/items
+    # （舊的 /tracks 已被改名；失敗時 fallback 舊路徑以相容未遷移的環境）
+    try:
+        sp._put(f"playlists/{pid}/items", payload={"uris": []})
+    except Exception:
+        sp._put(f"playlists/{pid}/tracks", payload={"uris": []})
     cache_key = f"persistent_history::{pid}"
     if cache_key in st.session_state:
         st.session_state[cache_key] = []
@@ -1157,7 +1198,7 @@ with hist_col2:
                 if n > 0:
                     st.toast(f"已清除 {n} 首過往推薦歷史")
             except Exception:
-                pass
+                st.toast("⚠️ 清除 Spotify 歷史歌單失敗，過往推薦歷史可能仍保留")
         st.rerun()
 
 # 生成按鈕
@@ -1281,22 +1322,25 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                     seen_rec.add(k)
                     unique_recs.append(rec)
 
+                _search_token = None
                 _has_spotify = bool(
                     _get_credential("SPOTIFY_CLIENT_ID")
                     and _get_credential("SPOTIFY_CLIENT_SECRET")
                 )
                 if _has_spotify:
-                    st.write(f"🔍 Spotify 搜尋歌曲...（{len(unique_recs)}/{pre_dedupe_n} 首去重後）")
+                    st.write(f"🔍 Spotify 搜尋歌曲...（{len(unique_recs)}/{pre_dedupe_n} 首去重後，並行搜尋）")
+                    _search_token = _get_search_token()
                 else:
                     st.write(f"⚠️ 未設定 Spotify API，跳過搜尋（{len(unique_recs)} 首）")
 
+                if _search_token:
+                    search_results = _search_tracks_parallel(unique_recs, _search_token)
+                else:
+                    search_results = [None] * len(unique_recs)
+
                 found = []
                 not_found = []
-                for rec in unique_recs:
-                    if _has_spotify:
-                        r = search_track(rec["title"], rec["artist"])
-                    else:
-                        r = None
+                for rec, r in zip(unique_recs, search_results):
                     if r:
                         r["reason"] = rec["reason"]
                         found.append(r)
