@@ -8,9 +8,11 @@ import os
 import random
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 import io
 
@@ -91,7 +93,9 @@ GENRE_OPTIONS = [
 ]
 
 MAX_TRACKS_PER_ARTIST = 2  # 同一次推薦中，同藝人最多出現幾首
-HISTORY_KEEP = 200          # session 內保留的歷史推薦上限
+HISTORY_KEEP = 200          # 注入 prompt 的歷史推薦上限
+PERSISTENT_HISTORY_MAX = 500  # 跨 session 歷史歌單保留上限，超過會修剪最舊的
+AUTO_CONTEXT_TTL = 600      # 位置/天氣快取秒數（10 分鐘）
 
 PROJECTIVE_QUESTIONS = [
     "📱 你手機現在的桌布是什麼？",
@@ -167,7 +171,7 @@ def logout() -> None:
         "spotify_token",
         "user_profile",
         "user_display_name",
-        "found", "not_found", "context_interp",
+        "found", "context_interp",
         "recommend_history",
         "share_images", "share_palette",
         "guest_mode",
@@ -458,7 +462,12 @@ def get_time_of_day(hour: int) -> str:
     return "深夜"
 
 
-def fetch_auto_context() -> str:
+def _fetch_geo_weather() -> str:
+    """IP 定位 + 天氣，session 內快取 AUTO_CONTEXT_TTL 秒（天氣變化慢，不必每次生成都重打外部 API）。"""
+    cached = st.session_state.get("geo_weather_cache")
+    if cached and time.time() - cached["ts"] < AUTO_CONTEXT_TTL:
+        return cached["value"]
+
     # 取得使用者真實 IP（雲端部署時 Streamlit 伺服器 IP 會是美國）
     try:
         forwarded = st.context.headers.get("X-Forwarded-For", "")
@@ -481,14 +490,15 @@ def fetch_auto_context() -> str:
     }, timeout=10).json()["current"]
 
     desc = WMO_CODES.get(w["weather_code"], "")
+    value = f"{city}, {country}｜{desc} {w['temperature_2m']}°C"
+    st.session_state["geo_weather_cache"] = {"ts": time.time(), "value": value}
+    return value
+
+
+def fetch_auto_context() -> str:
     now = datetime.now()
     time_label = get_time_of_day(now.hour)
-
-    return (
-        f"{now.strftime('%H:%M')}（{time_label}）｜"
-        f"{city}, {country}｜"
-        f"{desc} {w['temperature_2m']}°C"
-    )
+    return f"{now.strftime('%H:%M')}（{time_label}）｜{_fetch_geo_weather()}"
 
 
 def analyze_image(image_bytes: bytes, mime: str) -> str:
@@ -837,6 +847,35 @@ def _has_scope(scope_name: str) -> bool:
     return scope_name in (token.get("scope") or "")
 
 
+def _playlist_replace_items(sp: spotipy.Spotify, pid: str, uris: list[str]) -> None:
+    """整批取代歌單內容（一次最多 100 首）。新 endpoint PUT /items，失敗 fallback 舊 /tracks。"""
+    try:
+        sp._put(f"playlists/{pid}/items", payload={"uris": uris})
+    except Exception:
+        sp._put(f"playlists/{pid}/tracks", payload={"uris": uris})
+
+
+def _trim_persistent_history(sp: spotipy.Spotify, pid: str) -> None:
+    """歌單超過 PERSISTENT_HISTORY_MAX 首時只保留最新的部分，避免無限成長拖慢載入。"""
+    uris: list[str] = []
+    results = sp.playlist_items(pid, fields="items(track(uri)),next", limit=100)
+    while results:
+        for it in results["items"]:
+            uri = (it.get("track") or {}).get("uri")
+            if uri:
+                uris.append(uri)
+        if results.get("next"):
+            results = sp.next(results)
+        else:
+            break
+    if len(uris) <= PERSISTENT_HISTORY_MAX:
+        return
+    keep = uris[-PERSISTENT_HISTORY_MAX:]
+    _playlist_replace_items(sp, pid, keep[:100])
+    for i in range(100, len(keep), 100):
+        sp._post(f"playlists/{pid}/items", payload={"uris": keep[i:i + 100]})
+
+
 def _get_history_playlist_id() -> str | None:
     """找出（或建立）這位使用者的自動管理歷史歌單，回傳 playlist id。
     若使用者尚未授權 playlist-read-private，回傳 None（避免重複建立歌單）。
@@ -934,6 +973,13 @@ def append_to_persistent_history(tracks: list[dict]) -> None:
                 "title": t.get("name", ""),
                 "artist": t.get("artist", ""),
             })
+        # 超過上限時修剪歌單，只保留最新 PERSISTENT_HISTORY_MAX 首（best-effort）
+        if len(st.session_state[cache_key]) > PERSISTENT_HISTORY_MAX:
+            try:
+                _trim_persistent_history(sp, pid)
+                st.session_state[cache_key] = st.session_state[cache_key][-PERSISTENT_HISTORY_MAX:]
+            except Exception:
+                pass
 
 
 def clear_persistent_history() -> int:
@@ -961,12 +1007,8 @@ def clear_persistent_history() -> int:
         return 0
     if not all_uris:
         return 0
-    # 用「整批取代為空」清空歌單：新 endpoint PUT /playlists/{id}/items
-    # （舊的 /tracks 已被改名；失敗時 fallback 舊路徑以相容未遷移的環境）
-    try:
-        sp._put(f"playlists/{pid}/items", payload={"uris": []})
-    except Exception:
-        sp._put(f"playlists/{pid}/tracks", payload={"uris": []})
+    # 用「整批取代為空」清空歌單
+    _playlist_replace_items(sp, pid, [])
     cache_key = f"persistent_history::{pid}"
     if cache_key in st.session_state:
         st.session_state[cache_key] = []
@@ -1204,7 +1246,7 @@ with hist_col2:
 # 生成按鈕
 if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True):
     # 清空舊結果
-    for k in ("found", "not_found", "context_interp"):
+    for k in ("found", "context_interp"):
         st.session_state.pop(k, None)
 
     if not auto_ctx and not text_ctx.strip() and not uploaded:
@@ -1339,17 +1381,17 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                     search_results = [None] * len(unique_recs)
 
                 found = []
-                not_found = []
                 for rec, r in zip(unique_recs, search_results):
                     if r:
                         r["reason"] = rec["reason"]
                         found.append(r)
                     else:
+                        _search_q = quote(f"{rec['title']} {rec['artist']}", safe="")
                         found.append({
                             "name": rec["title"],
                             "artist": rec["artist"],
                             "album": "",
-                            "url": f"https://open.spotify.com/search/{rec['title']}%20{rec['artist']}",
+                            "url": f"https://open.spotify.com/search/{_search_q}",
                             "uri": None,
                             "cover": "",
                             "reason": rec["reason"],
@@ -1376,7 +1418,6 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
 
         # 結果寫入 session_state，讓「加入歌單」按鈕能存取
         st.session_state.found = found
-        st.session_state.not_found = not_found
         st.session_state.context_interp = result.get("context_interpretation", "")
         # 強制重跑，讓頁面頂端的 _hist_n 讀到剛存入的歷史計數
         st.rerun()
@@ -1385,7 +1426,6 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
 # ── 顯示結果（從 session_state 讀取，這樣即使重跑也不會消失）─────────
 if "found" in st.session_state and st.session_state.found:
     found = st.session_state.found
-    not_found = st.session_state.not_found
 
     if st.session_state.context_interp:
         st.markdown(
@@ -1477,11 +1517,6 @@ if "found" in st.session_state and st.session_state.found:
             )
             btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
             st.link_button(btn_label, track["url"], use_container_width=True)
-
-    if not_found:
-        with st.expander("Spotify 找不到的推薦"):
-            for nf in not_found:
-                st.text(f"• {nf}")
 
     # ── 複製 / 分享到 LINE ──────────────────────────────────
     st.divider()
