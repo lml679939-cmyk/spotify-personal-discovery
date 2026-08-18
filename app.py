@@ -2,19 +2,16 @@
 Spotify Personal Discovery - Web UI
 """
 
+import io
 import json
-import mimetypes
 import os
 import random
-import tempfile
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
-
-import io
 
 import requests
 import streamlit as st
@@ -501,20 +498,43 @@ def fetch_auto_context() -> str:
     return f"{now.strftime('%H:%M')}（{time_label}）｜{_fetch_geo_weather()}"
 
 
-def analyze_image(image_bytes: bytes, mime: str) -> str:
-    client = genai.Client(api_key=_get_credential("GEMINI_API_KEY"))
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=[
-            types.Part.from_bytes(data=image_bytes, mime_type=mime),
-            "請用音樂氛圍的角度分析這張圖片，輸出 JSON：{\"mood\":\"整體情緒\",\"atmosphere\":\"氛圍描述（30字內）\",\"tempo_suggestion\":\"slow/mid/upbeat/dance\",\"energy\":能量1-10,\"keywords\":[\"關鍵字1\",\"關鍵字2\",\"關鍵字3\"]}。只輸出JSON。",
-        ],
-    )
-    text = response.text.strip()
+def _strip_code_fence(text: str) -> str:
+    """去掉 Gemini 回應可能包的 ```json ... ``` code fence。"""
+    text = (text or "").strip()
     if text.startswith("```"):
         text = text.split("```")[1]
-        if text.startswith("json"): text = text[4:]
-    d = json.loads(text.strip())
+        if text.startswith("json"):
+            text = text[4:]
+    return text.strip()
+
+
+def _friendly_gemini_error(e: Exception) -> Exception:
+    """把 Gemini 常見錯誤轉成使用者看得懂的訊息；不認得的原樣回傳。"""
+    err = str(e)
+    if "429" in err or "RESOURCE_EXHAUSTED" in err:
+        return ValueError(
+            "Gemini API 配額已用盡（429）。免費額度有每分鐘/每日上限："
+            "請稍等 1 分鐘再試；若持續發生，到 https://aistudio.google.com/ "
+            "檢查你的 API Key 用量，或明天再試。"
+        )
+    if "API key not valid" in err or "API_KEY_INVALID" in err:
+        return ValueError("Gemini API Key 無效，請確認側邊欄「自訂 API Keys」填入的 Key 是否正確。")
+    return e
+
+
+def analyze_image(image_bytes: bytes, mime: str) -> str:
+    client = genai.Client(api_key=_get_credential("GEMINI_API_KEY"))
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type=mime),
+                "請用音樂氛圍的角度分析這張圖片，輸出 JSON：{\"mood\":\"整體情緒\",\"atmosphere\":\"氛圍描述（30字內）\",\"tempo_suggestion\":\"slow/mid/upbeat/dance\",\"energy\":能量1-10,\"keywords\":[\"關鍵字1\",\"關鍵字2\",\"關鍵字3\"]}。只輸出JSON。",
+            ],
+        )
+    except Exception as e:
+        raise _friendly_gemini_error(e) from e
+    d = json.loads(_strip_code_fence(response.text))
     return f"情緒：{d['mood']}｜氛圍：{d['atmosphere']}｜節奏：{d['tempo_suggestion']}｜能量：{d['energy']}/10"
 
 
@@ -707,13 +727,7 @@ def build_guest_prompt(
 
 def _parse_json_robust(text: str) -> dict:
     """Parse JSON from Gemini response with multiple fallback strategies."""
-    import re
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    text = text.strip()
+    text = _strip_code_fence(text)
 
     try:
         return json.loads(text)
@@ -748,7 +762,6 @@ def get_recommendations(
     history: list[dict] | None = None,
     fav_artists: list[str] | None = None,
 ) -> dict:
-    import time
     client = genai.Client(api_key=_get_credential("GEMINI_API_KEY"))
     if profile is None:
         prompt = build_guest_prompt(
@@ -771,7 +784,7 @@ def get_recommendations(
         resp = client.models.generate_content(**kwargs)
         return (resp.text or "").strip()
 
-    # 最多重試 3 次（含 503 過載）
+    # 最多重試 3 次（含 503 過載）；429 配額用盡 / Key 無效直接給友善訊息，不浪費重試
     for attempt in range(3):
         try:
             text = _call_gemini(with_mime=True)
@@ -780,6 +793,9 @@ def get_recommendations(
             if text:
                 return _parse_json_robust(text)
         except Exception as e:
+            friendly = _friendly_gemini_error(e)
+            if friendly is not e:
+                raise friendly from e
             err = str(e)
             is_503 = "503" in err or "UNAVAILABLE" in err
             if is_503 and attempt < 2:
@@ -1273,7 +1289,7 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                             _sp_error = e
                             if _attempt < 2:
                                 st.write(f"⚠️ 連線中斷，第 {_attempt + 2} 次重試...")
-                                import time; time.sleep(1.5)
+                                time.sleep(1.5)
                     if _sp_error is not None:
                         st.error(f"Spotify 連線失敗：{_sp_error}")
                         st.stop()
@@ -1458,24 +1474,26 @@ if "found" in st.session_state and st.session_state.found:
                     st.error("❌ Spotify 寫入被拒絕（403 Forbidden）")
                     with st.expander("📖 為什麼會這樣？怎麼解決？", expanded=True):
                         st.markdown("""
-**原因**：Spotify 2024-11 政策變更，對 Development Mode 的新 App 限制了寫入 API。
+**原因**：Spotify 對 Development Mode App 的歌單寫入有限制，你的帳號可能不在這個 App 的授權用戶清單，或 App 沒有寫入權限。
 
-**三個解決方向**：
+**解決方向（依序嘗試）**：
 
 1. **檢查 User Management Email**
    到 [Developer Dashboard](https://developer.spotify.com/dashboard) → 你的 App → Settings → User Management，
    確認填的 Email 完全等於你 Spotify 帳號註冊的 Email（到 [Spotify Profile](https://www.spotify.com/account/profile) 查看）。
 
 2. **重新授權 App**
-   到 [Spotify Apps 設定](https://www.spotify.com/account/apps) 撤銷你建立的 App 授權，
-   然後刪除 `.cache` 重新登入，會強制觸發新的權限授予。
+   到 [Spotify Apps 設定](https://www.spotify.com/account/apps) 撤銷這個 App 的授權，
+   然後從側邊欄登出、重新登入，強制觸發新的權限授予。
 
-3. **申請 Extended Quota Mode**（最終解法）
-   到 Developer Dashboard 你的 App → Extended Quota Mode 申請，
-   填寫用途說明後等待 Spotify 審核（通常數天到數週）。
+3. **用自己的 API Keys（BYOK，最可靠）**
+   在「自訂 API Keys」填入自己申請的 Client ID / Secret 後重新登入——
+   自己 App 的擁有者寫入自己的歌單不受此限制。
+
+> ⚠️ 網路上常見的「申請 Extended Quota Mode」目前對個人開發者實際上已無法通過，不建議花時間等審核。
                         """)
                     st.markdown("---")
-                    st.markdown("**手動加入歌單的方法**：用下方卡片每首歌的「在 Spotify 開啟」按鈕，在 Spotify 中對歌曲按右鍵 → 加入歌單。")
+                    st.markdown("**手動加入歌單的方法**：用下方卡片每首歌的「▶ Spotify」按鈕開啟歌曲，在 Spotify 中對歌曲按右鍵 → 加入歌單。")
                 else:
                     st.error(f"寫入失敗：{e}")
 
@@ -1553,8 +1571,6 @@ if "found" in st.session_state and st.session_state.found:
             key="share_mode",
         )
         if st.button("🎨 生成分享圖", use_container_width=True, key="gen_share"):
-            import time
-            from datetime import timezone, timedelta
             seed = str(time.time())
             _tz_sec = st.session_state.get("geo_tz_offset", 28800)
             _local_now = datetime.now(timezone(timedelta(seconds=_tz_sec)))
