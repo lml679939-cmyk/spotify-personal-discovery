@@ -423,7 +423,7 @@ _setting_sum = f"{st.session_state.get('num_songs', 15)} 首"
 if not is_guest_mode():
     _setting_sum += f" · 新藝人 {st.session_state.get('new_artist_ratio', 70)}%"
 
-with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False):
+with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False, key="exp_songs"):
     if is_guest_mode():
         num_songs = st.slider(
             "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
@@ -498,7 +498,7 @@ _music_sum = _summary(
     "不限語言與曲風",
 )
 
-with st.expander(f"🎵 音樂偏好　·　{_music_sum}", expanded=False):
+with st.expander(f"🎵 音樂偏好　·　{_music_sum}", expanded=False, key="exp_music"):
     languages = st.pills(
         "想聽哪些語言的歌？（可複選；不選代表不限）",
         options=LANGUAGE_OPTIONS,
@@ -528,7 +528,7 @@ _mood_sum = _summary(
     "",
 )
 
-with st.expander(f"😊 現在的心情　·　{_mood_sum}", expanded=False):
+with st.expander(f"😊 現在的心情　·　{_mood_sum}", expanded=False, key="exp_mood"):
     mood_col1, mood_col2 = st.columns(2)
     with mood_col1:
         mood_energy = st.slider(
@@ -560,7 +560,7 @@ _traits_sum = _summary(
     "未填",
 )
 
-with st.expander(f"🧠 關於你　·　{_traits_sum}", expanded=False):
+with st.expander(f"🧠 關於你　·　{_traits_sum}", expanded=False, key="exp_traits"):
     st.caption("選填。不同性格／星座的音樂偏好取向不太一樣，AI 會納入考量。")
     mbti = st.selectbox("MBTI 性格類型", MBTI_TYPES, key="mbti")
     col_bt, col_zd = st.columns(2)

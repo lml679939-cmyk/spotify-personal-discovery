@@ -174,6 +174,9 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 
 - **摺疊標題帶即時摘要**（`🎵 音樂偏好　·　日語 · Jazz`）。摘要必須在 expander 建立**之前**算好，
   所以一律從 `st.session_state` 讀值——因此**每個 widget 都必須有 `key=`**，新增欄位時別忘了。
+- ⚠️ **每個 expander 也必須有自己的 `key=`**（`exp_songs` / `exp_music` / `exp_mood` / `exp_traits`）。
+  沒有 key 時 Streamlit 用標題文字認元件，摘要一變就被當成新元件重建、摺疊狀態歸零——
+  症狀是「拖一下滑桿面板就自己關起來」。`st.expander(key=...)` 需要 Streamlit >= 1.57。
 - `_brief(items, limit=2)` 把多選縮成「前 2 項 +N」；`_summary(parts, empty)` 組合摘要、全空時顯示 empty。
 - **生成按鈕用 `generate_slot = st.container()` 佔位**：版面在摺疊區上方，程式碼卻在所有 widget 之後，
   這樣 handler 才讀得到 `languages` / `mood_energy` 等變數。進度狀態也走 `generate_slot.columns()`。

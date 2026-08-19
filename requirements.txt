@@ -1,4 +1,4 @@
-streamlit>=1.37
+streamlit>=1.57          # st.expander(key=...) 需要，摘要式標題才不會重建摺疊狀態
 spotipy>=2.26.0,<3.0
 python-dotenv==1.1.0
 google-genai>=1.0
