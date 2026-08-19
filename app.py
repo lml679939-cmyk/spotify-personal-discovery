@@ -42,6 +42,15 @@ from spotify_api import (
 load_dotenv()
 
 
+def _gemini_key() -> str | None:
+    """本站自備的 Gemini API Key。
+
+    只讀 .env / Streamlit Secrets——使用者不需要（也無法）自行填入，
+    所以刻意用 _get_env() 而非 _get_credential()。
+    """
+    return _get_env("GEMINI_API_KEY")
+
+
 MBTI_TYPES = [
     "不指定",
     "INTJ", "INTP", "ENTJ", "ENTP",
@@ -135,12 +144,34 @@ def enter_guest_mode() -> None:
 
 
 def show_login_required() -> None:
-    """未登入時顯示的歡迎/登入頁：Spotify 登入 + 訪客模式 + BYOK 設定。"""
+    """未登入時顯示的歡迎/登入頁：訪客模式（主要）+ Spotify 登入 + 進階 Spotify BYOK。"""
 
     # ── Hero ──
     st.markdown(styles.login_hero_html(), unsafe_allow_html=True)
 
-    # ── 方式一：Spotify 登入 ──
+    has_gemini = bool(_gemini_key())
+    if not has_gemini:
+        # 只有網站管理者會看到：Secrets 沒設好
+        st.error(
+            "⚠️ 本站的 Gemini API Key 尚未設定，暫時無法產生推薦。"
+            "（管理者：請在 Streamlit Cloud → Settings → Secrets 加入 `GEMINI_API_KEY`）"
+        )
+
+    # ── 方式一：訪客模式（零設定，人數不限）──
+    st.markdown(styles.login_guest_card(), unsafe_allow_html=True)
+
+    if st.button(
+        "🎶 直接開始推薦",
+        type="primary",
+        use_container_width=True,
+        disabled=not has_gemini,
+    ):
+        enter_guest_mode()
+
+    st.caption("✨ AI 由本站提供，你不需要申請或填入任何 API Key。")
+
+    # ── 方式二：Spotify 登入（需被加入授權名單）──
+    st.markdown(styles.divider_html(), unsafe_allow_html=True)
     st.markdown(styles.login_spotify_card(), unsafe_allow_html=True)
 
     has_spotify_creds = bool(
@@ -155,42 +186,37 @@ def show_login_required() -> None:
         st.link_button(
             "🎧 用 Spotify 登入",
             auth_url,
-            type="primary",
+            type="secondary",
             use_container_width=True,
         )
+        st.caption(
+            "🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。　"
+            "⚠️ Spotify 限制本站的登入人數，若出現 `INVALID_CLIENT` 或授權失敗，"
+            "表示你的帳號還沒被加入名單——先用上面的「直接開始推薦」即可，"
+            "或展開下方進階設定用自己的 Spotify App 登入。"
+        )
     else:
-        st.warning("尚未設定 Spotify API Keys，請在下方「自訂 API Keys」區填入後即可登入。")
+        st.warning("本站尚未設定 Spotify 登入，請用上方的訪客模式，或在下方進階設定填入自己的 Spotify App。")
 
-    st.caption("🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。")
-
-    # ── 方式二：訪客模式 ──
+    # ── 進階：自備 Spotify App ──
     st.markdown(styles.divider_html(), unsafe_allow_html=True)
-    st.markdown(styles.login_guest_card(), unsafe_allow_html=True)
-
-    has_gemini = bool(_get_credential("GEMINI_API_KEY"))
-    if has_gemini:
-        if st.button("🎶 不登入，直接推薦", type="primary", use_container_width=True):
-            enter_guest_mode()
-    else:
-        st.warning("訪客模式需要 Gemini API Key，請在下方「自訂 API Keys」區填入。")
-
-    # ── BYOK 設定區 ──
-    st.markdown(styles.divider_html(), unsafe_allow_html=True)
-    _render_api_key_settings(expanded=not has_spotify_creds and not has_gemini)
+    _render_api_key_settings()
 
 
 def _render_api_key_settings(expanded: bool = False) -> None:
-    """渲染 API Keys 設定區（登入頁 + sidebar 共用）。"""
+    """渲染進階 Spotify 設定區（登入頁 + sidebar 共用）。
+    Gemini 由本站自備，使用者不需要也不能填。"""
     default_redirect = _get_env("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8501/"
 
-    with st.expander("🔑 填入你的 API Keys（必填）", expanded=expanded):
+    with st.expander("🔧 進階（選填）：用自己的 Spotify App 登入", expanded=expanded):
 
         # ── 說明標語 ──
         st.markdown(
             "<div style=\"font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.92rem;"
             "color:#2D1B4E;line-height:1.7;padding:4px 0 8px 0\">"
-            "本網站<strong>不提供共用 API Keys</strong>，請填入自己申請的 Keys 才能使用。"
-            "每個人申請都只需要 <strong>3-5 分鐘</strong>，且 Gemini 有免費額度，基本上不花錢。"
+            "<strong>大部分人不需要這一區</strong>——直接用訪客模式就能推薦，AI 由本站提供。<br>"
+            "只有當你想讀取<strong>自己的 Spotify 聆聽紀錄</strong>做個人化推薦、"
+            "但帳號不在本站的 Spotify 授權名單內時，才需要自己建一個 Spotify App（約 5 分鐘）。"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -234,22 +260,6 @@ def _render_api_key_settings(expanded: bool = False) -> None:
                 placeholder=default_redirect,
                 help=f"通常不需要改動，預設值：{default_redirect}",
             )
-
-        st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
-
-        # ── Gemini 步驟卡 ──
-        st.markdown(
-            styles.byok_gemini_section_html(),
-            unsafe_allow_html=True,
-        )
-
-        # ── Gemini 輸入欄 ──
-        st.text_input(
-            "Gemini API Key",
-            key="custom_GEMINI_API_KEY",
-            type="password",
-            placeholder="貼上你的 Gemini API Key",
-        )
 
         # ── 隱私說明 ──
         st.markdown(styles.byok_privacy_badge_html(), unsafe_allow_html=True)
@@ -585,7 +595,7 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                         else:
                             img_bytes = uploaded.read()
                             mime = uploaded.type or "image/jpeg"
-                            img_ctx = analyze_image(_get_credential("GEMINI_API_KEY"), img_bytes, mime)
+                            img_ctx = analyze_image(_gemini_key(), img_bytes, mime)
                             context_parts.append(f"圖片分析：{img_ctx}")
                             st.write(f"🎨 {img_ctx}")
                     except Exception as e:
@@ -632,7 +642,7 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
                 )
                 try:
                     result = get_recommendations(
-                        _get_credential("GEMINI_API_KEY"),
+                        _gemini_key(),
                         profile, "\n".join(context_parts), num_songs, new_artist_ratio, user_traits,
                         languages=languages or None,
                         genres=genres or None,

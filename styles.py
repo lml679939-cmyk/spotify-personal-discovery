@@ -403,21 +403,21 @@ def _method_card_html(title, description, border_color, icon_svg):
 </div>"""
 
 
-def login_spotify_card():
+def login_guest_card():
     return _method_card_html(
-        "方式一：用 Spotify 登入（個人化推薦）",
-        "讀取你的聆聽紀錄，交給 Gemini AI 生成「你沒聽過、但會喜歡」的推薦。",
-        "#00D4AA",
-        SVG_VINYL,
+        "方式一：直接開始（推薦，免登入）",
+        "不需要 Spotify 帳號、不用申請任何 API Key，描述當下情境就能拿到 AI 推薦歌單。",
+        "#FFD700",
+        SVG_BOOMBOX,
     )
 
 
-def login_guest_card():
+def login_spotify_card():
     return _method_card_html(
-        "方式二：不登入，直接推薦（訪客模式）",
-        "不需要 Spotify 帳號，根據你描述的情境與偏好推薦音樂。",
-        "#FFD700",
-        SVG_BOOMBOX,
+        "方式二：連結 Spotify（個人化推薦）",
+        "讀取你的聆聽紀錄，推薦「你沒聽過、但會喜歡」的歌，並可直接存成 Spotify 歌單。",
+        "#00D4AA",
+        SVG_VINYL,
     )
 
 
@@ -651,44 +651,6 @@ def byok_spotify_steps_html(redirect_uri: str) -> str:
 </div>"""
 
 
-def byok_gemini_section_html() -> str:
-    """Render the Gemini API key guide section."""
-    return f"""
-<div style="border:3px solid #2D1B4E;border-left:6px solid #4285F4;
-  border-radius:18px;padding:16px 18px;margin:8px 0;
-  box-shadow:4px 4px 0px rgba(66,133,244,0.2);background:white">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-    <svg viewBox='0 0 48 48' width='28' xmlns='http://www.w3.org/2000/svg'>
-      <circle cx='24' cy='24' r='24' fill='#4285F4'/>
-      <path d='M24 12 C24 12 30 20 30 24 C30 28 24 36 24 36
-               C24 36 18 28 18 24 C18 20 24 12 24 12Z' fill='white' opacity='0.9'/>
-      <path d='M12 24 C12 24 20 18 24 18 C28 18 36 24 36 24
-               C36 24 28 30 24 30 C20 30 12 24 12 24Z' fill='white' opacity='0.7'/>
-      <circle cx='24' cy='24' r='4' fill='white'/>
-    </svg>
-    <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;
-      font-size:1.05rem;color:#2D1B4E">Gemini API — 免費申請</span>
-    <a href="https://aistudio.google.com/apikey" target="_blank"
-      style="margin-left:auto;font-family:'Nunito',sans-serif;font-size:0.8rem;
-      color:#4285F4;font-weight:700;text-decoration:none">前往 AI Studio →</a>
-  </div>
-  <div style="display:flex;gap:12px;align-items:flex-start">
-    <div style="flex-shrink:0;width:36px;height:36px;border-radius:50%;
-      background:#4285F4;border:2.5px solid #2D1B4E;
-      display:flex;align-items:center;justify-content:center;
-      font-family:'Nunito',sans-serif;font-weight:900;font-size:0.9rem;color:white;
-      box-shadow:2px 2px 0 #2D1B4E">1</div>
-    <div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.87rem;
-      color:#444;line-height:1.7">
-      前往 <a href="https://aistudio.google.com/apikey" target="_blank"
-      style="color:#4285F4;font-weight:700;text-decoration:none">Google AI Studio</a>，
-      用 Google 帳號登入 → 點擊 <strong>Create API Key</strong> → 複製後貼到下方欄位。
-      <br><span style="font-size:0.8rem;color:#888">✨ 免費 Tier 每分鐘可呼叫 15 次，個人使用完全夠用。</span>
-    </div>
-  </div>
-</div>"""
-
-
 def byok_privacy_badge_html() -> str:
     return """
 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;
@@ -696,7 +658,7 @@ def byok_privacy_badge_html() -> str:
   <span style="font-size:1.2rem">🔒</span>
   <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.83rem;
     color:#2D1B4E;line-height:1.5">
-    所有 Keys 僅存在你的<strong>瀏覽器分頁記憶體</strong>中，關閉分頁即消失，不會傳送到任何伺服器。
+    你填的 Keys 僅存在<strong>瀏覽器分頁記憶體</strong>中，關閉分頁即消失，不會被儲存下來。
   </span>
 </div>"""
 

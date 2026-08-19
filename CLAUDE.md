@@ -20,16 +20,26 @@
 ## 關鍵架構
 
 ### 雙模式運行
-1. **Spotify 登入模式**：讀取使用者聆聽資料，個人化推薦
-2. **訪客模式**（`is_guest_mode()`）：不需 Spotify 帳號，純情境推薦
+1. **訪客模式**（`is_guest_mode()`，登入頁「方式一」）：不需 Spotify 帳號、零設定，純情境推薦。
+   **人數不限**——搜尋走 Client Credentials（app 層級），AI 用本站自備的 Gemini Key。
+2. **Spotify 登入模式**（「方式二」）：讀取使用者聆聽資料，個人化推薦 + 寫入歌單。
+   **受 Spotify Development Mode 授權名單人數限制**，需在 Dashboard → User Management 逐一加 email。
 
 ### Credential 管理（重要）
 ```
-_get_credential(key)
+_get_credential(key)   # 只用於 Spotify
   → 先查 st.session_state["custom_{key}"]（使用者自訂 BYOK）
   → 再查 _get_env(key)（.env / Streamlit Secrets）
+
+_gemini_key()          # Gemini 專用，app.py
+  → 只查 _get_env("GEMINI_API_KEY")
 ```
-所有用到 API Key 的地方都用 `_get_credential()` 而非直接讀 env。
+> ⚠️ **Gemini 是本站自備的共用 Key**，使用者不能也不需要填（2026-08 改）。
+> UI 上已無 Gemini 輸入欄，`custom_GEMINI_API_KEY` 這個 session key 已完全移除。
+> 雲端部署必須在 Streamlit Cloud → Settings → Secrets 設定 `GEMINI_API_KEY`，否則登入頁會顯示紅色錯誤、訪客按鈕變灰。
+> 共用 Key 代表**所有使用者共用同一份免費配額**，人多時會撞 429（已有中文友善訊息，不會 crash）。
+
+Spotify BYOK 仍保留為「進階（選填）」，供不在授權名單內、又想要個人化推薦的使用者自建 App。
 
 ### Spotify 認證
 - **登入模式**：Authorization Code Flow（`SpotifyOAuth` + `MemoryCacheHandler`）
@@ -81,7 +91,7 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
   - `inject_global_css()` — app.py 頂部呼叫，注入全域 CSS
   - `login_hero_html()` — 登入頁頂部 Hero 區（圖示 + 標題 + 副標題）
   - `login_spotify_card()` / `login_guest_card()` — 登入方式卡片
-  - `byok_spotify_steps_html()` / `byok_gemini_section_html()` — BYOK 視覺引導步驟卡
+  - `byok_spotify_steps_html()` — 自建 Spotify App 的視覺引導步驟卡（Gemini 版已移除）
   - `track_card_html()` / `track_list_html()` — 推薦結果卡片
   - `results_header_html()` / `context_interpretation_html()` / `section_header_html()` / `divider_html()`
 
@@ -157,13 +167,14 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 
 ## 輸入欄位說明（登入頁）
 
-### BYOK（自帶 API Keys）設定區
+### 進階（選填）：自備 Spotify App
 | 欄位 | session_state key | 說明 |
 |---|---|---|
 | Spotify Client ID | `custom_SPOTIFY_CLIENT_ID` | 自動填入 Redirect URI |
 | Spotify Client Secret | `custom_SPOTIFY_CLIENT_SECRET` | |
 | Redirect URI | `custom_SPOTIFY_REDIRECT_URI` | 自動從 URL 組合 |
-| Gemini API Key | `custom_GEMINI_API_KEY` | |
+
+> Gemini 欄位已於 2026-08 移除——AI 由本站提供，見上方 Credential 管理。
 
 ### 推薦偏好輸入
 | 欄位 | 變數 | 說明 |
@@ -222,6 +233,9 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| （本次） | feat: Gemini 改為本站自備（移除 BYOK 欄位），訪客模式提升為方式一、Spotify 登入降為方式二並說明人數限制 |
+| `2c25727` | fix: hero 上下間距對齊（container padding-top 0.8rem） |
+| `0823714` | fix: 改用 stMainBlockContainer testid 收窄頂部留白 |
 | `7f1df04` | refactor: Spotify 層拆到 spotify_api.py，app.py 只剩 UI（~870 行） |
 | `e5f5202` | test: 純邏輯拆到 recommend.py（Gemini api_key 改參數傳入），新增 test_recommend.py 28 個單元測試 |
 | `c64c4e8` | refactor: 清理 imports、Gemini 429/Key 無效友善錯誤訊息、403 文案改寫（移除 Extended Quota 死路建議，改指向 BYOK） |
