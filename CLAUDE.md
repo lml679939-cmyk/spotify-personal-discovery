@@ -165,6 +165,21 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 }
 ```
 
+## 「設定情境」表單版面（2026-08 漸進式揭露改版）
+
+```
+第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
+第二層（摺疊 expander） 🎵 音樂偏好 · 😊 現在的心情 · 🧠 關於你 · ⚙️ 推薦設定
+```
+
+- **摺疊標題帶即時摘要**（`🎵 音樂偏好　·　日語 · Jazz`）。摘要必須在 expander 建立**之前**算好，
+  所以一律從 `st.session_state` 讀值——因此**每個 widget 都必須有 `key=`**，新增欄位時別忘了。
+- `_brief(items, limit=2)` 把多選縮成「前 2 項 +N」；`_summary(parts, empty)` 組合摘要、全空時顯示 empty。
+- **生成按鈕用 `generate_slot = st.container()` 佔位**：版面在摺疊區上方，程式碼卻在所有 widget 之後，
+  這樣 handler 才讀得到 `languages` / `mood_energy` 等變數。進度狀態也走 `generate_slot.columns()`。
+- 清除推薦歷史收在「⚙️ 推薦設定」內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
+- ⚠️ 別再用 `st.session_state["mbti"] = ...` 手動寫入——widget 有 `key` 時 Streamlit 會報錯。
+
 ## 輸入欄位說明（登入頁）
 
 ### 進階（選填）：自備 Spotify App
@@ -233,6 +248,7 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| `be5e05a` | feat: 設定情境改成漸進式揭露（情境+投射問題+生成按鈕在上，其餘 4 區摺疊帶即時摘要） |
 | `c19033a` | feat: Gemini 改為本站自備（移除 BYOK 欄位），訪客模式提升為方式一、Spotify 登入降為方式二並說明人數限制 |
 | `2c25727` | fix: hero 上下間距對齊（container padding-top 0.8rem） |
 | `0823714` | fix: 改用 stMainBlockContainer testid 收窄頂部留白 |
