@@ -229,9 +229,14 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   最長那題也還在同一行（row 高度維持 40px）。
 - 兩欄情境輸入的高度要手動對齊：`text_area(height=106)` 對上 file_uploader 的實際高度（量出來 104±2）。
   右欄的標題已併進左欄那句「分享一下你的日常吧（也可以上傳圖片給 AI 分析）」，
-  右欄改放**同一句、同一種元件**再用 CSS 藏起來（`st.container(key="ctx_label_spacer")`
-  + `.st-key-ctx_label_spacer { visibility:hidden }`）：視窗窄到標題換行時左右會一起換行，
-  兩個框的頂端才會永遠齊（量過 397px 欄寬單行、192px 欄寬雙行，`taTop == upTop`）。
+  右欄改放**同一句、同一種元件**再用 CSS 藏起來（`st.container(key="ctx_label_spacer")`）：
+  視窗窄到標題換行時左右會一起換行，兩個框的頂端才會永遠齊
+  （量過 397px 欄寬單行、192px 欄寬雙行，`taTop == upTop`）。
+  ⚠️ **只寫 `.st-key-ctx_label_spacer { visibility:hidden }` 沒用**——Streamlit 自己對
+  `stMarkdownContainer` 設了 `visibility:visible`，會蓋掉繼承來的 hidden，文字照樣顯示。
+  必須連子孫一起 `.st-key-ctx_label_spacer * { visibility:hidden !important }`；
+  驗證要量那個 `<p>` 自己的 computed visibility，只量容器會誤判。
+  手機版（≤640px）欄位會堆疊、不需要對齊，整塊 `display:none`。
 - 推薦網格的卡片要等高，`▶ Spotify` 按鈕才會對齊：歌名 1/2 行、有無專輯、有無理由都會讓卡片高度不同。
   作法是 `st.container(key="track_grid")` + `.st-key-track_grid` 把
   column → verticalBlock → 第一個 elementContainer → stMarkdown → wrapper → stMarkdownContainer

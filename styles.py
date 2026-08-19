@@ -320,8 +320,11 @@ br.y2k-mbr {{ display: none; }}
     min-width: 0 !important;
 }}
 
-/* 右欄上傳區的隱形標題（見 app.py 的 ctx_label_spacer）：佔高度但不顯示 */
-.st-key-ctx_label_spacer {{ visibility: hidden; }}
+/* 右欄上傳區的隱形標題（見 app.py 的 ctx_label_spacer）：佔高度但不顯示。
+   ⚠️ 只寫在容器上沒用——Streamlit 自己對 stMarkdownContainer 設了 visibility:visible，
+   會把繼承來的 hidden 蓋掉，文字照樣顯示出來。必須連子孫一起 !important。 */
+.st-key-ctx_label_spacer,
+.st-key-ctx_label_spacer * {{ visibility: hidden !important; }}
 
 /* ── 推薦網格：同一列的卡片等高，Spotify 按鈕才會對齊 ──
    歌名 1/2 行、專輯有無、理由有無都會讓卡片高度不同；
@@ -418,6 +421,8 @@ br.y2k-mbr {{ display: none; }}
 @media (max-width: 640px) {{
     /* 區塊之間拉開，讓堆疊後的版面有分組感 */
     .y2k-gap {{ height: 1.6rem; }}
+    /* 手機上兩欄會堆疊，不需要對齊佔位（留著只會在上傳區上方多一段空白） */
+    .st-key-ctx_label_spacer {{ display: none !important; }}
     [data-testid="stExpander"] {{ margin-bottom: 10px !important; }}
     /* 登入卡片標題在手機上於「方式一：」後換行，避免硬斷在詞中間 */
     br.y2k-mbr {{ display: inline !important; }}
