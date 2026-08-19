@@ -31,17 +31,19 @@ SVG_VINYL = '''<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
 </svg>'''
 
 SVG_NOTES = '''<svg viewBox="0 0 80 60" xmlns="http://www.w3.org/2000/svg">
+  <!-- 單獨的八分音符：符頭 → 符桿 → 符尾三段互相重疊，不留縫 -->
   <g fill="#FF69B4">
-    <ellipse cx="18" cy="45" rx="7" ry="5" transform="rotate(-20 18 45)"/>
-    <rect x="24" y="12" width="3" height="34" rx="1.5"/>
-    <path d="M25 12 Q35 8 40 15 Q35 12 27 14Z"/>
+    <ellipse cx="17" cy="45.5" rx="7.5" ry="5.5" transform="rotate(-20 17 45.5)"/>
+    <rect x="22.6" y="12" width="3.4" height="34" rx="1.7"/>
+    <path d="M25.4 12 C33.5 14.5 38 19 34.2 26 C35.4 20 31.5 17 25.4 18.6 Z"/>
   </g>
+  <!-- 連桁的兩個八分音符：符桿頂端高度不同，符桁必須是斜的平行四邊形才接得上 -->
   <g fill="#00D4AA">
-    <ellipse cx="48" cy="42" rx="7" ry="5" transform="rotate(-15 48 42)"/>
-    <rect x="54" y="10" width="3" height="33" rx="1.5"/>
-    <ellipse cx="65" cy="38" rx="7" ry="5" transform="rotate(-15 65 38)"/>
-    <rect x="71" y="6" width="3" height="33" rx="1.5"/>
-    <rect x="55.5" y="6" width="17" height="3.5" rx="1.5" fill="#00D4AA"/>
+    <ellipse cx="47" cy="43.5" rx="7.5" ry="5.5" transform="rotate(-20 47 43.5)"/>
+    <ellipse cx="66" cy="39.5" rx="7.5" ry="5.5" transform="rotate(-20 66 39.5)"/>
+    <rect x="52.6" y="9" width="3.4" height="35" rx="1.7"/>
+    <rect x="71.6" y="5" width="3.4" height="35" rx="1.7"/>
+    <path d="M52.6 8 L75 4 L75 9.5 L52.6 13.5 Z"/>
   </g>
 </svg>'''
 

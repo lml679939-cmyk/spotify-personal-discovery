@@ -87,6 +87,10 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 ### styles.py 結構
 - **CSS**：`_build_global_css()` — 在 f-string 內，所有 CSS `{}` 須寫成 `{{}}` 否則 Python SyntaxError
 - **SVG 常數**：`SVG_CASSETTE`, `SVG_VINYL`, `SVG_NOTES`, `SVG_BOOMBOX`, `SVG_SPARKLE`
+  - 改 SVG 後要驗證「同色的形狀是不是連在一起」：把 SVG 序列化成 data URL → 畫進 canvas →
+    `getImageData()` 後對每個顏色做連通分量分析。舊版 `SVG_NOTES` 的綠色是**兩塊**
+    （符桁 rect 的下緣 y=9.5、左符桿頂端 y=10，差 0.5px 就斷開），修好後是一塊。
+  - 兩根符桿頂端高度不同時，符桁不能用 `<rect>`，要用斜的平行四邊形 `<path>` 才蓋得住。
 - **HTML helpers**：
   - `inject_global_css()` — app.py 頂部呼叫，注入全域 CSS
   - `login_hero_html()` — 登入頁頂部 Hero 區（圖示 + 漸層標題）
