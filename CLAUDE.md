@@ -116,6 +116,9 @@ textColor = "#2D1B4E"
 
 [client]
 toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
+
+[server]
+maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per file」，與程式碼實際擋的 10 MB 不符
 ```
 > ⚠️ 這個檔案已加入 git，會被 Streamlit Cloud 讀取。
 
@@ -127,9 +130,21 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 ```
 若 Streamlit 升版後裝飾線復現，需檢查新版的 `data-testid` 屬性名稱。
 
+### 視覺層級（2026-08 手機版改版）
+- **粗框（3px）+ 彩色陰影只留給主要 CTA**（`stBaseButton-primary`、`stLinkButton`）。
+  其餘元件（expander / 輸入框 / 上傳區 / secondary 按鈕 / status）一律 `2px rgba(45,27,78,0.28)`、無陰影。
+- ⚠️ 按鈕的 `border-radius/font/border` 是 `.stButton > button, stBaseButton-primary, stBaseButton-secondary`
+  **三個 selector 共用**的規則——只想改次要按鈕時要改後面的 secondary 專屬區塊，別動共用規則。
+- **所有彩色左邊框已移除**（登入卡片、AI 情境解讀、BYOK 步驟卡、stAlert、expander）。
+- **手機覆寫放在 `_build_global_css()` 最後**：同特異性下後定義者勝，放前面會被桌機規則蓋掉。
+- 曲目卡的理由標籤文字色走 `_ACCENT_TEXT_COLORS`（亮底配深紫、深底配白）——
+  白字壓黃底只有 1.4:1，改後最差 4.67:1，四色全數通過 WCAG AA。
+
 ### 重要限制
 - **強制亮色模式**，不支援暗色主題
 - 標題內的文字必須緊貼標籤（`<h1 ...>文字</h1>`），換行縮排會產生尾隨空白讓置中偏移
+- 注入自訂 HTML 的 `stMarkdownContainer` 帶 `-16px` 負邊界（Streamlit 用來抵銷段落 margin），
+  若它是 expander 的最後一個元素，內容會被拉去貼住下框線——已用 `:last-of-type` 規則歸零
 - `[data-testid="stHeaderActionElements"]`（Streamlit 標題錨點圖示）已用 CSS 隱藏——它是 inline-flex，
   會佔行內寬度、把置中標題推偏（手機上 h1 換行時特別明顯）
 - 修改樣式只改 `styles.py` + `config.toml`，不要在 `app.py` 混入 CSS

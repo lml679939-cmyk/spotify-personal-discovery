@@ -272,7 +272,7 @@ def get_time_of_day(hour: int) -> str:
 
 
 def _fetch_geo_weather() -> str:
-    """IP 定位 + 天氣，session 內快取 AUTO_CONTEXT_TTL 秒（天氣變化慢，不必每次生成都重打外部 API）。"""
+    """IP 定位 + 天氣，session 內快取 AUTO_CONTEXT_TTL 秒。查不到時回空字串，不拋例外。"""
     cached = st.session_state.get("geo_weather_cache")
     if cached and time.time() - cached["ts"] < AUTO_CONTEXT_TTL:
         return cached["value"]
@@ -285,29 +285,49 @@ def _fetch_geo_weather() -> str:
         client_ip = ""
     ip_segment = f"/{client_ip}" if client_ip else ""
 
-    # ipwho.is：免費、HTTPS、無需 API key
-    geo = requests.get(f"https://ipwho.is{ip_segment}", timeout=10).json()
-    city = geo.get("city", "未知"); country = geo.get("country", "")
-    lat = geo.get("latitude"); lon = geo.get("longitude")
-    tz_offset_sec = geo.get("timezone", {}).get("offset", 28800)  # 預設 UTC+8
-    st.session_state["geo_tz_offset"] = tz_offset_sec
+    # ipwho.is：免費、HTTPS、無需 API key。
+    # 它在被限流或 IP 無效時會回非 JSON（或 success=false），直接 .json() 會炸成
+    # 「Expecting value: line 1 column 1」這種對使用者無意義的訊息——一律當作查無位置。
+    geo = {}
+    try:
+        resp = requests.get(f"https://ipwho.is{ip_segment}", timeout=10)
+        if resp.ok and resp.headers.get("content-type", "").startswith("application/json"):
+            data = resp.json()
+            if data.get("success", True):
+                geo = data
+    except Exception:
+        pass
 
-    w = requests.get("https://api.open-meteo.com/v1/forecast", params={
-        "latitude": lat, "longitude": lon,
-        "current": "temperature_2m,weather_code,wind_speed_10m,is_day",
-        "timezone": "auto",
-    }, timeout=10).json()["current"]
+    lat, lon = geo.get("latitude"), geo.get("longitude")
+    st.session_state["geo_tz_offset"] = (geo.get("timezone") or {}).get("offset", 28800)
 
-    desc = WMO_CODES.get(w["weather_code"], "")
-    value = f"{city}, {country}｜{desc} {w['temperature_2m']}°C"
-    st.session_state["geo_weather_cache"] = {"ts": time.time(), "value": value}
+    place = ", ".join(p for p in (geo.get("city"), geo.get("country")) if p)
+
+    weather = ""
+    if lat is not None and lon is not None:
+        try:
+            w = requests.get("https://api.open-meteo.com/v1/forecast", params={
+                "latitude": lat, "longitude": lon,
+                "current": "temperature_2m,weather_code,wind_speed_10m,is_day",
+                "timezone": "auto",
+            }, timeout=10).json()["current"]
+            weather = f"{WMO_CODES.get(w['weather_code'], '')} {w['temperature_2m']}°C".strip()
+        except Exception:
+            weather = ""
+
+    value = "｜".join(p for p in (place, weather) if p)
+    if value:
+        st.session_state["geo_weather_cache"] = {"ts": time.time(), "value": value}
     return value
 
 
 def fetch_auto_context() -> str:
     now = datetime.now()
-    time_label = get_time_of_day(now.hour)
-    return f"{now.strftime('%H:%M')}（{time_label}）｜{_fetch_geo_weather()}"
+    parts = [f"{now.strftime('%H:%M')}（{get_time_of_day(now.hour)}）"]
+    geo = _fetch_geo_weather()
+    if geo:
+        parts.append(geo)
+    return "｜".join(parts)
 
 
 # ── UI ────────────────────────────────────────────────────
@@ -353,9 +373,9 @@ else:
         st.stop()
 
 
-st.subheader("一起打造專屬於你的歌單吧")
+st.subheader("打造專屬於你的歌單吧")
 
-st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
+st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
 
 # ══ 第一層：情境輸入（唯一必要的一區）═══════════════════
 auto_ctx = st.toggle("自動偵測位置與天氣", value=True, key="auto_ctx")
@@ -374,7 +394,7 @@ with col1:
         label_visibility="collapsed",
     )
 with col2:
-    st.markdown("**或上傳一張情境圖片**")
+    st.markdown("**也可以上傳一張圖片**")
     uploaded = st.file_uploader(
         "上傳情境圖片",
         type=["jpg", "jpeg", "png", "webp"],
@@ -389,12 +409,12 @@ with col2:
 if "projective_q" not in st.session_state:
     st.session_state["projective_q"] = random.choice(PROJECTIVE_QUESTIONS)
 
-st.markdown("<div style='margin-top: 0.6rem;'></div>", unsafe_allow_html=True)
+st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
 proj_col1, proj_col2 = st.columns([5, 1], vertical_alignment="bottom")
 with proj_col1:
-    st.markdown(f"**🎲 {st.session_state['projective_q']}**")
+    st.markdown(f"**{st.session_state['projective_q']}**")
 with proj_col2:
-    if st.button("🔄 換一題", use_container_width=True):
+    if st.button("🔄 換一題"):
         _cur = st.session_state["projective_q"]
         st.session_state["projective_q"] = random.choice(
             [q for q in PROJECTIVE_QUESTIONS if q != _cur]
@@ -413,7 +433,7 @@ projective_answer = st.text_input(
 # 用 container 佔位就能讓按鈕顯示在偏好設定「上面」，程式碼卻仍在後面。
 generate_slot = st.container()
 
-st.markdown("<div style='margin-top: 0.6rem;'></div>", unsafe_allow_html=True)
+st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
 
 # 推薦歷史：狀態列跟著生成按鈕走，清除按鈕收進「推薦歌曲數」（罕用且不可逆）
 _session_hist_n = len(st.session_state.get("recommend_history", []))
@@ -658,9 +678,10 @@ if _clicked:
                     history = session_history + persistent_history
                 lang_msg = "、".join(languages) if languages else "不限"
                 genre_msg = "、".join(genres) if genres else "不限"
+                _ratio_msg = "" if is_guest_mode() else f"新藝人 {new_artist_ratio}%・"
                 st.write(
                     f"🤖 Gemini 生成 {num_songs} 首推薦中"
-                    f"（新藝人 {new_artist_ratio}%・語言：{lang_msg}・曲風：{genre_msg}"
+                    f"（{_ratio_msg}語言：{lang_msg}・曲風：{genre_msg}"
                     f"・避開過往 {len(history)} 首）..."
                 )
                 try:
@@ -862,7 +883,7 @@ if "found" in st.session_state and st.session_state.found:
 
     # ── 複製歌單 ＋ 分享到 IG 限時動態（左右並排）──────────
     st.divider()
-    share_col, ig_col = st.columns([1, 1])
+    share_col, ig_col = st.columns([1, 1], gap="large")
 
     with share_col:
         st.subheader("📋 複製或分享歌單")

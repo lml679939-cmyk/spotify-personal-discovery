@@ -7,3 +7,7 @@ font = "sans serif"
 
 [client]
 toolbarMode = "minimal"
+
+[server]
+# 程式碼本來就擋 10 MB；不設這個的話 Streamlit 會顯示預設的「200MB per file」，與實際不符
+maxUploadSize = 10

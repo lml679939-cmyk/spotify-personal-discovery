@@ -149,6 +149,9 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
 }}
 
+/* 區塊之間的呼吸空間：桌機小、手機大（見檔案最後的 media query）*/
+.y2k-gap {{ height: 0.6rem; }}
+
 /* ── Sidebar ────────────────── */
 [data-testid="stSidebar"] {{
     background: linear-gradient(180deg, #FFE4F0 0%, var(--y2k-lavender) 50%, #E8F8F5 100%) !important;
@@ -172,7 +175,6 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 /* ── Alert boxes ────────────── */
 [data-testid="stAlert"] {{
     border-radius: var(--y2k-border-radius) !important;
-    border-left: 5px solid var(--y2k-cyan) !important;
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
 }}
 
@@ -198,17 +200,18 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
     box-shadow: 0px 0px 0px var(--y2k-purple) !important;
     transform: translate(4px, 4px);
 }}
+/* 次要按鈕減重：粗框 + 彩色陰影只留給主要 CTA */
 [data-testid="stBaseButton-secondary"],
 .stButton > button:not([data-testid="stBaseButton-primary"]) {{
     background: var(--y2k-cream) !important;
     color: var(--y2k-deep-purple) !important;
-    box-shadow: var(--y2k-shadow) var(--y2k-cyan) !important;
+    border: 2px solid rgba(45, 27, 78, 0.35) !important;
+    box-shadow: none !important;
 }}
 [data-testid="stBaseButton-secondary"]:hover,
 .stButton > button:not([data-testid="stBaseButton-primary"]):hover {{
-    box-shadow: 2px 2px 0px var(--y2k-cyan) !important;
-    transform: translate(2px, 2px);
-    background: #E8FFF8 !important;
+    border-color: var(--y2k-pink) !important;
+    background: #FFF0F5 !important;
 }}
 
 /* ── Link buttons ───────────── */
@@ -279,12 +282,22 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 }}
 
 /* ── Expanders ──────────────── */
+/* 次要元件一律減重：粗框與彩色陰影只留給主要 CTA，畫面才有主次 */
 [data-testid="stExpander"] {{
-    border: 3px solid var(--y2k-deep-purple) !important;
-    border-left: 6px solid var(--y2k-cyan) !important;
+    border: 2px solid rgba(45, 27, 78, 0.28) !important;
     border-radius: var(--y2k-border-radius) !important;
     overflow: hidden;
-    box-shadow: 3px 3px 0px rgba(155,89,182,0.2) !important;
+    box-shadow: none !important;
+    margin-bottom: 8px !important;
+}}
+/* 摺疊內容不要貼著下框線（登入頁的隱私標示原本會黏在邊框上）。
+   Streamlit 給 stMarkdownContainer 的 -16px 負邊界是用來抵銷段落 margin 的，
+   但我們注入的自訂 HTML 沒有那個 margin，於是最後一塊內容會被拉去貼住框線 */
+[data-testid="stExpanderDetails"] {{
+    padding-bottom: 0.75rem !important;
+}}
+[data-testid="stExpanderDetails"] [data-testid="stElementContainer"]:last-of-type [data-testid="stMarkdownContainer"] {{
+    margin-bottom: 0 !important;
 }}
 [data-testid="stExpander"] summary {{
     font-weight: 700 !important;
@@ -295,7 +308,7 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 .stTextInput input, .stTextArea textarea,
 [data-testid="stTextInput"] input,
 [data-testid="stTextArea"] textarea {{
-    border: 3px solid var(--y2k-deep-purple) !important;
+    border: 2px solid rgba(45, 27, 78, 0.28) !important;
     border-radius: 14px !important;
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
     transition: all 0.2s ease !important;
@@ -316,7 +329,7 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 
 /* ── File uploader ──────────── */
 [data-testid="stFileUploader"] {{
-    border: 3px dashed var(--y2k-cyan) !important;
+    border: 2px solid rgba(45, 27, 78, 0.28) !important;
     border-radius: var(--y2k-border-radius) !important;
     padding: 1rem !important;
     transition: all 0.2s ease !important;
@@ -351,8 +364,18 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 /* ── Status container ───────── */
 [data-testid="stStatusWidget"], [data-testid="stStatus"] {{
     border-radius: var(--y2k-border-radius) !important;
-    border: 3px solid var(--y2k-deep-purple) !important;
-    box-shadow: var(--y2k-shadow) rgba(155,89,182,0.2) !important;
+    border: 2px solid rgba(45, 27, 78, 0.28) !important;
+    box-shadow: none !important;
+}}
+
+/* ── 手機版覆寫（必須放最後，同特異性下後定義者勝）───────── */
+@media (max-width: 640px) {{
+    /* 區塊之間拉開，讓堆疊後的版面有分組感 */
+    .y2k-gap {{ height: 1.6rem; }}
+    [data-testid="stExpander"] {{ margin-bottom: 10px !important; }}
+    /* 上傳區的說明文字在手機上佔一整行，收掉只留 Upload 按鈕 */
+    [data-testid="stFileUploaderDropzoneInstructions"] {{ display: none !important; }}
+    [data-testid="stFileUploaderDropzone"] {{ justify-content: center !important; }}
 }}
 """
 
@@ -360,6 +383,9 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 # ── HTML helpers ──────────────────────────────────────────
 
 _ACCENT_COLORS = ["#00D4AA", "#FF69B4", "#FFD700", "#9B59B6"]
+# 理由標籤的文字色要跟著底色走：白字壓在黃底上對比只有 1.4:1，幾乎看不見。
+# 亮底（青/粉/黃）配深紫字（5.1–9.6:1），深底（紫）才配白字（4.7:1）。
+_ACCENT_TEXT_COLORS = ["#2D1B4E", "#2D1B4E", "#2D1B4E", "#FFFFFF"]
 
 
 def section_header_html(text, icon="notes"):
@@ -383,7 +409,7 @@ def login_hero_html():
     background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
     margin:0 0 0.3rem 0;line-height:1.2;text-align:center">Spotify Personal Discovery</h1>
-  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0;text-align:center">{_sparkle('#FFD700', 16)} 根據你的聆聽習慣與當下情境，發現從未聽過的好歌 {_sparkle('#FF69B4', 16)}</p>
+  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0;text-align:center">根據你的聆聽習慣與當下情境，發現從未聽過的好歌</p>
 </div>"""
 
 
@@ -432,7 +458,7 @@ def divider_html():
 
 def context_interpretation_html(text):
     escaped = html_mod.escape(text)
-    return f"""<div style="border:3px solid #2D1B4E;border-left:6px solid #9B59B6;
+    return f"""<div style="border:3px solid #2D1B4E;
   border-radius:18px;padding:1.2rem 1.4rem;margin:0.8rem 0;
   box-shadow:4px 4px 0px rgba(155,89,182,0.2);
   background:linear-gradient(135deg,#FFF0F5,#FFFDF7)">
@@ -450,6 +476,7 @@ def context_interpretation_html(text):
 
 def track_card_html(track, index):
     accent = _ACCENT_COLORS[index % 4]
+    accent_text = _ACCENT_TEXT_COLORS[index % 4]
     name = html_mod.escape(track.get("name", ""))
     artist = html_mod.escape(track.get("artist", ""))
     album = html_mod.escape(track.get("album", ""))
@@ -485,7 +512,7 @@ def track_card_html(track, index):
     {album_html}
     <div style="margin-top:5px">
       <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7rem;
-        font-weight:700;color:white;background:{accent};font-family:'Nunito','Noto Sans TC',sans-serif;
+        font-weight:700;color:{accent_text};background:{accent};font-family:'Nunito','Noto Sans TC',sans-serif;
         border:1.5px solid #2D1B4E;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         💡 {reason}
       </span>
@@ -629,7 +656,7 @@ def byok_spotify_steps_html(redirect_uri: str) -> str:
 </div>"""
 
     return f"""
-<div style="border:3px solid #2D1B4E;border-left:6px solid #1DB954;
+<div style="border:3px solid #2D1B4E;
   border-radius:18px;padding:16px 18px;margin:8px 0;
   box-shadow:4px 4px 0px rgba(29,185,84,0.25);background:white">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -655,7 +682,7 @@ def byok_spotify_steps_html(redirect_uri: str) -> str:
 def byok_privacy_badge_html() -> str:
     return """
 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;
-  border-radius:12px;background:#F0FFF8;margin-top:8px">
+  border-radius:12px;background:#F0FFF8;margin:8px 0 4px 0">
   <span style="font-size:1.2rem">🔒</span>
   <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.83rem;
     color:#2D1B4E;line-height:1.5">
