@@ -229,6 +229,8 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   最長那題也還在同一行（row 高度維持 40px）。
 - 兩欄情境輸入的高度要手動對齊：`text_area(height=106)` 對上 file_uploader 的實際高度（量出來 104±2）。
   右欄的標題已併進左欄那句「分享一下你的日常吧（也可以上傳圖片給 AI 分析）」，
+  括號補充包在 `<span class="y2k-keep">`（`display:inline-block`）裡——窄螢幕換行時整段一起下去，
+  不會斷成「…給 AI／分析）」；桌機（欄寬 547px）仍是一行，手機 375px 剛好斷在「（」之前。
   右欄改放**同一句、同一種元件**再用 CSS 藏起來（`st.container(key="ctx_label_spacer")`）：
   視窗窄到標題換行時左右會一起換行，兩個框的頂端才會永遠齊
   （量過 397px 欄寬單行、192px 欄寬雙行，`taTop == upTop`）。

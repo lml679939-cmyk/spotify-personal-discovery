@@ -320,6 +320,10 @@ br.y2k-mbr {{ display: none; }}
     min-width: 0 !important;
 }}
 
+/* 標題裡不想被拆散的補充片語（例如括號說明）：整段當一個字，
+   要換行就整段換到下一行，不會斷成「…給 AI / 分析）」 */
+.y2k-keep {{ display: inline-block; }}
+
 /* 右欄上傳區的隱形標題（見 app.py 的 ctx_label_spacer）：佔高度但不顯示。
    ⚠️ 只寫在容器上沒用——Streamlit 自己對 stMarkdownContainer 設了 visibility:visible，
    會把繼承來的 hidden 蓋掉，文字照樣顯示出來。必須連子孫一起 !important。 */
