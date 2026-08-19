@@ -389,7 +389,7 @@ with col1:
     text_ctx = st.text_area(
         "你現在在做什麼？",
         placeholder="例如：在咖啡廳讀書、深夜想一個人散步、運動前暖身…",
-        height=108,
+        height=106,
         key="text_ctx",
         label_visibility="collapsed",
     )
@@ -410,7 +410,9 @@ if "projective_q" not in st.session_state:
     st.session_state["projective_q"] = random.choice(PROJECTIVE_QUESTIONS)
 
 st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
-proj_col1, proj_col2 = st.columns([5, 1], vertical_alignment="bottom")
+# 3:2 讓問題欄約 476px——最長的題目量到 404px，不會換行，
+# 按鈕又能比 5:1 時靠近題目約 190px。
+proj_col1, proj_col2 = st.columns([3, 2], vertical_alignment="center")
 with proj_col1:
     st.markdown(f"**{st.session_state['projective_q']}**")
 with proj_col2:
@@ -425,7 +427,7 @@ with proj_col2:
 projective_answer = st.text_input(
     "你的回答",
     key="projective_a",
-    placeholder="隨意回答，越具體越好——AI 會從中讀出你的當下狀態（選填）",
+    placeholder="隨意回答，越具體越好",
     label_visibility="collapsed",
 )
 

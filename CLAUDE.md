@@ -130,6 +130,22 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 ```
 若 Streamlit 升版後裝飾線復現，需檢查新版的 `data-testid` 屬性名稱。
 
+### 版面幾何：改動前務必先量，不要憑感覺調
+
+這個專案的 UI 微調幾乎都是「看起來怪 → 量出真正原因 → 改一個數字」。歷史上踩過的坑：
+
+| 症狀 | 真正原因 | 量法 |
+|---|---|---|
+| 置中標題換行後偏左 12px | Streamlit 在標題尾端插 `stHeaderActionElements` 錨點（inline-flex 佔行內寬） | `range.getClientRects()` 逐行比對 center |
+| 摺疊區內容貼住下框線 | `stMarkdownContainer` 帶 `-16px` 負邊界抵銷了 padding | 往上追祖先的 `marginBottom` |
+| 拖滑桿面板自己關起來 | expander 沒有 `key`，標題文字一變就被當新元件重建 | 改值後看 `details.open` |
+| 兩欄輸入框沒對齊 | 上傳區有自己的 `padding` + 邊框把右欄推低 | 比對兩個 box 的 `top`/`bottom` |
+| 黃底標籤看不到字 | 白字壓 `#FFD700` 對比只有 1.4:1 | 用 WCAG 公式算 relative luminance |
+
+**做法**：`streamlit run app.py --server.headless true --server.port 8599`
+起服務後用瀏覽器工具跑 `getBoundingClientRect()` / `getComputedStyle()` 量，
+改完再量一次確認數字真的變了——目測分不出 1px 和 12px 的差別。
+
 ### 視覺層級（2026-08 手機版改版）
 - **粗框（3px）+ 彩色陰影只留給主要 CTA**（`stBaseButton-primary`、`stLinkButton`）。
   其餘元件（expander / 輸入框 / 上傳區 / secondary 按鈕 / status）一律 `2px rgba(45,27,78,0.28)`、無陰影。
@@ -139,6 +155,10 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - **手機覆寫放在 `_build_global_css()` 最後**：同特異性下後定義者勝，放前面會被桌機規則蓋掉。
 - 曲目卡的理由標籤文字色走 `_ACCENT_TEXT_COLORS`（亮底配深紫、深底配白）——
   白字壓黃底只有 1.4:1，改後最差 4.67:1，四色全數通過 WCAG AA。
+- 登入卡片 `_method_card_html()`：`display:flex;flex-direction:column;justify-content:center`
+  讓內容在 `min-height:130px` 內垂直置中；標題在全形冒號後插 `<br class="y2k-mbr">`，
+  該 `<br>` 桌機 `display:none`、手機 `display:inline`，避免「方式一：直接開始（推薦，免」硬斷。
+- `.y2k-gap` 是區塊間距用的空 div（桌機 0.6rem / 手機 1.6rem），別再寫 inline margin hack。
 
 ### 重要限制
 - **強制亮色模式**，不支援暗色主題
@@ -199,6 +219,9 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - `_brief(items, limit=2)` 把多選縮成「前 2 項 +N」；`_summary(parts, empty)` 組合摘要、全空時顯示 empty。
 - **生成按鈕用 `generate_slot = st.container()` 佔位**：版面在摺疊區上方，程式碼卻在所有 widget 之後，
   這樣 handler 才讀得到 `languages` / `mood_energy` 等變數。進度狀態也走 `generate_slot.columns()`。
+- 投射問題那一列用 `st.columns([3, 2], vertical_alignment="center")`：
+  最長的題目量到 404px，欄寬 476px 剛好不換行，按鈕又比 5:1 時靠近題目約 190px。
+- 兩欄情境輸入的高度要手動對齊：`text_area(height=106)` 對上 file_uploader 的實際高度（量出來 104±2）。
 - 「⚙️ 推薦歌曲數」緊接在生成按鈕下方（程式碼也放在 `generate_slot` 之後、其他 expander 之前）。
   清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
 - ⚠️ 別再用 `st.session_state["mbti"] = ...` 手動寫入——widget 有 `key` 時 Streamlit 會報錯。
@@ -270,6 +293,8 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| `4e53694` | feat: 手機視覺層級（粗框只給主 CTA）、理由標籤對比修正、定位失敗優雅降級、訪客模式不顯示新藝人比例、maxUploadSize=10 |
+| `7d97353` | feat: 移除活動 pills、兩欄標題字級統一 16px、情境雙框對齊、標題錨點隱藏 |
 | `be5e05a` | feat: 設定情境改成漸進式揭露（情境+投射問題+生成按鈕在上，其餘 4 區摺疊帶即時摘要） |
 | `c19033a` | feat: Gemini 改為本站自備（移除 BYOK 欄位），訪客模式提升為方式一、Spotify 登入降為方式二並說明人數限制 |
 | `2c25727` | fix: hero 上下間距對齊（container padding-top 0.8rem） |

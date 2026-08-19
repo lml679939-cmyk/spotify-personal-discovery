@@ -151,6 +151,8 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 
 /* 區塊之間的呼吸空間：桌機小、手機大（見檔案最後的 media query）*/
 .y2k-gap {{ height: 0.6rem; }}
+/* 只在手機生效的換行點，桌機停用 */
+br.y2k-mbr {{ display: none; }}
 
 /* ── Sidebar ────────────────── */
 [data-testid="stSidebar"] {{
@@ -294,6 +296,7 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
    Streamlit 給 stMarkdownContainer 的 -16px 負邊界是用來抵銷段落 margin 的，
    但我們注入的自訂 HTML 沒有那個 margin，於是最後一塊內容會被拉去貼住框線 */
 [data-testid="stExpanderDetails"] {{
+    padding-top: 0.75rem !important;
     padding-bottom: 0.75rem !important;
 }}
 [data-testid="stExpanderDetails"] [data-testid="stElementContainer"]:last-of-type [data-testid="stMarkdownContainer"] {{
@@ -373,6 +376,8 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
     /* 區塊之間拉開，讓堆疊後的版面有分組感 */
     .y2k-gap {{ height: 1.6rem; }}
     [data-testid="stExpander"] {{ margin-bottom: 10px !important; }}
+    /* 登入卡片標題在手機上於「方式一：」後換行，避免硬斷在詞中間 */
+    br.y2k-mbr {{ display: inline !important; }}
     /* 上傳區的說明文字在手機上佔一整行，收掉只留 Upload 按鈕 */
     [data-testid="stFileUploaderDropzoneInstructions"] {{ display: none !important; }}
     [data-testid="stFileUploaderDropzone"] {{ justify-content: center !important; }}
@@ -414,19 +419,25 @@ def login_hero_html():
 
 
 def _method_card_html(title, description, border_color, icon_svg):
+    # 手機上標題會從「方式一：直接開始（推薦，免」硬斷成兩行很難看。
+    # 在全形冒號後插一個只在手機生效的 <br>（見 CSS 的 br.y2k-mbr），桌機仍維持單行。
+    if "：" in title:
+        _prefix, _rest = title.split("：", 1)
+        title_html = (
+            f"{html_mod.escape(_prefix)}：<br class=\"y2k-mbr\">{html_mod.escape(_rest)}"
+        )
+    else:
+        title_html = html_mod.escape(title)
     return f"""<div style="border:3px solid #2D1B4E;
-  border-radius:18px;padding:1.2rem 1.4rem 0.8rem 1.4rem;margin:0.8rem 0;
+  border-radius:18px;padding:1rem 1.4rem;margin:0.8rem 0;
   min-height:130px;box-sizing:border-box;
+  display:flex;flex-direction:column;justify-content:center;
   box-shadow:4px 4px 0px {border_color}33;background:white">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:0.4rem">
     <span style="display:inline-block;width:36px">{icon_svg}</span>
-    <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:1.15rem;color:#2D1B4E">
-      {html_mod.escape(title)}
-    </span>
+    <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:1.15rem;color:#2D1B4E">{title_html}</span>
   </div>
-  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;opacity:0.75;font-size:0.92rem;margin:0 0 0.5rem 0">
-    {html_mod.escape(description)}
-  </p>
+  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;opacity:0.75;font-size:0.92rem;margin:0">{html_mod.escape(description)}</p>
 </div>"""
 
 
