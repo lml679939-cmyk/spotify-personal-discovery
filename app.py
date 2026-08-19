@@ -414,6 +414,59 @@ generate_slot = st.container()
 
 st.markdown("<div style='margin-top: 0.6rem;'></div>", unsafe_allow_html=True)
 
+# 推薦歷史：狀態列跟著生成按鈕走，清除按鈕收進「推薦歌曲數」（罕用且不可逆）
+_session_hist_n = len(st.session_state.get("recommend_history", []))
+_persistent_hist_n = 0 if is_guest_mode() else len(load_persistent_history())
+_total_hist_n = _session_hist_n + _persistent_hist_n
+
+_setting_sum = f"{st.session_state.get('num_songs', 15)} 首"
+if not is_guest_mode():
+    _setting_sum += f" · 新藝人 {st.session_state.get('new_artist_ratio', 70)}%"
+
+with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False):
+    if is_guest_mode():
+        num_songs = st.slider(
+            "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
+        )
+        new_artist_ratio = 70
+    else:
+        col_num, col_mode = st.columns(2)
+        with col_num:
+            num_songs = st.slider(
+                "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
+            )
+        with col_mode:
+            new_artist_ratio = st.slider(
+                "新藝人佔比",
+                min_value=0, max_value=100, value=70, step=10,
+                format="%d%%", key="new_artist_ratio",
+                help="0% = 全部從你熟悉的藝人推｜70% = 平衡｜100% = 完全沒接觸過的新藝人",
+            )
+
+    st.markdown("---")
+    if _total_hist_n > 0 and not is_guest_mode():
+        st.caption(
+            f"🧠 已記住推薦過的 **{_total_hist_n}** 首歌"
+            f"（本次 {_session_hist_n}・過往 {_persistent_hist_n}），生成時會自動避開。"
+        )
+    elif is_guest_mode():
+        st.caption("🧠 訪客模式：推薦歷史僅在本次瀏覽期間有效，關掉分頁就重置。")
+    elif _has_scope("playlist-read-private"):
+        st.caption("🧠 尚未有推薦歷史。每次生成後會記住，跨 session 都不重複推薦。")
+    else:
+        st.caption("🧠 想跨 session 記住推薦歷史？請從側邊欄登出後重新登入授權。")
+
+    if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0):
+        st.session_state["recommend_history"] = []
+        if not is_guest_mode():
+            try:
+                n = clear_persistent_history()
+                if n > 0:
+                    st.toast(f"已清除 {n} 首過往推薦歷史")
+            except Exception:
+                st.toast("⚠️ 清除 Spotify 歷史歌單失敗，過往推薦歷史可能仍保留")
+        st.rerun()
+
 
 # ══ 第二層：摺疊的偏好設定 ═══════════════════════════════
 def _brief(items, limit: int = 2) -> str:
@@ -515,60 +568,6 @@ with st.expander(f"🧠 關於你　·　{_traits_sum}", expanded=False):
         blood_type = st.selectbox("血型", BLOOD_TYPE_OPTIONS, key="blood_type")
     with col_zd:
         zodiac = st.selectbox("星座", ZODIAC_OPTIONS, key="zodiac")
-
-# 推薦歷史：狀態列跟著生成按鈕走，清除按鈕收進「推薦設定」（罕用且不可逆）
-_session_hist_n = len(st.session_state.get("recommend_history", []))
-_persistent_hist_n = 0 if is_guest_mode() else len(load_persistent_history())
-_total_hist_n = _session_hist_n + _persistent_hist_n
-
-_setting_sum = f"{st.session_state.get('num_songs', 15)} 首"
-if not is_guest_mode():
-    _setting_sum += f" · 新藝人 {st.session_state.get('new_artist_ratio', 70)}%"
-
-with st.expander(f"⚙️ 推薦設定　·　{_setting_sum}", expanded=False):
-    if is_guest_mode():
-        num_songs = st.slider(
-            "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
-        )
-        new_artist_ratio = 70
-    else:
-        col_num, col_mode = st.columns(2)
-        with col_num:
-            num_songs = st.slider(
-                "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
-            )
-        with col_mode:
-            new_artist_ratio = st.slider(
-                "新藝人佔比",
-                min_value=0, max_value=100, value=70, step=10,
-                format="%d%%", key="new_artist_ratio",
-                help="0% = 全部從你熟悉的藝人推｜70% = 平衡｜100% = 完全沒接觸過的新藝人",
-            )
-
-    st.markdown("---")
-    if _total_hist_n > 0 and not is_guest_mode():
-        st.caption(
-            f"🧠 已記住推薦過的 **{_total_hist_n}** 首歌"
-            f"（本次 {_session_hist_n}・過往 {_persistent_hist_n}），生成時會自動避開。"
-        )
-    elif is_guest_mode():
-        st.caption("🧠 訪客模式：推薦歷史僅在本次瀏覽期間有效，關掉分頁就重置。")
-    elif _has_scope("playlist-read-private"):
-        st.caption("🧠 尚未有推薦歷史。每次生成後會記住，跨 session 都不重複推薦。")
-    else:
-        st.caption("🧠 想跨 session 記住推薦歷史？請從側邊欄登出後重新登入授權。")
-
-    if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0):
-        st.session_state["recommend_history"] = []
-        if not is_guest_mode():
-            try:
-                n = clear_persistent_history()
-                if n > 0:
-                    st.toast(f"已清除 {n} 首過往推薦歷史")
-            except Exception:
-                st.toast("⚠️ 清除 Spotify 歷史歌單失敗，過往推薦歷史可能仍保留")
-        st.rerun()
-
 
 # ══ 把生成按鈕填回上方預留的位置 ═════════════════════════
 _clicked = generate_slot.button("✨ 生成推薦歌單", type="primary", use_container_width=True)

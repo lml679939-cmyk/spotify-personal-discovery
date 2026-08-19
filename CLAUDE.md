@@ -169,7 +169,7 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 
 ```
 第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
-第二層（摺疊 expander） 🎵 音樂偏好 · 😊 現在的心情 · 🧠 關於你 · ⚙️ 推薦設定
+第二層（摺疊 expander） ⚙️ 推薦歌曲數 · 🎵 音樂偏好 · 😊 現在的心情 · 🧠 關於你
 ```
 
 - **摺疊標題帶即時摘要**（`🎵 音樂偏好　·　日語 · Jazz`）。摘要必須在 expander 建立**之前**算好，
@@ -177,7 +177,8 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 - `_brief(items, limit=2)` 把多選縮成「前 2 項 +N」；`_summary(parts, empty)` 組合摘要、全空時顯示 empty。
 - **生成按鈕用 `generate_slot = st.container()` 佔位**：版面在摺疊區上方，程式碼卻在所有 widget 之後，
   這樣 handler 才讀得到 `languages` / `mood_energy` 等變數。進度狀態也走 `generate_slot.columns()`。
-- 清除推薦歷史收在「⚙️ 推薦設定」內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
+- 「⚙️ 推薦歌曲數」緊接在生成按鈕下方（程式碼也放在 `generate_slot` 之後、其他 expander 之前）。
+  清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
 - ⚠️ 別再用 `st.session_state["mbti"] = ...` 手動寫入——widget 有 `key` 時 Streamlit 會報錯。
 
 ## 輸入欄位說明（登入頁）
