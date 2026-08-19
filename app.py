@@ -360,179 +360,207 @@ else:
 st.divider()
 
 st.subheader("設定情境")
-st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
+st.caption("描述你當下的情境就能生成推薦——下方的偏好設定都是選填的微調，不動也沒關係。")
 
-# 個人特質區（一次填、session 內沿用）
-with st.expander("🧠 關於你（選填，讓 AI 更懂你）", expanded=False):
-    mbti = st.selectbox(
-        "MBTI 性格類型",
-        MBTI_TYPES,
-        index=MBTI_TYPES.index(st.session_state.get("mbti", "不指定")),
-        help="不同性格類型對音樂的偏好取向不太一樣，AI 會納入考量",
-    )
-    st.session_state["mbti"] = mbti
+st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
 
-    col_bt, col_zd = st.columns(2)
-    with col_bt:
-        blood_type = st.selectbox(
-            "血型",
-            BLOOD_TYPE_OPTIONS,
-            index=BLOOD_TYPE_OPTIONS.index(st.session_state.get("blood_type", "不指定")),
-        )
-        st.session_state["blood_type"] = blood_type
-    with col_zd:
-        zodiac = st.selectbox(
-            "星座",
-            ZODIAC_OPTIONS,
-            index=ZODIAC_OPTIONS.index(st.session_state.get("zodiac", "不指定")),
-        )
-        st.session_state["zodiac"] = zodiac
-
-st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-auto_ctx = st.toggle("自動偵測位置與天氣", value=True)
+# ══ 第一層：情境輸入（唯一必要的一區）═══════════════════
+auto_ctx = st.toggle("自動偵測位置與天氣", value=True, key="auto_ctx")
 st.caption("啟用時會透過 [ipwho.is](https://ipwho.is) 取得 IP 地理位置，僅用於判斷天氣與時區，不儲存。")
 
 col1, col2 = st.columns(2)
-
 with col1:
     text_ctx = st.text_area(
         "文字描述（選填）",
         placeholder="例如：在咖啡廳讀書、深夜想一個人散步、運動前暖身…",
         height=98,
+        key="text_ctx",
     )
-
 with col2:
     uploaded = st.file_uploader(
         "上傳情境圖片（選填）",
         type=["jpg", "jpeg", "png", "webp"],
         help="上傳一張能代表你當下心情或環境的照片，最大 10 MB",
+        key="ctx_image",
     )
     if uploaded:
         st.image(uploaded, use_container_width=True)
 
-# 心情雙軸滑桿
-mood_col1, mood_col2 = st.columns(2)
-with mood_col1:
-    mood_energy = st.slider(
-        "活力程度",
-        min_value=1, max_value=10, value=5, step=1,
-        help="1 = 完全放空｜10 = 精力爆棚",
-    )
-with mood_col2:
-    mood_valence = st.slider(
-        "情緒",
-        min_value=1, max_value=10, value=5, step=1,
-        help="1 = 低落／煩躁｜5 = 平靜｜10 = 愉悅／興奮",
-    )
-
-# 活動情境快速選擇
-st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-activity = st.pills(
-    "正在做 / 即將做什麼？（選填）",
-    options=ACTIVITY_OPTIONS,
-    selection_mode="single",
-    default=None,
-)
-
-# 語言與曲風偏好（多選）
-st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-languages = st.pills(
-    "想聽哪些語言的歌？（選填，可複選；不選代表不限）",
-    options=LANGUAGE_OPTIONS,
-    selection_mode="multi",
-    default=None,
-    key="lang_pills",
-)
-
-st.markdown("<div style='margin-top: 0.8rem;'></div>", unsafe_allow_html=True)
-genres = st.pills(
-    "想聽哪些曲風？(選填，可複選；不選代表不限)",
-    options=GENRE_OPTIONS,
-    selection_mode="multi",
-    default=None,
-    key="genre_pills",
-)
-
-st.markdown("<div style='margin-top: 0.8rem;'></div>", unsafe_allow_html=True)
-fav_artists_raw = st.text_input(
-    "🎤 想聽哪些歌手的歌？（選填，用逗號分隔）",
-    key="fav_artists_input",
-    placeholder="例：周杰倫, Taylor Swift, NewJeans, 陳奕迅",
-    help="填入後 AI 會優先從這些歌手中推薦，同時兼顧你的情境偏好。",
-)
-# 解析成清單，過濾空白
-fav_artists = [a.strip() for a in fav_artists_raw.replace('，', ',').split(',') if a.strip()] or None
-
-st.markdown("<div style='margin-top: 2.4rem;'></div>", unsafe_allow_html=True)
-# 隨機投射問題
+# ══ 投射問題（本站特色，從頁面最底下提到這裡）═══════════
 if "projective_q" not in st.session_state:
     st.session_state["projective_q"] = random.choice(PROJECTIVE_QUESTIONS)
 
-proj_col1, proj_col2 = st.columns([5, 1])
+st.markdown("<div style='margin-top: 0.6rem;'></div>", unsafe_allow_html=True)
+proj_col1, proj_col2 = st.columns([5, 1], vertical_alignment="bottom")
 with proj_col1:
-    st.markdown(f"**🎲 隨機投射問題（選填）**  \n{st.session_state['projective_q']}")
+    st.markdown(f"**🎲 {st.session_state['projective_q']}**")
 with proj_col2:
-    if st.button("換一題", use_container_width=True):
-        current = st.session_state["projective_q"]
-        choices = [q for q in PROJECTIVE_QUESTIONS if q != current]
-        st.session_state["projective_q"] = random.choice(choices)
+    if st.button("🔄 換一題", use_container_width=True):
+        _cur = st.session_state["projective_q"]
+        st.session_state["projective_q"] = random.choice(
+            [q for q in PROJECTIVE_QUESTIONS if q != _cur]
+        )
         st.session_state["projective_a"] = ""
         st.rerun()
 
-st.markdown("<div style='margin-top: -2.6rem;'></div>", unsafe_allow_html=True)
 projective_answer = st.text_input(
     "你的回答",
     key="projective_a",
-    placeholder="隨意回答，越具體越好（讓 AI 從中讀出你的當下狀態）",
+    placeholder="隨意回答，越具體越好——AI 會從中讀出你的當下狀態（選填）",
     label_visibility="collapsed",
 )
-st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
 
-if is_guest_mode():
-    num_songs = st.slider("推薦歌曲數量", min_value=5, max_value=30, value=15, step=1)
-    new_artist_ratio = 70
-else:
-    col_num, col_mode = st.columns([1, 1])
-    with col_num:
-        num_songs = st.slider("推薦歌曲數量", min_value=5, max_value=30, value=15, step=1)
-    with col_mode:
-        new_artist_ratio = st.slider(
-            "新藝人佔比",
-            min_value=0, max_value=100, value=70, step=10,
-            format="%d%%",
-            help="0% = 全部從你熟悉的藝人推｜70% = 平衡｜100% = 完全沒接觸過的新藝人",
+# 生成按鈕的版面位置。實際內容要等下方所有 widget 都建立完才填得進去，
+# 用 container 佔位就能讓按鈕顯示在偏好設定「上面」，程式碼卻仍在後面。
+generate_slot = st.container()
+
+st.markdown("<div style='margin-top: 0.6rem;'></div>", unsafe_allow_html=True)
+
+
+# ══ 第二層：摺疊的偏好設定 ═══════════════════════════════
+def _brief(items, limit: int = 2) -> str:
+    """多選清單縮成摘要：前 limit 項 + 剩餘數量。"""
+    items = list(items or [])
+    if not items:
+        return ""
+    if len(items) <= limit:
+        return "、".join(items)
+    return "、".join(items[:limit]) + f" +{len(items) - limit}"
+
+
+def _summary(parts, empty: str) -> str:
+    """組出摺疊標題右側的摘要，全空時顯示 empty。"""
+    parts = [p for p in parts if p]
+    return " · ".join(parts) if parts else empty
+
+
+# ⚠️ 摘要必須在 widget 建立「之前」算好（expander 的標題此時就要定），
+#    所以一律從 session_state 讀——Streamlit 在 rerun 前已寫入最新值。
+_fav_raw = st.session_state.get("fav_artists_input", "")
+_fav_n = len([a for a in _fav_raw.replace("，", ",").split(",") if a.strip()])
+_music_sum = _summary(
+    [
+        _brief(st.session_state.get("lang_pills")),
+        _brief(st.session_state.get("genre_pills")),
+        f"{_fav_n} 位指定歌手" if _fav_n else "",
+    ],
+    "不限語言與曲風",
+)
+
+with st.expander(f"🎵 音樂偏好　·　{_music_sum}", expanded=False):
+    languages = st.pills(
+        "想聽哪些語言的歌？（可複選；不選代表不限）",
+        options=LANGUAGE_OPTIONS,
+        selection_mode="multi",
+        key="lang_pills",
+    )
+    genres = st.pills(
+        "想聽哪些曲風？（可複選；不選代表不限）",
+        options=GENRE_OPTIONS,
+        selection_mode="multi",
+        key="genre_pills",
+    )
+    fav_artists_raw = st.text_input(
+        "🎤 想聽哪些歌手的歌？（用逗號分隔）",
+        key="fav_artists_input",
+        placeholder="例：周杰倫, Taylor Swift, NewJeans, 陳奕迅",
+        help="填入後 AI 會優先從這些歌手中推薦，同時兼顧你的情境偏好。",
+    )
+fav_artists = [a.strip() for a in fav_artists_raw.replace("，", ",").split(",") if a.strip()] or None
+
+_mood_sum = _summary(
+    [
+        f"活力 {st.session_state.get('mood_energy', 5)}",
+        f"情緒 {st.session_state.get('mood_valence', 5)}",
+        st.session_state.get("activity_pills") or "",
+    ],
+    "",
+)
+
+with st.expander(f"😊 現在的心情　·　{_mood_sum}", expanded=False):
+    mood_col1, mood_col2 = st.columns(2)
+    with mood_col1:
+        mood_energy = st.slider(
+            "活力程度",
+            min_value=1, max_value=10, value=5, step=1, key="mood_energy",
+            help="1 = 完全放空｜10 = 精力爆棚",
         )
+    with mood_col2:
+        mood_valence = st.slider(
+            "情緒",
+            min_value=1, max_value=10, value=5, step=1, key="mood_valence",
+            help="1 = 低落／煩躁｜5 = 平靜｜10 = 愉悅／興奮",
+        )
+    activity = st.pills(
+        "正在做 / 即將做什麼？",
+        options=ACTIVITY_OPTIONS,
+        selection_mode="single",
+        key="activity_pills",
+    )
 
-st.divider()
+_traits_sum = _summary(
+    [
+        v for v in (
+            st.session_state.get("mbti"),
+            st.session_state.get("blood_type"),
+            st.session_state.get("zodiac"),
+        ) if v and v != "不指定"
+    ],
+    "未填",
+)
 
-# 推薦歷史狀態列 + 清除歷史
+with st.expander(f"🧠 關於你　·　{_traits_sum}", expanded=False):
+    st.caption("選填。不同性格／星座的音樂偏好取向不太一樣，AI 會納入考量。")
+    mbti = st.selectbox("MBTI 性格類型", MBTI_TYPES, key="mbti")
+    col_bt, col_zd = st.columns(2)
+    with col_bt:
+        blood_type = st.selectbox("血型", BLOOD_TYPE_OPTIONS, key="blood_type")
+    with col_zd:
+        zodiac = st.selectbox("星座", ZODIAC_OPTIONS, key="zodiac")
+
+# 推薦歷史：狀態列跟著生成按鈕走，清除按鈕收進「推薦設定」（罕用且不可逆）
 _session_hist_n = len(st.session_state.get("recommend_history", []))
-if is_guest_mode():
-    _persistent_hist_n = 0
-    _total_hist_n = _session_hist_n
-else:
-    _persistent_hist = load_persistent_history()
-    _persistent_hist_n = len(_persistent_hist)
-    _total_hist_n = _session_hist_n + _persistent_hist_n
+_persistent_hist_n = 0 if is_guest_mode() else len(load_persistent_history())
+_total_hist_n = _session_hist_n + _persistent_hist_n
 
-hist_col1, hist_col2 = st.columns([4, 1])
-with hist_col1:
-    if _total_hist_n > 0:
-        if is_guest_mode():
-            st.caption(f"🧠 已記住本次推薦過的 **{_session_hist_n}** 首歌，下次生成會自動避開。")
-        else:
-            st.caption(
-                f"🧠 已記住推薦過的 **{_total_hist_n}** 首歌"
-                f"（本次 {_session_hist_n}・過往 {_persistent_hist_n}），下次生成會自動避開。"
+_setting_sum = f"{st.session_state.get('num_songs', 15)} 首"
+if not is_guest_mode():
+    _setting_sum += f" · 新藝人 {st.session_state.get('new_artist_ratio', 70)}%"
+
+with st.expander(f"⚙️ 推薦設定　·　{_setting_sum}", expanded=False):
+    if is_guest_mode():
+        num_songs = st.slider(
+            "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
+        )
+        new_artist_ratio = 70
+    else:
+        col_num, col_mode = st.columns(2)
+        with col_num:
+            num_songs = st.slider(
+                "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
             )
+        with col_mode:
+            new_artist_ratio = st.slider(
+                "新藝人佔比",
+                min_value=0, max_value=100, value=70, step=10,
+                format="%d%%", key="new_artist_ratio",
+                help="0% = 全部從你熟悉的藝人推｜70% = 平衡｜100% = 完全沒接觸過的新藝人",
+            )
+
+    st.markdown("---")
+    if _total_hist_n > 0 and not is_guest_mode():
+        st.caption(
+            f"🧠 已記住推薦過的 **{_total_hist_n}** 首歌"
+            f"（本次 {_session_hist_n}・過往 {_persistent_hist_n}），生成時會自動避開。"
+        )
     elif is_guest_mode():
-        st.caption("🧠 訪客模式：推薦歷史僅在本次瀏覽期間有效。")
+        st.caption("🧠 訪客模式：推薦歷史僅在本次瀏覽期間有效，關掉分頁就重置。")
     elif _has_scope("playlist-read-private"):
         st.caption("🧠 尚未有推薦歷史。每次生成後會記住，跨 session 都不重複推薦。")
     else:
         st.caption("🧠 想跨 session 記住推薦歷史？請從側邊欄登出後重新登入授權。")
-with hist_col2:
-    if st.button("🗑 清除歷史", use_container_width=True, disabled=_total_hist_n == 0):
+
+    if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0):
         st.session_state["recommend_history"] = []
         if not is_guest_mode():
             try:
@@ -543,8 +571,14 @@ with hist_col2:
                 st.toast("⚠️ 清除 Spotify 歷史歌單失敗，過往推薦歷史可能仍保留")
         st.rerun()
 
-# 生成按鈕
-if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True):
+st.divider()
+
+# ══ 把生成按鈕填回上方預留的位置 ═════════════════════════
+_clicked = generate_slot.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
+if _total_hist_n > 0:
+    generate_slot.caption(f"🧠 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
+
+if _clicked:
     # 清空舊結果
     for k in ("found", "context_interp"):
         st.session_state.pop(k, None)
@@ -554,7 +588,8 @@ if st.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
     else:
         context_parts = []
 
-        status_col, _ = st.columns([1, 1])
+        # 進度顯示在生成按鈕正下方（跟著 container 走，不會掉到頁面底部）
+        status_col, _ = generate_slot.columns([1, 1])
         with status_col:
             with st.status("準備中...", expanded=True) as status:
                 profile = None
