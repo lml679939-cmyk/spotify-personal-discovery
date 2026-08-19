@@ -369,7 +369,7 @@ st.caption("啟用時會透過 [ipwho.is](https://ipwho.is) 取得 IP 地理位�
 col1, col2 = st.columns(2)
 with col1:
     text_ctx = st.text_area(
-        "文字描述（選填）",
+        "**你現在在做什麼？**",
         placeholder="例如：在咖啡廳讀書、深夜想一個人散步、運動前暖身…",
         height=98,
         key="text_ctx",

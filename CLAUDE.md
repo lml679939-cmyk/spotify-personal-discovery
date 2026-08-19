@@ -198,7 +198,7 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 ### 推薦偏好輸入
 | 欄位 | 變數 | 說明 |
 |---|---|---|
-| 情境文字 | `text_ctx` | 自由描述當下情境 |
+| 情境文字 | `text_ctx` | 標籤「**你現在在做什麼？**」，自由描述當下情境 |
 | 自動偵測 | `auto_ctx` | 開啟後讀取 IP/天氣 |
 | 圖片上傳 | `uploaded` | Gemini Vision 分析氛圍 |
 | 活動情境 | `activity` | Pills 單選 |
