@@ -120,9 +120,10 @@ header {{
     padding-top: 0 !important;
 }}
 /* 新版 Streamlit 沒有 .main 祖先，block-container 掛在 stMainBlockContainer testid 上；
-   預設 padding-top 6rem 讓頁面頂部留白過大，收窄為 2rem */
+   預設 padding-top 6rem 讓頁面頂部留白過大。
+   0.8rem + 元件間隙 16px ≈ 29px，與 hero 下方間距（padding-bottom 16px + 卡片 margin 12.8px）對齊 */
 [data-testid="stMainBlockContainer"] {{
-    padding-top: 2rem !important;
+    padding-top: 0.8rem !important;
 }}
 h1, h2, h3, [data-testid="stHeading"] {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
