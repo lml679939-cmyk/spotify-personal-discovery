@@ -119,6 +119,11 @@ header {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
     padding-top: 0 !important;
 }}
+/* 新版 Streamlit 沒有 .main 祖先，block-container 掛在 stMainBlockContainer testid 上；
+   預設 padding-top 6rem 讓頁面頂部留白過大，收窄為 2rem */
+[data-testid="stMainBlockContainer"] {{
+    padding-top: 2rem !important;
+}}
 h1, h2, h3, [data-testid="stHeading"] {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
     font-weight: 900 !important;
