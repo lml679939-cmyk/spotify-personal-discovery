@@ -357,7 +357,6 @@ else:
         st.error(f"Spotify 連線異常：{e}")
         st.stop()
 
-st.divider()
 
 st.subheader("設定情境")
 
@@ -570,7 +569,6 @@ with st.expander(f"⚙️ 推薦設定　·　{_setting_sum}", expanded=False):
                 st.toast("⚠️ 清除 Spotify 歷史歌單失敗，過往推薦歷史可能仍保留")
         st.rerun()
 
-st.divider()
 
 # ══ 把生成按鈕填回上方預留的位置 ═════════════════════════
 _clicked = generate_slot.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
