@@ -320,6 +320,36 @@ br.y2k-mbr {{ display: none; }}
     min-width: 0 !important;
 }}
 
+/* 右欄上傳區的隱形標題（見 app.py 的 ctx_label_spacer）：佔高度但不顯示 */
+.st-key-ctx_label_spacer {{ visibility: hidden; }}
+
+/* ── 推薦網格：同一列的卡片等高，Spotify 按鈕才會對齊 ──
+   歌名 1/2 行、專輯有無、理由有無都會讓卡片高度不同；
+   把 column → verticalBlock → 第一個 elementContainer 這條鏈都拉成 flex 並給高度，
+   卡片自己的 height:100% 才有依據（Streamlit 的 column 本來就會拉成該列最高） */
+.st-key-track_grid [data-testid="stColumn"] {{
+    display: flex;
+}}
+.st-key-track_grid [data-testid="stColumn"] > [data-testid="stVerticalBlock"] {{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}}
+.st-key-track_grid [data-testid="stColumn"] > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]:first-child {{
+    flex: 1;
+}}
+/* elementContainer → stMarkdown → (emotion wrapper) → stMarkdownContainer → 卡片，
+   中間任何一層漏掉 height:100%，卡片就只會長到內容高度（按鈕仍會齊，但短卡片下緣會縮） */
+.st-key-track_grid [data-testid="stColumn"] > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]:first-child [data-testid="stMarkdown"],
+.st-key-track_grid [data-testid="stColumn"] > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]:first-child [data-testid="stMarkdown"] > div,
+.st-key-track_grid [data-testid="stColumn"] > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]:first-child [data-testid="stMarkdownContainer"] {{
+    height: 100%;
+}}
+
 /* ── Text inputs ────────────── */
 .stTextInput input, .stTextArea textarea,
 [data-testid="stTextInput"] input,
@@ -485,15 +515,13 @@ def context_interpretation_html(text):
   border-radius:18px;padding:1.2rem 1.4rem;margin:0.8rem 0;
   box-shadow:4px 4px 0px rgba(155,89,182,0.2);
   background:linear-gradient(135deg,#FFF0F5,#FFFDF7)">
-  <div style="display:flex;align-items:flex-start;gap:10px">
-    <span style="font-size:1.6rem;line-height:1">💭</span>
-    <div>
-      <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:700;font-size:0.8rem;
-        color:#9B59B6;text-transform:uppercase;letter-spacing:1px">AI 情境解讀</span>
-      <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;margin:0.3rem 0 0 0;
-        font-size:0.95rem;line-height:1.6">{escaped}</p>
-    </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span style="font-size:1.6rem;line-height:1;display:flex;align-items:center">💭</span>
+    <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:700;font-size:0.8rem;
+      color:#9B59B6;text-transform:uppercase;letter-spacing:1px;line-height:1">AI 情境解讀</span>
   </div>
+  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;margin:0.5rem 0 0 0;
+    font-size:0.95rem;line-height:1.6">{escaped}</p>
 </div>"""
 
 
@@ -527,7 +555,8 @@ def track_card_html(track, index):
     )
 
     album_html = (
-        f'<div style="font-size:0.75rem;color:#9B59B6;margin-top:2px">💿 {album}</div>'
+        f'<div style="font-size:0.75rem;color:#9B59B6;margin-top:2px;'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">💿 {album}</div>'
         if album
         else ""
     )
@@ -546,6 +575,7 @@ def track_card_html(track, index):
 
     return _tidy(f"""<div style="border:3px solid #2D1B4E;border-radius:18px;padding:10px;
   box-shadow:4px 4px 0px {accent};background:white;margin-bottom:8px;
+  height:100%;box-sizing:border-box;
   transition:transform 0.15s ease,box-shadow 0.15s ease">
   {cover_html}
   <div style="padding:6px 2px 2px 2px">

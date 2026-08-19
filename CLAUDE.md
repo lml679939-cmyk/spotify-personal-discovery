@@ -212,7 +212,7 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 ```
 第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
 第二層（摺疊 expander） ⚙️ 推薦歌曲數 · 🎵 音樂偏好 · 😊 現在的心情 · 🧠 關於你
-（活動情境 pills 已於 2026-08 移除——與「你現在在做什麼？」文字欄重複）
+（活動情境 pills 已於 2026-08 移除——與「分享一下你的日常吧」文字欄重複）
 ```
 
 - **摺疊標題帶即時摘要**（`🎵 音樂偏好　·　日語 · Jazz`）。摘要必須在 expander 建立**之前**算好，
@@ -228,8 +228,16 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   短題目後面會空一大片（量到 500px）。改完不論題目長短，按鈕都固定在題目右側 20px，
   最長那題也還在同一行（row 高度維持 40px）。
 - 兩欄情境輸入的高度要手動對齊：`text_area(height=106)` 對上 file_uploader 的實際高度（量出來 104±2）。
-  右欄的標題已併進左欄那句「你現在在做什麼？（也可以上傳圖片給 AI 分析）」，
-  但右欄仍要留一行 `st.markdown("**&nbsp;**")` 當等高空白標題，兩個框的頂端才會齊（量到皆 top=226）。
+  右欄的標題已併進左欄那句「分享一下你的日常吧（也可以上傳圖片給 AI 分析）」，
+  右欄改放**同一句、同一種元件**再用 CSS 藏起來（`st.container(key="ctx_label_spacer")`
+  + `.st-key-ctx_label_spacer { visibility:hidden }`）：視窗窄到標題換行時左右會一起換行，
+  兩個框的頂端才會永遠齊（量過 397px 欄寬單行、192px 欄寬雙行，`taTop == upTop`）。
+- 推薦網格的卡片要等高，`▶ Spotify` 按鈕才會對齊：歌名 1/2 行、有無專輯、有無理由都會讓卡片高度不同。
+  作法是 `st.container(key="track_grid")` + `.st-key-track_grid` 把
+  column → verticalBlock → 第一個 elementContainer → stMarkdown → wrapper → stMarkdownContainer
+  整條鏈拉成 flex/height:100%，卡片自己再 `height:100%`。**中間漏掉任何一層，短卡片就不會撐滿**
+  （按鈕仍會齊，但卡片下緣會縮，量到 259 vs 317）。專輯名另外限一行 ellipsis——
+  `First Love (The Original & the Very First Recording)` 這種長名稱換行就是這次不對齊的直接原因。
 - Spotify 授權失敗的說明（人數上限／INVALID_CLIENT）不留在首頁：
   `consume_oauth_callback()` 把 `?error=` 或 token 交換例外寫進 `st.session_state["spotify_auth_error"]`，
   登入頁只在有值時 `st.warning()`。首頁平常只留一行「🔒 Token 只存在瀏覽器分頁記憶體」。
@@ -252,8 +260,8 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 ### 推薦偏好輸入
 | 欄位 | 變數 | 說明 |
 |---|---|---|
-| 情境文字 | `text_ctx` | 標籤「**你現在在做什麼？**」，自由描述當下情境 |
-| 自動偵測 | `auto_ctx` | 開啟後讀取 IP/天氣 |
+| 情境文字 | `text_ctx` | 標籤「**分享一下你的日常吧（也可以上傳圖片給 AI 分析）**」，自由描述當下情境 |
+| 自動偵測 | `auto_ctx` | 開啟後讀取 IP/天氣；隱私說明收在 `help=`（問號 tooltip），不再用 `st.caption` 佔版面 |
 | 圖片上傳 | `uploaded` | Gemini Vision 分析氛圍 |
 | 語言 | `languages` | Pills 多選 |
 | 曲風 | `genres` | Pills 多選 |

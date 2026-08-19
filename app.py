@@ -382,24 +382,34 @@ st.subheader("打造專屬於你的歌單吧")
 st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
 
 # ══ 第一層：情境輸入（唯一必要的一區）═══════════════════
-auto_ctx = st.toggle("自動偵測位置與天氣", value=True, key="auto_ctx")
-st.caption("啟用時會透過 [ipwho.is](https://ipwho.is) 取得 IP 地理位置，僅用於判斷天氣與時區，不儲存。")
+# 隱私說明收進 help（問號圖示的 tooltip），不佔版面
+auto_ctx = st.toggle(
+    "自動偵測位置與天氣",
+    value=True,
+    key="auto_ctx",
+    help="啟用時會透過 [ipwho.is](https://ipwho.is) 取得 IP 地理位置，"
+         "僅用於判斷天氣與時區，不儲存。",
+)
 
 # 兩欄都用 markdown 當標題（16px，跟投射問題同級——widget label 只有 14px），
 # 並把原本的 label 收起來，讓左右兩個輸入框的頂端對齊。
+CTX_LABEL = "分享一下你的日常吧（也可以上傳圖片給 AI 分析）"
+
 col1, col2 = st.columns(2)
 with col1:
-    st.markdown("**你現在在做什麼？（也可以上傳圖片給 AI 分析）**")
+    st.markdown(f"**{CTX_LABEL}**")
     text_ctx = st.text_area(
-        "你現在在做什麼？",
+        "分享一下你的日常吧",
         placeholder="例如：在咖啡廳讀書、深夜想一個人散步、運動前暖身…",
         height=106,
         key="text_ctx",
         label_visibility="collapsed",
     )
 with col2:
-    # 標題已併進左欄那句，這裡留一行等高的空白標題，兩個輸入框的頂端才會齊
-    st.markdown("**&nbsp;**")
+    # 標題已併進左欄那句。這裡放同一句、同一種元件，再用 CSS 藏起來當佔位——
+    # 視窗窄到標題換行時左右兩邊會一起換行，兩個輸入框的頂端才會永遠齊
+    with st.container(key="ctx_label_spacer"):
+        st.markdown(f"**{CTX_LABEL}**")
     uploaded = st.file_uploader(
         "上傳情境圖片",
         type=["jpg", "jpeg", "png", "webp"],
@@ -849,21 +859,24 @@ if "found" in st.session_state and st.session_state.found:
             cols_per_row = st.slider("每列幾首", min_value=3, max_value=10, value=5, step=1)
 
     if view_mode == "網格":
-        for i in range(0, len(found), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for j, col in enumerate(cols):
-                idx = i + j
-                if idx < len(found):
-                    track = found[idx]
-                    with col:
-                        show_album = cols_per_row <= 5
-                        card_track = track if show_album else {**track, "album": "", "reason": ""}
-                        st.markdown(
-                            styles.track_card_html(card_track, idx),
-                            unsafe_allow_html=True,
-                        )
-                        btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
-                        st.link_button(btn_label, track["url"], use_container_width=True)
+        # key="track_grid" 讓 styles.py 把同一列的卡片拉成等高（見 .st-key-track_grid），
+        # 否則歌名長短、有無專輯／理由會讓每張卡不一樣高，Spotify 按鈕就參差不齊
+        with st.container(key="track_grid"):
+            for i in range(0, len(found), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j, col in enumerate(cols):
+                    idx = i + j
+                    if idx < len(found):
+                        track = found[idx]
+                        with col:
+                            show_album = cols_per_row <= 5
+                            card_track = track if show_album else {**track, "album": "", "reason": ""}
+                            st.markdown(
+                                styles.track_card_html(card_track, idx),
+                                unsafe_allow_html=True,
+                            )
+                            btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
+                            st.link_button(btn_label, track["url"], use_container_width=True)
     else:
         for i, track in enumerate(found):
             st.markdown(
