@@ -167,6 +167,10 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   若它是 expander 的最後一個元素，內容會被拉去貼住下框線——已用 `:last-of-type` 規則歸零
 - `[data-testid="stHeaderActionElements"]`（Streamlit 標題錨點圖示）已用 CSS 隱藏——它是 inline-flex，
   會佔行內寬度、把置中標題推偏（手機上 h1 換行時特別明顯）
+- **注入的 HTML 不能有縮排**：Streamlit 的 markdown 會把「縮排 4 個空白」的行當成程式碼區塊。
+  條件式片段（如沒有專輯時的 `album_html`）算出來是空字串時那一行只剩空白＝空行，
+  後面縮排的 `<div>` 就會被當 code block 印出原始碼（症狀：曲目卡的理由標籤變成一段程式碼）。
+  `track_card_html()` 的輸出走 `_tidy()` 去掉行首縮排與空行；新增有條件式插值的 HTML helper 時照做。
 - 修改樣式只改 `styles.py` + `config.toml`，不要在 `app.py` 混入 CSS
 - `_method_card_html()` 使用 `min-height:130px`（非 `height`），讓手機上文字換行後能撐高，不截字
 
@@ -219,9 +223,17 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - `_brief(items, limit=2)` 把多選縮成「前 2 項 +N」；`_summary(parts, empty)` 組合摘要、全空時顯示 empty。
 - **生成按鈕用 `generate_slot = st.container()` 佔位**：版面在摺疊區上方，程式碼卻在所有 widget 之後，
   這樣 handler 才讀得到 `languages` / `mood_energy` 等變數。進度狀態也走 `generate_slot.columns()`。
-- 投射問題那一列用 `st.columns([3, 2], vertical_alignment="center")`：
-  最長的題目量到 404px，欄寬 476px 剛好不換行，按鈕又比 5:1 時靠近題目約 190px。
+- 投射問題那一列包在 `st.container(key="proj_row")` 裡，`styles.py` 用 `.st-key-proj_row` 把兩欄
+  改成 `flex:0 0 auto; width:auto`、`gap:1.25rem`——題目長度 170–403px 差很多，固定欄寬時
+  短題目後面會空一大片（量到 500px）。改完不論題目長短，按鈕都固定在題目右側 20px，
+  最長那題也還在同一行（row 高度維持 40px）。
 - 兩欄情境輸入的高度要手動對齊：`text_area(height=106)` 對上 file_uploader 的實際高度（量出來 104±2）。
+  右欄的標題已併進左欄那句「你現在在做什麼？（也可以上傳圖片給 AI 分析）」，
+  但右欄仍要留一行 `st.markdown("**&nbsp;**")` 當等高空白標題，兩個框的頂端才會齊（量到皆 top=226）。
+- Spotify 授權失敗的說明（人數上限／INVALID_CLIENT）不留在首頁：
+  `consume_oauth_callback()` 把 `?error=` 或 token 交換例外寫進 `st.session_state["spotify_auth_error"]`，
+  登入頁只在有值時 `st.warning()`。首頁平常只留一行「🔒 Token 只存在瀏覽器分頁記憶體」。
+- expander 內距 `[data-testid="stExpanderDetails"]` 上下各 1.35rem（21.6px），0.75rem 太擠。
 - 「⚙️ 推薦歌曲數」緊接在生成按鈕下方（程式碼也放在 `generate_slot` 之後、其他 expander 之前）。
   清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
 - ⚠️ 別再用 `st.session_state["mbti"] = ...` 手動寫入——widget 有 `key` 時 Streamlit 會報錯。
@@ -293,6 +305,7 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| （本次） | fix: 曲目卡理由標籤被當成程式碼區塊（HTML 縮排 + 空的 album_html）、無理由時不畫空標籤；feat: 授權失敗說明改成失敗才顯示、投射問題按鈕貼齊題目、expander 內距加大、登入頁與情境欄文案精簡 |
 | `4e53694` | feat: 手機視覺層級（粗框只給主 CTA）、理由標籤對比修正、定位失敗優雅降級、訪客模式不顯示新藝人比例、maxUploadSize=10 |
 | `7d97353` | feat: 移除活動 pills、兩欄標題字級統一 16px、情境雙框對齊、標題錨點隱藏 |
 | `be5e05a` | feat: 設定情境改成漸進式揭露（情境+投射問題+生成按鈕在上，其餘 4 區摺疊帶即時摘要） |

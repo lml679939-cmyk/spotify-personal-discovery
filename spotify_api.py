@@ -57,9 +57,23 @@ def _get_auth_manager() -> SpotifyOAuth:
 
 
 def consume_oauth_callback() -> None:
-    """頁面載入時呼叫：如果 URL 含有 ?code=xxx，交換 token 並寫入 session。"""
+    """頁面載入時呼叫：處理 Spotify 導回的 ?code=xxx（交換 token）或 ?error=xxx（授權失敗）。
+
+    失敗訊息寫入 st.session_state["spotify_auth_error"]，由登入頁決定呈現方式——
+    不在這裡 st.error()，否則錯誤會出現在 hero 之前。
+    """
     if "spotify_token" in st.session_state:
         return
+
+    err = st.query_params.get("error")
+    if err:
+        st.session_state["spotify_auth_error"] = err
+        try:
+            st.query_params.clear()
+        except Exception:
+            pass
+        return
+
     code = st.query_params.get("code")
     if not code:
         return
@@ -67,8 +81,9 @@ def consume_oauth_callback() -> None:
         auth_manager = _get_auth_manager()
         token_info = auth_manager.get_access_token(code, as_dict=True, check_cache=False)
         st.session_state["spotify_token"] = token_info
+        st.session_state.pop("spotify_auth_error", None)
     except Exception as e:
-        st.error(f"Spotify 授權失敗：{e}")
+        st.session_state["spotify_auth_error"] = str(e)
     finally:
         # 清掉 URL 上的 code，避免重新整理時重複交換
         try:

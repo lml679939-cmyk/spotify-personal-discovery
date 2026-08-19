@@ -163,8 +163,6 @@ def show_login_required() -> None:
     ):
         enter_guest_mode()
 
-    st.caption("✨ AI 由本站提供，你不需要申請或填入任何 API Key。")
-
     # ── 方式二：Spotify 登入（需被加入授權名單）──
     st.markdown(styles.divider_html(), unsafe_allow_html=True)
     st.markdown(styles.login_spotify_card(), unsafe_allow_html=True)
@@ -184,12 +182,18 @@ def show_login_required() -> None:
             type="secondary",
             use_container_width=True,
         )
-        st.caption(
-            "🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。　"
-            "⚠️ Spotify 限制本站的登入人數，若出現 `INVALID_CLIENT` 或授權失敗，"
-            "表示你的帳號還沒被加入名單——先用上面的「直接開始推薦」即可，"
-            "或展開下方進階設定用自己的 Spotify App 登入。"
-        )
+        st.caption("🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。")
+
+        # 授權名單的說明只在真的登入失敗時才出現，平常不佔首頁版面
+        auth_err = st.session_state.get("spotify_auth_error")
+        if auth_err:
+            st.warning(
+                "⚠️ Spotify 授權失敗（"
+                f"`{auth_err}`）。本站的 Spotify 登入有人數上限，"
+                "你的帳號可能還沒被加入授權名單——"
+                "先用上面的「🎶 直接開始推薦」即可，"
+                "或展開下方進階設定用自己的 Spotify 登入。"
+            )
     else:
         st.warning("本站尚未設定 Spotify 登入，請用上方的訪客模式，或在下方進階設定填入自己的 Spotify App。")
 
@@ -203,7 +207,7 @@ def _render_api_key_settings(expanded: bool = False) -> None:
     Gemini 由本站自備，使用者不需要也不能填。"""
     default_redirect = _get_env("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8501/"
 
-    with st.expander("🔧 進階（選填）：用自己的 Spotify App 登入", expanded=expanded):
+    with st.expander("🔧 進階（選填）：用自己的 Spotify 登入", expanded=expanded):
 
         # ── 說明標語 ──
         st.markdown(
@@ -385,7 +389,7 @@ st.caption("啟用時會透過 [ipwho.is](https://ipwho.is) 取得 IP 地理位�
 # 並把原本的 label 收起來，讓左右兩個輸入框的頂端對齊。
 col1, col2 = st.columns(2)
 with col1:
-    st.markdown("**你現在在做什麼？**")
+    st.markdown("**你現在在做什麼？（也可以上傳圖片給 AI 分析）**")
     text_ctx = st.text_area(
         "你現在在做什麼？",
         placeholder="例如：在咖啡廳讀書、深夜想一個人散步、運動前暖身…",
@@ -394,7 +398,8 @@ with col1:
         label_visibility="collapsed",
     )
 with col2:
-    st.markdown("**也可以上傳一張圖片**")
+    # 標題已併進左欄那句，這裡留一行等高的空白標題，兩個輸入框的頂端才會齊
+    st.markdown("**&nbsp;**")
     uploaded = st.file_uploader(
         "上傳情境圖片",
         type=["jpg", "jpeg", "png", "webp"],
@@ -410,19 +415,20 @@ if "projective_q" not in st.session_state:
     st.session_state["projective_q"] = random.choice(PROJECTIVE_QUESTIONS)
 
 st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
-# 3:2 讓問題欄約 476px——最長的題目量到 404px，不會換行，
-# 按鈕又能比 5:1 時靠近題目約 190px。
-proj_col1, proj_col2 = st.columns([3, 2], vertical_alignment="center")
-with proj_col1:
-    st.markdown(f"**{st.session_state['projective_q']}**")
-with proj_col2:
-    if st.button("🔄 換一題"):
-        _cur = st.session_state["projective_q"]
-        st.session_state["projective_q"] = random.choice(
-            [q for q in PROJECTIVE_QUESTIONS if q != _cur]
-        )
-        st.session_state["projective_a"] = ""
-        st.rerun()
+# 固定比例會讓短題目和按鈕之間留下一大片空白（題目 170–403px 不等，欄寬卻固定）。
+# 改用 key 讓 styles.py 把這一列的兩欄變成 width:auto，按鈕永遠緊跟在題目後面。
+with st.container(key="proj_row"):
+    proj_col1, proj_col2 = st.columns([3, 2], vertical_alignment="center")
+    with proj_col1:
+        st.markdown(f"**{st.session_state['projective_q']}**")
+    with proj_col2:
+        if st.button("🔄 換一題"):
+            _cur = st.session_state["projective_q"]
+            st.session_state["projective_q"] = random.choice(
+                [q for q in PROJECTIVE_QUESTIONS if q != _cur]
+            )
+            st.session_state["projective_a"] = ""
+            st.rerun()
 
 projective_answer = st.text_input(
     "你的回答",

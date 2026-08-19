@@ -296,8 +296,8 @@ br.y2k-mbr {{ display: none; }}
    Streamlit 給 stMarkdownContainer 的 -16px 負邊界是用來抵銷段落 margin 的，
    但我們注入的自訂 HTML 沒有那個 margin，於是最後一塊內容會被拉去貼住框線 */
 [data-testid="stExpanderDetails"] {{
-    padding-top: 0.75rem !important;
-    padding-bottom: 0.75rem !important;
+    padding-top: 1.35rem !important;
+    padding-bottom: 1.35rem !important;
 }}
 [data-testid="stExpanderDetails"] [data-testid="stElementContainer"]:last-of-type [data-testid="stMarkdownContainer"] {{
     margin-bottom: 0 !important;
@@ -305,6 +305,19 @@ br.y2k-mbr {{ display: none; }}
 [data-testid="stExpander"] summary {{
     font-weight: 700 !important;
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
+}}
+
+/* ── 投射問題那一列：題目欄收成內容寬，按鈕才會緊跟在題目後面 ──
+   （固定欄寬時短題目後面會空一大片，題目長度 170–403px 差很多） */
+.st-key-proj_row [data-testid="stHorizontalBlock"] {{
+    flex-wrap: wrap;
+    gap: 1.25rem !important;   /* 量出來 20px：夠近，又不會黏在題號上 */
+    align-items: center;
+}}
+.st-key-proj_row [data-testid="stColumn"] {{
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
 }}
 
 /* ── Text inputs ────────────── */
@@ -414,7 +427,6 @@ def login_hero_html():
     background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
     margin:0 0 0.3rem 0;line-height:1.2;text-align:center">Spotify Personal Discovery</h1>
-  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0;text-align:center">根據你的聆聽習慣與當下情境，發現從未聽過的好歌</p>
 </div>"""
 
 
@@ -452,7 +464,7 @@ def login_guest_card():
 
 def login_spotify_card():
     return _method_card_html(
-        "方式二：連結 Spotify（個人化推薦）",
+        "方式二：連結 Spotify",
         "讀取你的聆聽紀錄，推薦「你沒聽過、但會喜歡」的歌，並可直接存成 Spotify 歌單。",
         "#00D4AA",
         SVG_VINYL,
@@ -485,6 +497,16 @@ def context_interpretation_html(text):
 </div>"""
 
 
+def _tidy(html: str) -> str:
+    """把注入用的 HTML 拉平成無縮排、無空行。
+
+    Streamlit 的 markdown 會把「縮排 4 個空白」的行當成程式碼區塊。條件式片段
+    （例如沒有專輯名時的 album_html）算出來是空字串時，那一行只剩縮排的空白＝空行，
+    後面縮排 4 空白的 <div> 就被當成 code block 印出原始碼——就是「理由標籤變成程式碼」的 bug。
+    """
+    return "\n".join(stripped for line in html.splitlines() if (stripped := line.strip()))
+
+
 def track_card_html(track, index):
     accent = _ACCENT_COLORS[index % 4]
     accent_text = _ACCENT_TEXT_COLORS[index % 4]
@@ -510,7 +532,19 @@ def track_card_html(track, index):
         else ""
     )
 
-    return f"""<div style="border:3px solid #2D1B4E;border-radius:18px;padding:10px;
+    # 沒有理由文字時整塊不畫——否則會留下一個只有 💡 的空標籤（密集網格會把 reason 清掉）
+    reason_html = (
+        f'<div style="margin-top:5px">'
+        f'<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7rem;'
+        f"font-weight:700;color:{accent_text};background:{accent};"
+        f"font-family:'Nunito','Noto Sans TC',sans-serif;"
+        f'border:1.5px solid #2D1B4E;max-width:100%;overflow:hidden;'
+        f'text-overflow:ellipsis;white-space:nowrap">💡 {reason}</span></div>'
+        if reason
+        else ""
+    )
+
+    return _tidy(f"""<div style="border:3px solid #2D1B4E;border-radius:18px;padding:10px;
   box-shadow:4px 4px 0px {accent};background:white;margin-bottom:8px;
   transition:transform 0.15s ease,box-shadow 0.15s ease">
   {cover_html}
@@ -521,15 +555,9 @@ def track_card_html(track, index):
     <div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.78rem;color:#666;
       margin-top:2px">{artist}</div>
     {album_html}
-    <div style="margin-top:5px">
-      <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7rem;
-        font-weight:700;color:{accent_text};background:{accent};font-family:'Nunito','Noto Sans TC',sans-serif;
-        border:1.5px solid #2D1B4E;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-        💡 {reason}
-      </span>
-    </div>
+    {reason_html}
   </div>
-</div>"""
+</div>""")
 
 
 def track_list_html(track, index):
