@@ -360,7 +360,6 @@ else:
 st.divider()
 
 st.subheader("設定情境")
-st.caption("描述你當下的情境就能生成推薦——下方的偏好設定都是選填的微調，不動也沒關係。")
 
 st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
 
