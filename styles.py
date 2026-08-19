@@ -520,7 +520,7 @@ def form_hero_html():
   <h2 class="y2k-form-title" style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;
     background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-    margin:0;padding:0;line-height:1.25;text-align:center">打造專屬於你的歌單吧</h2>
+    margin:0;padding:0;line-height:1.25;text-align:center">想成為你專屬的歌單</h2>
 </div>""")
 
 

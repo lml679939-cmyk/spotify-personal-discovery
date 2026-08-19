@@ -99,7 +99,7 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 - **HTML helpers**：
   - `inject_global_css()` — app.py 頂部呼叫，注入全域 CSS
   - `login_hero_html()` — 登入頁頂部 Hero 區（圖示 + 漸層標題）
-  - `form_hero_html()` — 主表單頁 Hero（音符/卡帶/黑膠三個圖示 + 漸層標題「打造專屬於你的歌單吧」）
+  - `form_hero_html()` — 主表單頁 Hero（音符/卡帶/黑膠三個圖示 + 漸層標題「想成為你專屬的歌單」）
     ⚠️ Streamlit 自己的 `.stMarkdown h2` 是 2.25rem，單一 class 選擇器蓋不過去——
     字級規則要寫成 `h2.y2k-form-title { font-size: … !important }`
   - `login_spotify_card()` / `login_guest_card()` — 登入方式卡片
@@ -234,7 +234,7 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 }
 ```
 
-## 主表單版面（Hero「打造專屬於你的歌單吧」，2026-08 漸進式揭露改版）
+## 主表單版面（Hero「想成為你專屬的歌單」，2026-08 漸進式揭露改版）
 
 > 標題已從 `st.subheader()` 改成 `styles.form_hero_html()`（圖示 + 漸層字，與登入頁同一套視覺）。
 
