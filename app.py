@@ -377,9 +377,7 @@ else:
         st.stop()
 
 
-st.subheader("打造專屬於你的歌單吧")
-
-st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
+st.markdown(styles.form_hero_html(), unsafe_allow_html=True)
 
 # ══ 第一層：情境輸入（唯一必要的一區）═══════════════════
 # 隱私說明收進 help（問號圖示的 tooltip），不佔版面
@@ -429,7 +427,6 @@ with col2:
 if "projective_q" not in st.session_state:
     st.session_state["projective_q"] = random.choice(PROJECTIVE_QUESTIONS)
 
-st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
 # 固定比例會讓短題目和按鈕之間留下一大片空白（題目 170–403px 不等，欄寬卻固定）。
 # 改用 key 讓 styles.py 把這一列的兩欄變成 width:auto，按鈕永遠緊跟在題目後面。
 with st.container(key="proj_row"):
@@ -455,8 +452,6 @@ projective_answer = st.text_input(
 # 生成按鈕的版面位置。實際內容要等下方所有 widget 都建立完才填得進去，
 # 用 container 佔位就能讓按鈕顯示在偏好設定「上面」，程式碼卻仍在後面。
 generate_slot = st.container()
-
-st.markdown('<div class="y2k-gap"></div>', unsafe_allow_html=True)
 
 # 推薦歷史：狀態列跟著生成按鈕走，清除按鈕收進「推薦歌曲數」（罕用且不可逆）
 _session_hist_n = len(st.session_state.get("recommend_history", []))
@@ -607,7 +602,9 @@ with st.expander(f"🧠 關於你　·　{_traits_sum}", expanded=False, key="ex
         zodiac = st.selectbox("星座", ZODIAC_OPTIONS, key="zodiac")
 
 # ══ 把生成按鈕填回上方預留的位置 ═════════════════════════
-_clicked = generate_slot.button("✨ 生成推薦歌單", type="primary", use_container_width=True)
+_clicked = generate_slot.button(
+    "✨ 生成推薦歌單", type="primary", use_container_width=True, key="btn_generate"
+)
 if _total_hist_n > 0:
     generate_slot.caption(f"🧠 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
 

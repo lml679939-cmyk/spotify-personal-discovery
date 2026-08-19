@@ -150,7 +150,6 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 }}
 
 /* 區塊之間的呼吸空間：桌機小、手機大（見檔案最後的 media query）*/
-.y2k-gap {{ height: 0.6rem; }}
 /* 只在手機生效的換行點，桌機停用 */
 br.y2k-mbr {{ display: none; }}
 
@@ -290,7 +289,7 @@ br.y2k-mbr {{ display: none; }}
     border-radius: var(--y2k-border-radius) !important;
     overflow: hidden;
     box-shadow: none !important;
-    margin-bottom: 8px !important;
+    margin-bottom: 0 !important;   /* 間距一律交給 flex gap，見「垂直間距三級制」 */
 }}
 /* 摺疊內容不要貼著下框線（登入頁的隱私標示原本會黏在邊框上）。
    Streamlit 給 stMarkdownContainer 的 -16px 負邊界是用來抵銷段落 margin 的，
@@ -319,6 +318,27 @@ br.y2k-mbr {{ display: none; }}
     width: auto !important;
     min-width: 0 !important;
 }}
+
+/* ── 垂直間距三級制（8 / 16 / 32）──────────────────
+   原本混用了三套機制：Streamlit 垂直區塊的 flex gap(16px)、自己插的 .y2k-gap 空 div、
+   還有 stMarkdownContainer 的 -16px 負邊界，相加後量到 16/20/26/32/41/49 六種間距。
+   現在只留 flex gap 當基準（16px＝並列欄位），再用 widget 的 key class 加減出另外兩級：
+     8px  組內（標題 → 它的輸入框、題目 → 回答框）
+     32px 區塊之間（手機；桌機 24px）
+   ⚠️ 這些 key 都必須跟 app.py 的 key= 對得上，改名要一起改。 */
+/* ⚠️ 這裡的數字是「在 16px flex gap 之上再加減多少」，不是最終間距。
+   桌機：區塊 16+8=24、CTA 16+8=24、組內 16-8=8。 */
+.st-key-auto_ctx,
+.st-key-proj_row,
+.st-key-exp_songs,
+.st-key-btn_generate {{ margin-top: 8px; }}
+.st-key-auto_ctx {{ margin-bottom: -8px; }}
+.st-key-text_ctx,
+.st-key-ctx_image,
+.st-key-projective_a {{ margin-top: -8px; }}
+/* hero 的 markdown container 帶 -16px 負邊界，會把下面的第一個元件吸上來 */
+[data-testid="stMarkdownContainer"]:has(.y2k-form-title) {{ margin-bottom: 0 !important; }}
+h2.y2k-form-title {{ font-size: 2rem !important; }}
 
 /* 標題裡不想被拆散的補充片語（例如括號說明）：整段當一個字，
    要換行就整段換到下一行，不會斷成「…給 AI / 分析）」 */
@@ -424,10 +444,21 @@ br.y2k-mbr {{ display: none; }}
 /* ── 手機版覆寫（必須放最後，同特異性下後定義者勝）───────── */
 @media (max-width: 640px) {{
     /* 區塊之間拉開，讓堆疊後的版面有分組感 */
-    .y2k-gap {{ height: 1.6rem; }}
-    /* 手機上兩欄會堆疊，不需要對齊佔位（留著只會在上傳區上方多一段空白） */
+    /* 手機：區塊 16+16=32、CTA 16+8=24（數字同樣是「再加多少」）*/
+    .st-key-auto_ctx,
+    .st-key-proj_row,
+    .st-key-exp_songs {{ margin-top: 16px !important; }}
+    .st-key-btn_generate {{ margin-top: 8px !important; }}
+    /* 兩欄堆疊後上傳區是獨立欄位，維持 16px（桌機的 -8 是要貼齊隱形標題）*/
+    .st-key-ctx_image {{ margin-top: 0 !important; }}
+    h2.y2k-form-title {{ font-size: 1.7rem !important; }}
+    /* 手機上兩欄會堆疊，不需要對齊佔位。整個 layout wrapper 一起收掉——
+       只把裡面的 vertical block 設 display:none 的話，wrapper 仍是 flex item，
+       上下各吃掉一個 16px gap，量到文字框與上傳區之間多出 32px */
+    [data-testid="stLayoutWrapper"]:has(> .st-key-ctx_label_spacer) {{ display: none !important; }}
     .st-key-ctx_label_spacer {{ display: none !important; }}
-    [data-testid="stExpander"] {{ margin-bottom: 10px !important; }}
+    /* 換一題換行掉到下一行時，貼著題目而不是浮在中間 */
+    .st-key-proj_row [data-testid="stHorizontalBlock"] {{ row-gap: 8px !important; }}
     /* 登入卡片標題在手機上於「方式一：」後換行，避免硬斷在詞中間 */
     br.y2k-mbr {{ display: inline !important; }}
     /* 上傳區的說明文字在手機上佔一整行，收掉只留 Upload 按鈕 */
@@ -467,6 +498,25 @@ def login_hero_html():
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
     margin:0 0 0.3rem 0;line-height:1.2;text-align:center">Spotify Personal Discovery</h1>
 </div>"""
+
+
+def form_hero_html():
+    """主表單頁的標題區：跟登入頁同一套視覺語言（圖示列 + 漸層字），字級小一階。
+
+    用注入 HTML 而不是 st.subheader，是為了避開 Streamlit 插在標題尾端的錨點元素
+    （inline-flex，會把置中標題推偏，手機換行時特別明顯）。
+    """
+    return _tidy(f"""<div style="text-align:center;padding:0.2rem 0 0 0">
+  <div style="display:flex;justify-content:center;align-items:center;gap:14px;margin-bottom:0.5rem">
+    <span style="display:inline-block;width:54px">{SVG_NOTES}</span>
+    <span style="display:inline-block;width:60px">{SVG_CASSETTE}</span>
+    <span style="display:inline-block;width:44px">{SVG_VINYL}</span>
+  </div>
+  <h2 class="y2k-form-title" style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;
+    background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    margin:0;padding:0;line-height:1.25;text-align:center">打造專屬於你的歌單吧</h2>
+</div>""")
 
 
 def _method_card_html(title, description, border_color, icon_svg):

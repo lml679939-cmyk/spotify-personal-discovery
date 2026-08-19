@@ -89,7 +89,10 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 - **SVG 常數**：`SVG_CASSETTE`, `SVG_VINYL`, `SVG_NOTES`, `SVG_BOOMBOX`, `SVG_SPARKLE`
 - **HTML helpers**：
   - `inject_global_css()` — app.py 頂部呼叫，注入全域 CSS
-  - `login_hero_html()` — 登入頁頂部 Hero 區（圖示 + 標題 + 副標題）
+  - `login_hero_html()` — 登入頁頂部 Hero 區（圖示 + 漸層標題）
+  - `form_hero_html()` — 主表單頁 Hero（音符/卡帶/黑膠三個圖示 + 漸層標題「打造專屬於你的歌單吧」）
+    ⚠️ Streamlit 自己的 `.stMarkdown h2` 是 2.25rem，單一 class 選擇器蓋不過去——
+    字級規則要寫成 `h2.y2k-form-title { font-size: … !important }`
   - `login_spotify_card()` / `login_guest_card()` — 登入方式卡片
   - `byok_spotify_steps_html()` — 自建 Spotify App 的視覺引導步驟卡（Gemini 版已移除）
   - `track_card_html()` / `track_list_html()` — 推薦結果卡片
@@ -158,7 +161,22 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - 登入卡片 `_method_card_html()`：`display:flex;flex-direction:column;justify-content:center`
   讓內容在 `min-height:130px` 內垂直置中；標題在全形冒號後插 `<br class="y2k-mbr">`，
   該 `<br>` 桌機 `display:none`、手機 `display:inline`，避免「方式一：直接開始（推薦，免」硬斷。
-- `.y2k-gap` 是區塊間距用的空 div（桌機 0.6rem / 手機 1.6rem），別再寫 inline margin hack。
+- **垂直間距走三級制（8 / 16 / 32）**，`.y2k-gap` 空 div 已移除。
+  過去混用三套機制（Streamlit 垂直區塊的 flex `gap:1rem`、`.y2k-gap` 空 div、
+  `stMarkdownContainer` 的 -16px 負邊界），相加後手機上量到 16/20/26/32/41/49 六種間距。
+  現在只留 flex gap 16px 當基準（＝並列欄位），另外兩級用 widget 的 **key class** 加減：
+
+  | 級距 | 用途 | 作法 |
+  |---|---|---|
+  | 8px | 組內（標題 → 輸入框、題目 → 回答框） | `.st-key-text_ctx` 等 `margin-top:-8px` |
+  | 16px | 並列欄位、expander 之間 | 不動，就是 flex gap |
+  | 32px（手機）/ 24px（桌機） | 區塊之間 | `.st-key-auto_ctx`/`proj_row`/`exp_songs`/`btn_generate` 加 `margin-top` |
+
+  ⚠️ **CSS 裡的數字是「在 16px 之上再加減多少」，不是最終間距**（手機寫 16 → 實際 32）。
+  ⚠️ 這些選擇器都綁在 `app.py` 的 `key=` 上，改 key 名要一起改 CSS。
+  ⚠️ hero 的 `stMarkdownContainer` 帶 -16px 負邊界，會把下面第一個元件吸上來，
+  已用 `[data-testid="stMarkdownContainer"]:has(.y2k-form-title)` 歸零。
+  手機量到：32 / 8 / 8 / 16 / 32 / 8 / 24 / 32 / 16 / 16；桌機：24 / 8 / 8 / 24 / 8 / 24 / 24 / 16。
 
 ### 重要限制
 - **強制亮色模式**，不支援暗色主題
@@ -207,7 +225,9 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 }
 ```
 
-## 主表單版面（標題「一起打造專屬於你的歌單吧」，2026-08 漸進式揭露改版）
+## 主表單版面（Hero「打造專屬於你的歌單吧」，2026-08 漸進式揭露改版）
+
+> 標題已從 `st.subheader()` 改成 `styles.form_hero_html()`（圖示 + 漸層字，與登入頁同一套視覺）。
 
 ```
 第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
@@ -320,6 +340,7 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| （本次） | feat: 主表單 Hero（插圖 + 漸層標題）、垂直間距改三級制 8/16/32（移除 .y2k-gap） |
 | （本次） | fix: 曲目卡理由標籤被當成程式碼區塊（HTML 縮排 + 空的 album_html）、無理由時不畫空標籤；feat: 授權失敗說明改成失敗才顯示、投射問題按鈕貼齊題目、expander 內距加大、登入頁與情境欄文案精簡 |
 | `4e53694` | feat: 手機視覺層級（粗框只給主 CTA）、理由標籤對比修正、定位失敗優雅降級、訪客模式不顯示新藝人比例、maxUploadSize=10 |
 | `7d97353` | feat: 移除活動 pills、兩欄標題字級統一 16px、情境雙框對齊、標題錨點隱藏 |
