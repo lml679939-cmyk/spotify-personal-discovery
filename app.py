@@ -68,11 +68,6 @@ ZODIAC_OPTIONS = [
     "射手座", "摩羯座", "水瓶座", "雙魚座",
 ]
 
-ACTIVITY_OPTIONS = [
-    "讀書", "工作", "通勤", "開車", "運動", "散步",
-    "放鬆", "聚會", "煮飯", "做家事", "睡前", "剛起床",
-]
-
 LANGUAGE_OPTIONS = [
     "華語", "英語", "日語", "韓語", "粵語",
     "西語", "法語", "其他語言",
@@ -358,7 +353,7 @@ else:
         st.stop()
 
 
-st.subheader("設定情境")
+st.subheader("一起打造專屬於你的歌單吧")
 
 st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
 
@@ -366,20 +361,26 @@ st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
 auto_ctx = st.toggle("自動偵測位置與天氣", value=True, key="auto_ctx")
 st.caption("啟用時會透過 [ipwho.is](https://ipwho.is) 取得 IP 地理位置，僅用於判斷天氣與時區，不儲存。")
 
+# 兩欄都用 markdown 當標題（16px，跟投射問題同級——widget label 只有 14px），
+# 並把原本的 label 收起來，讓左右兩個輸入框的頂端對齊。
 col1, col2 = st.columns(2)
 with col1:
+    st.markdown("**你現在在做什麼？**")
     text_ctx = st.text_area(
-        "**你現在在做什麼？**",
+        "你現在在做什麼？",
         placeholder="例如：在咖啡廳讀書、深夜想一個人散步、運動前暖身…",
-        height=98,
+        height=108,
         key="text_ctx",
+        label_visibility="collapsed",
     )
 with col2:
+    st.markdown("**或上傳一張情境圖片**")
     uploaded = st.file_uploader(
-        "上傳情境圖片（選填）",
+        "上傳情境圖片",
         type=["jpg", "jpeg", "png", "webp"],
         help="上傳一張能代表你當下心情或環境的照片，最大 10 MB",
         key="ctx_image",
+        label_visibility="collapsed",
     )
     if uploaded:
         st.image(uploaded, use_container_width=True)
@@ -523,7 +524,6 @@ _mood_sum = _summary(
     [
         f"活力 {st.session_state.get('mood_energy', 5)}",
         f"情緒 {st.session_state.get('mood_valence', 5)}",
-        st.session_state.get("activity_pills") or "",
     ],
     "",
 )
@@ -542,12 +542,6 @@ with st.expander(f"😊 現在的心情　·　{_mood_sum}", expanded=False, key
             min_value=1, max_value=10, value=5, step=1, key="mood_valence",
             help="1 = 低落／煩躁｜5 = 平靜｜10 = 愉悅／興奮",
         )
-    activity = st.pills(
-        "正在做 / 即將做什麼？",
-        options=ACTIVITY_OPTIONS,
-        selection_mode="single",
-        key="activity_pills",
-    )
 
 _traits_sum = _summary(
     [
@@ -647,8 +641,6 @@ if _clicked:
                 energy_label = "低" if mood_energy <= 3 else "高" if mood_energy >= 8 else "中"
                 valence_label = "低落" if mood_valence <= 3 else "愉悅" if mood_valence >= 8 else "平靜"
                 traits_parts.append(f"- 當下心情：活力 {mood_energy}/10（{energy_label}）、情緒 {mood_valence}/10（{valence_label}）")
-                if activity:
-                    traits_parts.append(f"- 正在做：{activity}")
                 if projective_answer.strip():
                     traits_parts.append(
                         f"- 投射問題「{st.session_state['projective_q']}」"

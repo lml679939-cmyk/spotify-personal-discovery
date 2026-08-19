@@ -129,6 +129,9 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 
 ### 重要限制
 - **強制亮色模式**，不支援暗色主題
+- 標題內的文字必須緊貼標籤（`<h1 ...>文字</h1>`），換行縮排會產生尾隨空白讓置中偏移
+- `[data-testid="stHeaderActionElements"]`（Streamlit 標題錨點圖示）已用 CSS 隱藏——它是 inline-flex，
+  會佔行內寬度、把置中標題推偏（手機上 h1 換行時特別明顯）
 - 修改樣式只改 `styles.py` + `config.toml`，不要在 `app.py` 混入 CSS
 - `_method_card_html()` 使用 `min-height:130px`（非 `height`），讓手機上文字換行後能撐高，不截字
 
@@ -165,11 +168,12 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 }
 ```
 
-## 「設定情境」表單版面（2026-08 漸進式揭露改版）
+## 主表單版面（標題「一起打造專屬於你的歌單吧」，2026-08 漸進式揭露改版）
 
 ```
 第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
 第二層（摺疊 expander） ⚙️ 推薦歌曲數 · 🎵 音樂偏好 · 😊 現在的心情 · 🧠 關於你
+（活動情境 pills 已於 2026-08 移除——與「你現在在做什麼？」文字欄重複）
 ```
 
 - **摺疊標題帶即時摘要**（`🎵 音樂偏好　·　日語 · Jazz`）。摘要必須在 expander 建立**之前**算好，
@@ -201,7 +205,6 @@ toolbarMode = "minimal"   # 縮小頂部工具列，移除裝飾線
 | 情境文字 | `text_ctx` | 標籤「**你現在在做什麼？**」，自由描述當下情境 |
 | 自動偵測 | `auto_ctx` | 開啟後讀取 IP/天氣 |
 | 圖片上傳 | `uploaded` | Gemini Vision 分析氛圍 |
-| 活動情境 | `activity` | Pills 單選 |
 | 語言 | `languages` | Pills 多選 |
 | 曲風 | `genres` | Pills 多選 |
 | **指定歌手** | `fav_artists` | 文字輸入，逗號分隔，傳入 prompt 讓 AI 優先推薦 |

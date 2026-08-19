@@ -107,6 +107,11 @@ div[class*="decoration"] {{
     height: 0 !important;
     visibility: hidden !important;
 }}
+/* Streamlit 會在標題尾端插入錨點連結圖示（inline-flex，佔行內寬度），
+   置中標題換行時會被它推偏——這個 app 用不到錨點，直接隱藏 */
+[data-testid="stHeaderActionElements"] {{
+    display: none !important;
+}}
 [data-testid="stHeader"],
 header {{
     display: none !important;
@@ -377,17 +382,13 @@ def login_hero_html():
   <h1 style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:2.4rem;
     background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-    margin:0 0 0.3rem 0;line-height:1.2;text-align:center">
-    Spotify Personal Discovery
-  </h1>
-  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0;text-align:center">
-    {_sparkle('#FFD700', 16)} 根據你的聆聽習慣與當下情境，發現從未聽過的好歌 {_sparkle('#FF69B4', 16)}
-  </p>
+    margin:0 0 0.3rem 0;line-height:1.2;text-align:center">Spotify Personal Discovery</h1>
+  <p style="font-family:'Nunito','Noto Sans TC',sans-serif;color:#2D1B4E;font-size:1.05rem;opacity:0.8;margin:0;text-align:center">{_sparkle('#FFD700', 16)} 根據你的聆聽習慣與當下情境，發現從未聽過的好歌 {_sparkle('#FF69B4', 16)}</p>
 </div>"""
 
 
 def _method_card_html(title, description, border_color, icon_svg):
-    return f"""<div style="border:3px solid #2D1B4E;border-left:6px solid {border_color};
+    return f"""<div style="border:3px solid #2D1B4E;
   border-radius:18px;padding:1.2rem 1.4rem 0.8rem 1.4rem;margin:0.8rem 0;
   min-height:130px;box-sizing:border-box;
   box-shadow:4px 4px 0px {border_color}33;background:white">
