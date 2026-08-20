@@ -630,7 +630,7 @@ def _method_card_html(title, description, border_color, icon_svg):
 
 def login_guest_card():
     return _method_card_html(
-        "方式一：直接開始（推薦，免登入）",
+        "方式一：直接開始",
         "不需要 Spotify 帳號、不用申請任何 API Key，描述當下情境就能拿到 AI 推薦歌單。",
         "#FFD700",
         SVG_BOOMBOX,
