@@ -142,11 +142,14 @@ def test_play_link_spotify_uses_resolved_url():
     assert play_link(t, "Spotify") == ("▶ Spotify", "https://open.spotify.com/track/1")
 
 
-def test_play_link_spotify_miss_becomes_search_button():
-    t = {"name": "Ghost", "artist": "Nobody", "url": "https://open.spotify.com/search/x",
-         "_no_spotify": True}
+def test_spotify_miss_falls_back_to_youtube_even_in_spotify_mode():
+    # 那首歌本來就不在 Spotify 上，給站內搜尋連結點過去必然落空；YouTube 幾乎都找得到
+    t = {"name": "Drive My Car", "artist": "Peach Pit",
+         "url": "https://open.spotify.com/search/x", "_no_spotify": True}
     label, url = play_link(t, "Spotify")
-    assert label == "🔍 搜尋" and "search" in url
+    assert label == "▶ YouTube"
+    assert url.startswith("https://www.youtube.com/results?search_query=")
+    assert "open.spotify.com" not in url
 
 
 def test_play_link_youtube_ignores_spotify_miss():
@@ -596,6 +599,24 @@ def test_guest_tracks_have_no_discovery_flag():
     # 訪客沒有已知清單，「出圈」對他們沒有意義，不該畫標籤
     result, _ = curate_tracks([_t("S", "A")])
     assert "_discovery" not in result[0]
+
+
+def test_unfound_cards_are_sorted_to_the_end():
+    # 搜不到的卡片沒封面、只有搜尋按鈕，排在最前面會讓清單看起來像壞掉的
+    profile = _profile()
+    tracks = [
+        {"name": "Ghost1", "artist": "G1", "_no_spotify": True},
+        _st("Real1", "A", pop=20),
+        {"name": "Ghost2", "artist": "G2", "_no_spotify": True},
+        _st("Real2", "B", pop=20),
+    ]
+    result, _ = curate_tracks(tracks, profile=profile, new_ratio=100, num_songs=4)
+    names = [t["name"] for t in result]
+    assert names[:2] == ["Real1", "Real2"], "能播的要排前面且維持原順序"
+    # 補位卡有比例上限，實際用幾張不固定；要驗的是「一律墊底」這個性質
+    flags = [bool(t.get("_no_spotify")) for t in result]
+    assert flags == sorted(flags), "搜不到的卡片不能夾在能播的中間"
+    assert any(flags), "這個情境本來就該用到補位卡"
 
 
 def test_curate_preserves_llm_order_in_output():

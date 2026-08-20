@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（86）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（23），共 140 tests
+- **測試**：`test_recommend.py`（87）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（30）+ `test_ratelimit.py`（13），共 161 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,8 +23,10 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 140 tests，改任何 .py 都要跑
+python -m pytest -q                     # 161 tests，改任何 .py 都要跑
 ```
+⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
+只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
 
 **照任務找地方**
 
@@ -47,12 +49,23 @@ python -m pytest -q                     # 140 tests，改任何 .py 都要跑
    session_state 整個重生。OAuth state 因此做成無狀態簽章，見「OAuth state」。
 8. 把網址參數（`?error=`）原樣回顯到 `st.warning()` — alert 會渲染 Markdown，
    反引號可跳脫 code span，等於讓人在登入頁插釣魚連結。一律走白名單。
+9. push 後看到 `ImportError: cannot import name 'X' from 'recommend'`，
+   但 GitHub 上明明有 X — **不是程式的錯，是 Streamlit Cloud 沒重啟行程**。
+   見下方「部署：跨模組改動要 Reboot」。本機改被 import 的模組也一樣要重啟。
+10. 拿不到使用者 IP 還照樣打 ipwho.is — 那會定位到**伺服器自己**（顯示 The Dalles），
+    時刻判斷全錯。見「位置偵測」。
 
 **現在還沒做的**（依價值排序）
+- **修好雲端的位置偵測**：目前拿不到使用者 IP，位置與天氣一律不顯示（時間仍正確）。
+  下次部署後看 Manage app 日誌的 `[GEO]` 那行，把正確標頭補進 `_CLIENT_IP_HEADERS`。
+  這是唯一一個「已知壞掉、修法也已經鋪好」的項目，優先做。
 - LLM 只提名歌手、曲目改由 `artist_albums` + `album_tracks` 取得，可根治歌名幻覺
-  （代價：每位歌手約 3 個請求，要先解決共用 Client ID 的速率限制）
+  （實測 12 首有 3 首是曲名與歌手配錯；代價是每位歌手約 3 個請求，
+  要先解決共用 Client ID 的速率限制）
 - 歌單寫入仍是 403（需要 Spotify Quota Extension，個人開發者實際上申請不到）
 - 推薦結果的評分回饋（目前沒有任何學習訊號）
+- `use_container_width` 已被 Streamlit 標記棄用（線上日誌一直在警告），
+  哪天真的移除就會壞，要改成 `width='stretch'` / `width='content'`
 
 ## 關鍵架構
 
@@ -131,6 +144,33 @@ alert **會渲染 Markdown**（雖然不允許 HTML）——payload 裡放一個
 ⚠️ **不要把代碼本身插回訊息裡**，也不要把 `str(e)` 存進 `spotify_auth_error`
 （例外訊息含 Spotify 回傳的內容，同樣會被回顯）。
 
+### 濫用防護（生成節流）
+
+本站是**公開網址**，用的是站方自備的 Gemini Key（所有人共用同一份免費配額）與同一組
+Spotify Client ID（所有人共用同一份速率限制）。一次 15 首的生成 ≈ 1–2 個 Gemini 請求
++ 上百個 Spotify 請求——沒有節流的話，一個人按住生成鍵連點就能把當日配額耗光、
+並讓 Spotify 回 429（`Retry-After` 實測 6 小時），**對所有使用者**。
+
+`ratelimit.py`（純邏輯、時間由參數傳入、可直接 pytest）：
+`COOLDOWN_SEC=20` 冷卻 + `DAILY_MAX=40` 滾動 24 小時窗上限。
+
+- **桶子鍵走 `_rate_key()`**：優先用 `_browser_secret()`（XSRF cookie 的 raw token），
+  它撐得過整頁重載，所以重新整理洗不掉額度（實測：重載後仍顯示「請稍候 6 秒」）。
+  ⚠️ 取不到 cookie 時**不能**退回固定字串——那會把所有這類使用者算成同一個人、
+  互相鎖死。改用 per-session 隨機 id（撐不過重載，但不誤傷別人）。
+- ⚠️ **冷卻中不要把按鈕 `disabled`**：按鈕的文字與 disabled 都是「渲染當下」的快照，
+  Streamlit 沒重跑就不會更新。實測 20 秒早就過了、畫面還停在「請稍候 6 秒」且點不動，
+  使用者會以為壞掉。改成讓他點得下去，由 `consume()` 用當下時間回準確秒數——
+  點擊本身就會觸發重跑。**每日上限相反**：持續 24 小時，disable 不會卡住，擋住比較清楚。
+- ⚠️ **`consume()` 要在「驗完輸入之後」呼叫**：順序反過來的話，什麼都沒填就按下去
+  也會被扣一次，等於用填錯把自己的額度耗光。
+- ⚠️ **清空舊結果（`found` / `context_interp`）要放在確定要生成之後**，不能放在
+  `if _clicked:` 開頭——否則被冷卻擋下時會順手把使用者上一份歌單清掉（實測過這個症狀）。
+- **額度是逐格恢復不是到點清零**：每一次呼叫各自滿 24 小時才回來，所以釋放速率
+  ＝當初的消耗速率。有測試釘住這條，很容易誤以為是「過 24 小時全部恢復」。
+- **這道防線擋的是意外與隨手亂點，不是有決心的攻擊者**：清 cookie／無痕／寫腳本都能繞。
+  真正擋得住的（登入驗證、WAF、IP 信譽）Streamlit Cloud 免費方案都沒有。
+
 ### 模組分層（2026-08 拆分）
 ```
 app.py         → UI、登入/訪客流程、context helpers（定位/天氣）
@@ -168,6 +208,12 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 | `refill_exclude` | 補生成那一輪才有：把第一輪已經產出的 (曲名, 歌手) 傳回去，避免重複提名（僅 `build_prompt()`） |
 
 ### 出圈演算法（novelty，2026-08 Phase 1）
+
+> ✅ **2026-08-20 線上實測有效**：重度聽眾、新藝人 100%，12 首推薦裡使用者只聽過 1 首
+> （Motion Sickness — Phoebe Bridgers）。同一批有 3 首是 LLM 幻覺（曲名與歌手配錯，
+> 例如把 Wolf Alice 的《Don't Delete The Kisses》掛到 Lianne La Havas），
+> 已被搜尋端擋下、改附 YouTube 連結並排到清單最後。
+> 這是整套演算法唯一的真實驗收數據，改動前後都該用同樣方式對照。
 
 **要解決的問題**：登入使用者把「新藝人佔比」拉到 100%，推出來的還是自己聽過的歌。
 根因是雙重流行度偏差——① 舊版「已聽過清單」只抓約 180 首，是使用者真實聽覺記憶的極小
@@ -214,6 +260,15 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
   ② `SPARE_MAX_RATIO = 0.2` 限制搜不到的補位卡比例
   ③ **補生成的觸發條件看「可播放」首數**（`len(found) - spare_used`）——
   用總數判斷的話清單看起來是滿的、補生成永遠不觸發，使用者卻拿到一堆死連結。
+- ⚠️ **`resolution_matches()` 只套用在模糊 fallback，不要也套到嚴格搜尋**（有實測依據）。
+  嚴格搜尋（`track:` + `artist:` 欄位限定）的結果品質夠好；套上驗證反而會誤刪正確結果——
+  實測 15 首裡唯一「通不過驗證」的是「風になる / つじあやの」被解析成
+  「風になる / Tsuji Ayano」，**同一首歌同一位歌手**，只是日文名 vs 羅馬拼音。
+  `_loose_match()` 以詞為單位比對，跨文字系統（日文/韓文 vs 羅馬拼音）本來就沒有共同詞。
+  這個盲點在 fallback 路徑會讓正確曲目被丟掉變成搜尋連結卡——代價是少一首可播的歌，
+  不是推錯歌，目前接受。要修的話得做音譯，成本高。
+- **解析率實測**（配額正常時，訪客模式一般推薦）：15 首中 14–15 首解析成功、耗時 5 秒。
+  對照組：登入模式加強冷門指令後只有約 40%——差距全部來自幻覺，不是搜尋能力。
 - **未來方向**：`artist_top_tracks` 已 403，但 `artist_albums` + `album_tracks` 還能用。
   改成「LLM 只提名歌手 → 曲目由 Spotify 提供」可以徹底消滅這類幻覺
   （代價是每位歌手約 3 個請求，要先解決上面的速率限制問題）。
@@ -446,7 +501,13 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   每天總共才 10,000 units，等於全站一天約 100 次搜尋——解析一份歌單就要 24 次。
   建立歌單（`playlists.insert` 50 + `playlistItems.insert` 50/首）約 800 units/份，
   全站一天 12 份。而且未通過 Google 驗證的 app 同樣有 100 人上限，沒有繞過授權問題。
-- 選 YouTube 時，Spotify 搜不到的曲目不再顯示「🔍 搜尋」——換平台後通常真的播得到。
+- ⚠️ **選 Spotify 但那首歌在 Spotify 找不到時，一律退回 YouTube 連結**（`_no_spotify`）。
+  以前給的是 Spotify 站內搜尋網址，但那首歌本來就不在 Spotify 上，點過去必然落空。
+  按鈕文字跟著變「▶ YouTube」，順便讓使用者一眼看出哪幾首不在 Spotify。
+  → 所以 `🔍 搜尋` 這個標籤已經完全不存在了，看到它就是舊版。
+- **搜不到的卡片一律排到清單最後**（`curate_tracks` 的最終排序鍵是
+  `(bool(_no_spotify), 原始索引)`）。實測 15 首裡 3 首搜不到剛好都被 LLM 排在最前面，
+  沒有封面、只有搜尋按鈕，第一眼看起來像整個功能壞掉。
 
 ### 搜尋結果快取
 - `search_track()` 的結果跨使用者快取在 `_SEARCH_CACHE`（key 是 `_track_key()`，
@@ -514,6 +575,38 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - 偏移是在 `_fetch_geo_weather()` 裡寫進 session_state 的，所以 `fetch_auto_context()`
   必須**先查地理位置再取時間**，順序反過來第一次會用到預設值。
 
+### 位置偵測：拿不到使用者 IP 就別查（2026-08 修）
+
+**症狀**：使用者在台北，畫面卻顯示「📍 08:27（清晨）｜The Dalles, United States｜晴朗 22.2°C」。
+The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器自己**。時刻判斷跟著全錯，
+「清晨」的情境被送進 prompt，推薦整個歪掉。
+
+**根因**：`_client_ip()` 取不到使用者 IP 時回空字串，而舊的 `_geo_weather_blocking()`
+會照樣打**不帶 IP** 的 `https://ipwho.is`——那個端點的語意是「定位發出請求的這台機器」。
+本機開發時剛好就是開發者自己的 IP，所以一直看起來是對的，只有雲端會露餡。
+
+**兩層修法**：
+1. `_geo_weather_blocking()` 在 `client_ip` 為空時**直接 return，完全不發請求**。
+   時區退回 `DEFAULT_TZ_OFFSET`（+8）——沒有位置至少時間是對的，比顯示錯誤位置好。
+2. `_client_ip()` 依序試 `_CLIENT_IP_HEADERS`（X-Forwarded-For、X-Real-Ip、
+   Cf-Connecting-Ip…），並用 `_first_global_ip()` 掃**整條代理鏈**取第一個公開 IP
+   （不能只取最左邊，那有可能是內網位址）。
+3. 一個都挑不到時印 `[GEO] 找不到 client IP；可用標頭：[...]` 到 stderr。
+   ⚠️ **只印標頭名稱不印值**——標頭內容含 cookie / token，不能進 log。
+
+**本機開發是唯一例外**：`_is_local_dev()` 用 `Host` 標頭判斷（本機 `127.0.0.1:8501`、
+雲端 `spotify-lml.streamlit.app`）。本機直連時「伺服器」就是開發者自己的機器，
+定位自己反而是對的，所以 `allow_self_lookup=True` 放行不帶 IP 的查詢——否則本機開發會
+完全看不到位置與天氣。
+⚠️ 去 port 不能無腦 `split(":")[0]`：IPv6 本身含冒號，`::1` 會被切成空字串（有測試釘住）。
+⚠️ `_client_ip()` / `_is_local_dev()` 都碰 `st.context`，**必須在主執行緒算好再傳進背景執行緒**。
+
+**待辦**：Streamlit Cloud 實際送哪個標頭沒有文件。實測本機只有
+`['Accept-Encoding','Accept-Language','Cache-Control','Connection','Cookie','Host','Origin',
+'Pragma','Sec-Websocket-*','Upgrade','User-Agent']`（直連本來就沒有 proxy 標頭）。
+下次部署後到 Manage app 日誌看那行 `[GEO]`，把雲端實際送的標頭名補進 `_CLIENT_IP_HEADERS`
+就能真正修好定位。在那之前雲端使用者看不到位置與天氣（時間正確），是可接受的降級。
+
 ### Widget Key 衝突
 - `_render_api_key_settings()` 在登入頁和 sidebar 共用，因 `st.stop()` 機制兩者不同時渲染
 - Streamlit widget key 以 `custom_` 前綴存在 session_state：`custom_SPOTIFY_CLIENT_ID` 等
@@ -535,6 +628,18 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 ## 主表單版面（Hero「想成為你專屬的歌單」，2026-08 漸進式揭露改版）
 
 > 標題已從 `st.subheader()` 改成 `styles.form_hero_html()`（圖示 + 漸層字，與登入頁同一套視覺）。
+
+**Hero 尺寸（2026-08 放大）**：與登入頁 hero **同級**，不要再做「小一階」——兩個 hero
+不會同時出現（一個在登入頁、一個在表單頁），各自都是該頁主標題，做小反而沒有標題感。
+- 圖示 `68 / 76 / 56` px（三個 SVG 長寬比不同，是逐個微調的，別統一成同一個數字）
+- 標題 `h2.y2k-form-title` 桌機 2.4rem、手機 2rem
+  ⚠️ Streamlit 的 `.stMarkdown h2` 是 2.25rem，**單一 class 選擇器蓋不過去**，
+  一定要寫成 `h2.y2k-form-title { … !important }`
+- 手機圖示用 `.y2k-form-icons > span { transform: scale(0.82) }` 縮一階
+  ⚠️ **選擇器必須限定在圖示列**。寫成 `.y2k-form-hero span` 會連標題文字一起縮小——
+  Streamlit 會在 `<h2>` 裡再包一層 span，量到 `transform: matrix(0.82,…)` 就是踩到這個。
+- 量測值：桌機圖示 68/76/56、標題 38.4px、hero 高 117px；
+  手機圖示 56/62/46、標題 32px 單行、hero 高 109px；兩者皆無水平溢出。
 
 ```
 第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
@@ -609,15 +714,19 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 ```powershell
 streamlit run app.py
 ```
+⚠️ **改了 `styles.py` / `recommend.py` / `spotify_api.py` 要重啟伺服器**，
+存檔後重新整理瀏覽器**沒有用**——Streamlit 只重跑 `app.py`，`sys.modules` 裡的模組還是舊的
+（跟雲端要 Reboot 是同一個機制，見「跨模組改動要手動 Reboot」）。
+症狀很容易誤判：CSS 沒變、新加的 class 在 DOM 裡找不到，看起來像自己改錯了。
 
 ### 語法檢查
 ```powershell
 python -c "import ast; [ast.parse(open(f, encoding='utf-8').read()) for f in ('app.py','recommend.py','spotify_api.py','styles.py')]; print('OK')"
 ```
 
-### 跑單元測試（改 recommend.py 後必跑）
+### 跑單元測試（改任何 .py 都要跑）
 ```powershell
-python -m pytest test_recommend.py -q
+python -m pytest -q
 ```
 
 ### 推到 Streamlit Cloud
@@ -628,6 +737,27 @@ git push origin main
 ```
 Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
+#### ⚠️ 跨模組改動要手動 Reboot（2026-08 踩過）
+Cloud 偵測到 push 後做的是 **`git pull` + 重跑腳本**（日誌顯示 `🔄 Updated app!`），
+**不會重啟 Python 行程**。`sys.modules` 裡的 `recommend` / `spotify_api` / `styles`
+仍是舊版 module 物件，於是新的 `app.py` 執行 `from recommend import 新名稱` 就會炸：
+
+```
+ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
+```
+
+——GitHub 上明明有那個名稱，本機也 import 得到，只有雲端壞。**這不是程式碼問題**。
+
+- **判斷方式**：錯誤是 `cannot import name X from Y`（不是 `No module named`），
+  而 `git show origin/main:Y.py` 裡確實有 X → 就是這個狀況。
+- **修法**：share.streamlit.io → 該 app 的 **⋮ 選單 → Reboot**（重啟行程、重新 import）。
+  再 push 一次沒有用，因為問題不在檔案。
+- **只改 `app.py`** 時不會遇到（腳本本來就每次重跑）；**改了被 import 的模組**就要 Reboot。
+- ⚠️ **若 Reboot 後錯誤完全相同**，那就不是行程快取，而是伺服器上的檔案真的沒更新
+  （pull 靜默失敗）。判別法：`git show origin/main:recommend.py | grep '^OVERGEN_FACTOR'`
+  ——遠端有、雲端沒有＝檔案沒同步。這時要用 Manage app 看 pull 那段有沒有錯誤，
+  或在 Settings 重新指定 branch 觸發完整 re-clone。
+
 ## 檔案結構
 
 | 檔案 | 用途 | 常改？ |
@@ -637,6 +767,7 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `test_recommend.py` | recommend.py 單元測試（pytest） | 改 recommend.py 時同步 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
+| `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
 | `share_card.py` | IG Story 圖卡生成（Pillow） | 偶爾 |
 | `.streamlit/config.toml` | Streamlit 主題 + toolbarMode | 偶爾 |
 | `requirements.txt` | pip 依賴 | 偶爾 |
@@ -649,6 +780,7 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| （工作區，尚未 commit） | fix(security): 依賴改精確釘版（Pillow 12.3.0 補 13 個 CVE、python-dotenv 1.2.3）、新增生成節流 `ratelimit.py`；順帶修好被擋下的點擊會清掉既有歌單 |
 | （工作區，尚未 commit） | fix(security): `X-Forwarded-For` 改用 `ipaddress` 驗證（只收 is_global）；BYOK 步驟卡的 URI 移出 onclick 改走 `data-` 屬性；`.claude/` 從 git 索引移除。BYOK 步驟卡拆成兩半、中間改夾原生 `st.code()`——那顆自製複製鈕一直是死的（Streamlit 會濾掉 onclick），順帶讓 redirect_uri 完全不經過 unsafe_allow_html |
 | （工作區，尚未 commit） | fix(security): OAuth 補上綁定瀏覽器的 `state`（防授權碼注入／login CSRF）；`?error=` 改走白名單（原本可在登入頁警告框注入釣魚連結與追蹤圖片，已實測確認） |
 | （工作區，尚未 commit） | feat: 出圈演算法 Phase 2——雙通道 prompt（去錨定／相鄰場景／溫和校準）、排除清單瘦身尾置、補生成迴圈；fix: Spotify 拿掉 popularity 改用 LLM 自評 fame、補位卡上限、spotipy 重試關閉（429 的 Retry-After 是 6 小時，會凍住整頁）、提示訊息改走 session_state |

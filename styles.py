@@ -343,7 +343,9 @@ br.y2k-mbr {{ display: none; }}
 .st-key-projective_a {{ margin-top: -8px; }}
 /* hero 的 markdown container 帶 -16px 負邊界，會把下面的第一個元件吸上來 */
 [data-testid="stMarkdownContainer"]:has(.y2k-form-title) {{ margin-bottom: 0 !important; }}
-h2.y2k-form-title {{ font-size: 2rem !important; }}
+/* ⚠️ Streamlit 自己的 .stMarkdown h2 是 2.25rem，單一 class 選擇器蓋不過去——
+   一定要寫成 h2.y2k-form-title 並加 !important */
+h2.y2k-form-title {{ font-size: 2.4rem !important; }}
 
 /* 標題裡不想被拆散的補充片語（例如括號說明）：整段當一個字，
    要換行就整段換到下一行，不會斷成「…給 AI / 分析）」 */
@@ -502,7 +504,11 @@ h2.y2k-form-title {{ font-size: 2rem !important; }}
     .st-key-btn_generate {{ margin-top: 8px !important; }}
     /* 兩欄堆疊後上傳區是獨立欄位，維持 16px（桌機的 -8 是要貼齊隱形標題）*/
     .st-key-ctx_image {{ margin-top: 0 !important; }}
-    h2.y2k-form-title {{ font-size: 1.7rem !important; }}
+    h2.y2k-form-title {{ font-size: 2rem !important; }}
+    /* 圖示跟著縮一階，否則 375px 寬下三個圖示會把標題擠掉。
+       ⚠️ 選擇器一定要限定在圖示列——Streamlit 會在 <h2> 裡再包一層 span，
+       寫成 .y2k-form-hero span 會連標題文字一起被縮小。 */
+    .y2k-form-icons > span {{ transform: scale(0.82); }}
     /* 手機上兩欄會堆疊，不需要對齊佔位。整個 layout wrapper 一起收掉——
        只把裡面的 vertical block 設 display:none 的話，wrapper 仍是 flex item，
        上下各吃掉一個 16px gap，量到文字框與上傳區之間多出 32px */
@@ -577,16 +583,20 @@ def login_hero_html():
 
 
 def form_hero_html():
-    """主表單頁的標題區：跟登入頁同一套視覺語言（圖示列 + 漸層字），字級小一階。
+    """主表單頁的標題區：跟登入頁同一套視覺語言（圖示列 + 漸層字）。
+
+    尺寸與登入頁的 hero 同級——這兩個 hero 不會同時出現（一個在登入頁、一個在表單頁），
+    各自都是該頁的主標題，做小一階反而沒有標題感。圖示寬度是逐個微調的
+    （三個 SVG 的長寬比不同），不要統一成同一個數字。
 
     用注入 HTML 而不是 st.subheader，是為了避開 Streamlit 插在標題尾端的錨點元素
     （inline-flex，會把置中標題推偏，手機換行時特別明顯）。
     """
-    return _tidy(f"""<div style="text-align:center;padding:0.2rem 0 0 0">
-  <div style="display:flex;justify-content:center;align-items:center;gap:14px;margin-bottom:0.5rem">
-    <span style="display:inline-block;width:54px">{SVG_NOTES}</span>
-    <span style="display:inline-block;width:60px">{SVG_CASSETTE}</span>
-    <span style="display:inline-block;width:44px">{SVG_VINYL}</span>
+    return _tidy(f"""<div class="y2k-form-hero" style="text-align:center;padding:0.2rem 0 0 0">
+  <div class="y2k-form-icons" style="display:flex;justify-content:center;align-items:center;gap:16px;margin-bottom:0.6rem">
+    <span style="display:inline-block;width:68px">{SVG_NOTES}</span>
+    <span style="display:inline-block;width:76px">{SVG_CASSETTE}</span>
+    <span style="display:inline-block;width:56px">{SVG_VINYL}</span>
   </div>
   <h2 class="y2k-form-title" style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;
     background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);

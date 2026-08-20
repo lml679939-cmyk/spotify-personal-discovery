@@ -39,7 +39,9 @@ Developer Dashboard → User Management 逐一加入 email。不在名單內但�
 | IG Story 分享圖卡 | ✅ 完成 | `share_card.py` |
 | BYOK（自備 Spotify App）+ 訪客模式 | ✅ 完成 | `app.py` |
 | 出圈演算法（避免推到已經聽過的歌） | ✅ 完成 | `recommend.py` |
-| 單元測試（93 tests） | ✅ 完成 | `test_recommend.py`、`test_spotify_api.py` |
+| Spotify / YouTube 播放平台切換 | ✅ 完成 | `recommend.play_link()` |
+| 位置與天氣自動偵測 | ⚠️ 雲端拿不到使用者 IP，暫不顯示（時間正確） | `app.py` |
+| 單元測試（155 tests） | ✅ 完成 | `test_*.py` 共 5 個檔案 |
 
 主要使用方式是 **`app.py` Streamlit Web UI**，CLI 檔案保留作為單元測試與功能驗證用。
 
@@ -156,8 +158,11 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ├── recommend.py                 ← prompt 組裝 / Gemini 呼叫 / 驗證鏈（純邏輯，可單獨測試）
 ├── spotify_api.py               ← OAuth / 搜尋 / 歌單 / 跨 session 歷史
 ├── styles.py                    ← Y2K 主題 CSS、SVG 插圖、HTML helpers
-├── test_recommend.py            ← recommend.py 的 pytest（86 tests，不依賴 streamlit）
-├── test_spotify_api.py          ← spotify_api.py 的 pytest（7 tests：搜尋快取、重試設定）
+├── test_recommend.py            ← recommend.py 的 pytest（87 tests，不依賴 streamlit）
+├── test_spotify_api.py          ← spotify_api.py 的 pytest（22：搜尋快取、重試、OAuth state）
+├── test_styles.py               ← styles.py 的 pytest（9：HTML 產出與注入防護）
+├── test_app.py                  ← app.py 的 pytest（24：client IP、錯誤白名單）
+├── test_ratelimit.py            ← ratelimit.py 的 pytest（13）
 ├── share_card.py                ← IG Story 分享圖卡生成
 ├── CLAUDE.md                    ← 交接文件：架構、踩過的坑、量測數據
 ├── m1_top_tracks.py             ← CLI：驗證 OAuth + 讀取 Top Tracks

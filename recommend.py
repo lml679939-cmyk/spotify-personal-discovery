@@ -485,13 +485,13 @@ def youtube_search_url(title: str, artist: str) -> str:
 def play_link(track: dict, platform: str = "Spotify") -> tuple[str, str]:
     """回傳 (按鈕文字, 連結)。
 
-    選 YouTube 時一律走搜尋網址——Spotify 搜不到的曲目本來就只有一個死連結，
-    換成 YouTube 通常反而真的播得到；沒有 Spotify 帳號的人也終於有東西可以聽。
+    ⚠️ **選 Spotify 但這首在 Spotify 找不到時，一律退回 YouTube**。
+    以前是給一個 Spotify 站內搜尋網址，但那首歌本來就不在 Spotify 上，點過去必然落空；
+    YouTube 幾乎都找得到（涵蓋更廣，也收得到 LLM 把曲名與歌手配錯時的正確版本）。
+    按鈕文字會跟著變成「▶ YouTube」，順便讓使用者一眼看出哪幾首不在 Spotify。
     """
-    if platform == "YouTube":
+    if platform == "YouTube" or track.get("_no_spotify"):
         return "▶ YouTube", youtube_search_url(track.get("name", ""), track.get("artist", ""))
-    if track.get("_no_spotify"):
-        return "🔍 搜尋", track.get("url", "")
     return "▶ Spotify", track.get("url", "")
 
 
@@ -814,7 +814,10 @@ def curate_tracks(
     stats["spare_used"] = _take(spare, _spare_quota)
     stats["pop_blocked"] = len(blocked)
 
-    picked.sort(key=lambda it: it[0])   # 呈現時回到 LLM 的原始順序，新舊交錯
+    # 呈現順序：能播的照 LLM 原始順序（新舊交錯），搜不到的一律墊底。
+    # ⚠️ 不要只照原始索引排——搜不到的卡片沒有封面、只有搜尋按鈕，夾在最前面會讓
+    # 整份清單第一眼看起來像壞掉的（實測 15 首裡 3 首搜不到剛好都排在最前面）。
+    picked.sort(key=lambda it: (bool(it[1].get("_no_spotify")), it[0]))
     result = [t for _, t in picked]
 
     # 標記哪幾首是「出圈」的，讓 UI 畫得出標籤。附解釋能提高使用者對陌生推薦的

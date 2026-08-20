@@ -98,5 +98,48 @@ def test_only_validated_ip_can_reach_the_geo_url(monkeypatch):
     monkeypatch.setattr(app.requests, "get", _fake_get)
 
     app._geo_weather_blocking("8.8.8.8")
-    app._geo_weather_blocking("")           # 驗不過時傳進來的就是空字串
-    assert seen == ["https://ipwho.is/8.8.8.8", "https://ipwho.is"]
+    assert seen == ["https://ipwho.is/8.8.8.8"]
+
+
+def test_no_client_ip_means_no_geo_request_at_all(monkeypatch):
+    """驗不過 / 拿不到 IP 時**完全不發請求**。
+
+    以前會打不帶 IP 的 `https://ipwho.is`，那等於叫對方定位「發請求的這台機器」——
+    也就是雲端伺服器。實測使用者在台北卻顯示「The Dalles, United States｜08:27（清晨）」，
+    時刻判斷跟著全錯。回退到 DEFAULT_TZ_OFFSET 至少時間是對的。
+    """
+    seen = []
+    monkeypatch.setattr(app.requests, "get", lambda url, *a, **kw: seen.append(url))
+
+    value, tz = app._geo_weather_blocking("")
+    assert seen == [], "沒有可用的使用者 IP 就不該發任何請求"
+    assert value == ""
+    assert tz == app.DEFAULT_TZ_OFFSET
+
+
+def test_local_dev_may_still_geolocate_itself(monkeypatch):
+    """本機開發是唯一例外：伺服器就是開發者自己的機器，定位自己才是對的。
+
+    不開這個例外的話，本機開發會完全看不到位置與天氣（雲端才需要擋）。
+    """
+    seen = []
+
+    class _Resp:
+        ok = False
+        headers = {}
+
+    monkeypatch.setattr(app.requests, "get", lambda url, *a, **kw: (seen.append(url), _Resp())[1])
+    app._geo_weather_blocking("", allow_self_lookup=True)
+    assert seen == ["https://ipwho.is"], "本機開發要允許不帶 IP 的自我定位"
+
+
+@pytest.mark.parametrize("host,expected", [
+    ("127.0.0.1:8501", True),
+    ("localhost:8599", True),
+    ("::1", True),
+    ("spotify-lml.streamlit.app", False),
+    ("", False),
+])
+def test_is_local_dev_reads_host_header(monkeypatch, host, expected):
+    monkeypatch.setattr(app.st, "context", _FakeContext({"Host": host}))
+    assert app._is_local_dev() is expected

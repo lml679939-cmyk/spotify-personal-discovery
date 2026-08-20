@@ -5,6 +5,7 @@ Spotify Personal Discovery - Web UI
 import io
 import ipaddress
 import random
+import secrets
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +15,7 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 import spotipy
+import ratelimit
 import styles
 
 import share_card
@@ -29,6 +31,7 @@ from recommend import (
     play_link,
 )
 from spotify_api import (
+    _browser_secret,
     _get_credential,
     _get_env,
     _get_search_token,
@@ -49,6 +52,23 @@ from spotify_api import (
 )
 
 load_dotenv()
+
+
+def _rate_key() -> str:
+    """生成節流的桶子鍵：盡量對應「這個瀏覽器」。
+
+    優先用 _browser_secret()（取自 Streamlit 的 XSRF cookie）——它撐得過整頁重新載入，
+    所以重新整理不會把額度洗掉。
+    ⚠️ 取不到 cookie 時**不能**退回固定字串，那會把所有這類使用者算成同一個人、
+    互相把對方鎖死。改用 per-session 隨機 id：撐不過重載（節流會被繞過），
+    但至少不會誤傷別人。
+    """
+    secret = _browser_secret()
+    if secret:
+        return f"b:{secret}"
+    if "rl_session_id" not in st.session_state:
+        st.session_state["rl_session_id"] = secrets.token_hex(8)
+    return f"s:{st.session_state['rl_session_id']}"
 
 
 def _gemini_key() -> str | None:
@@ -322,36 +342,101 @@ def get_time_of_day(hour: int) -> str:
     return "深夜"
 
 
+# 反向代理放使用者真實 IP 的標頭，依可信度排序。X-Forwarded-For 是標準做法，
+# 其餘是各家 CDN/代理的慣例——Streamlit Cloud 實際送哪一個沒有文件，所以全試一輪。
+_CLIENT_IP_HEADERS = (
+    "X-Forwarded-For",      # 標準：client, proxy1, proxy2 …
+    "X-Real-Ip",
+    "Cf-Connecting-Ip",     # Cloudflare
+    "True-Client-Ip",
+    "X-Client-Ip",
+)
+
+
+def _first_global_ip(raw: str) -> str:
+    """從 `a, b, c` 這種標頭值裡挑出第一個「公開」IP。
+
+    ⚠️ 不能只取最左邊那一段：代理鏈最左邊有可能是內網位址（實測 Streamlit Cloud
+    定位會落在伺服器所在地 The Dalles，就是因為整條鏈都沒挑出可用的公開 IP）。
+    is_global 一個判斷就涵蓋 private / loopback / link-local / reserved / multicast，
+    連 RFC 文件保留範圍（203.0.113.x、2001:db8::）也算在內。
+    """
+    for part in raw.split(","):
+        try:
+            ip = ipaddress.ip_address(part.strip())
+        except ValueError:
+            continue
+        if ip.is_global:
+            return str(ip)
+    return ""
+
+
+def _is_local_dev() -> bool:
+    """瀏覽器是否直連本機的 streamlit（沒有任何反向代理）。
+
+    這種情況下「伺服器」就是開發者自己的機器，讓 ipwho.is 定位「自己」反而是對的；
+    雲端則相反——那會定位到機房（The Dalles）。用 Host 區分：
+    本機是 `127.0.0.1:8501` 之類，雲端是 `spotify-lml.streamlit.app`。
+    """
+    try:
+        host = (st.context.headers.get("Host") or "").strip().lower()
+    except Exception:
+        return False
+    # ⚠️ 去 port 不能無腦 split(":")——IPv6 位址本身就有冒號（`::1` 會被切成空字串）。
+    # 三種形式：`[::1]:8501`（IPv6 帶 port）、`127.0.0.1:8501`、`::1`（裸 IPv6）
+    if host.startswith("["):
+        host = host[1:].split("]")[0]
+    elif host.count(":") == 1:
+        host = host.split(":")[0]
+    return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+
+
 def _client_ip() -> str:
     """使用者真實 IP（雲端部署時伺服器自己的 IP 會是美國）。必須在主執行緒讀。
 
-    ⚠️ X-Forwarded-For 最左邊那一段是**使用者自己送的**、可任意偽造，而這個值會被
-    直接拼進 `https://ipwho.is/{ip}` 的路徑。host 改不掉（不是 SSRF），但沒驗證的話
-    任意字串都會被送進網址——所以一律用 ipaddress 解析過才採用，解不出來就當作查無。
-    偽造的後果僅止於「使用者謊報自己的地點/時區」，那只影響推薦情境，不是安全決策。
+    ⚠️ 這些標頭是**使用者自己送的**、可任意偽造，而值會被拼進 `https://ipwho.is/{ip}`
+    的路徑。host 改不掉（不是 SSRF），但沒驗證的話任意字串都會被送進網址——所以一律
+    用 ipaddress 解析並確認是公開位址才採用。偽造的後果僅止於「使用者謊報自己的
+    地點/時區」，只影響推薦情境，不是安全決策。
     """
     try:
-        forwarded = st.context.headers.get("X-Forwarded-For", "")
+        headers = st.context.headers
     except Exception:
         return ""
-    if not forwarded:
+    if not headers:
         return ""
-    candidate = forwarded.split(",")[0].strip()
-    try:
-        ip = ipaddress.ip_address(candidate)
-    except ValueError:
-        return ""
-    # is_global 一個判斷就涵蓋 private / loopback / link-local / reserved / multicast，
-    # 連 RFC 文件保留範圍（203.0.113.x、2001:db8::）也算在內。這些查不到有意義的
-    # 地理資訊（本機開發時就是這種），直接省下一個請求。
-    return str(ip) if ip.is_global else ""
+    for name in _CLIENT_IP_HEADERS:
+        ip = _first_global_ip(headers.get(name, "") or "")
+        if ip:
+            return ip
+    # 一個都沒挑到——ipwho.is 會改成定位「伺服器自己」，使用者就會看到 The Dalles
+    # 之類的機房所在地。把實際收到的標頭名稱印出來，下次部署就知道該加哪一個。
+    # ⚠️ 只印名稱不印值：標頭內容含 cookie / token，不能進 log。
+    # 本機直連本來就不會有 proxy 標頭，不必每次都吵。
+    if not _is_local_dev():
+        try:
+            print(f"[GEO] 找不到 client IP；可用標頭：{sorted(headers.keys())}",
+                  file=sys.stderr, flush=True)
+        except Exception:
+            pass
+    return ""
 
 
-def _geo_weather_blocking(client_ip: str) -> tuple[str, int]:
+def _geo_weather_blocking(client_ip: str, allow_self_lookup: bool = False) -> tuple[str, int]:
     """IP 定位 + 天氣的純網路查詢，回傳 (顯示字串, 時區偏移秒數)。
 
     ⚠️ 不碰 st.session_state——這個函式會在背景執行緒跑（worker thread 不能碰 session_state）。
     """
+    # ⚠️ 查不到使用者 IP 時**直接放棄**，不要打沒帶 IP 的 ipwho.is——那會定位到
+    # 「發出請求的機器」，也就是雲端伺服器自己。實測使用者在台北卻顯示
+    # 「The Dalles, United States｜08:27（清晨）」（Google 機房所在地 + 當地時間），
+    # 比不顯示位置更糟：時刻判斷全錯，推薦情境跟著錯。
+    # 回退到 DEFAULT_TZ_OFFSET（+8）至少時間是對的。
+    # 例外：本機開發時「伺服器」就是開發者自己的機器，定位自己才是對的
+    # （allow_self_lookup 由主執行緒的 _is_local_dev() 決定後傳進來）。
+    if not client_ip and not allow_self_lookup:
+        return "", DEFAULT_TZ_OFFSET
+
     ip_segment = f"/{client_ip}" if client_ip else ""
 
     # ipwho.is：免費、HTTPS、無需 API key。
@@ -397,7 +482,10 @@ def start_geo_prefetch() -> None:
     """
     if "geo_weather_cache" in st.session_state or "geo_future" in st.session_state:
         return
-    st.session_state["geo_future"] = _GEO_POOL.submit(_geo_weather_blocking, _client_ip())
+    # ⚠️ _client_ip() / _is_local_dev() 都碰 st.context，必須在主執行緒先算好再傳進去
+    st.session_state["geo_future"] = _GEO_POOL.submit(
+        _geo_weather_blocking, _client_ip(), _is_local_dev()
+    )
 
 
 def _fetch_geo_weather() -> str:
@@ -412,7 +500,7 @@ def _fetch_geo_weather() -> str:
         if future is not None:
             value, tz_offset = future.result(timeout=12)   # 背景已經在跑，通常直接拿到
         else:
-            value, tz_offset = _geo_weather_blocking(_client_ip())
+            value, tz_offset = _geo_weather_blocking(_client_ip(), _is_local_dev())
     except Exception:
         value, tz_offset = "", DEFAULT_TZ_OFFSET
 
@@ -710,20 +798,54 @@ with st.expander(f"🧠 關於你　·　{_traits_sum}", expanded=False, key="ex
         zodiac = st.selectbox("星座", ZODIAC_OPTIONS, key="zodiac")
 
 # ══ 把生成按鈕填回上方預留的位置 ═════════════════════════
+# 節流狀態要在建立按鈕「之前」算好——按鈕的 disabled 參數當下就要定
+_rl_ok, _rl_wait, _rl_left = ratelimit.status(_rate_key(), time.time())
+_rl_exhausted = not _rl_ok and not _rl_wait
+
+# ⚠️ 冷卻中**不要**把按鈕 disable：按鈕的文字與 disabled 都是「渲染當下」的快照，
+# Streamlit 沒有重跑就不會更新。實測 20 秒冷卻早就過了，畫面還停在「請稍候 6 秒」
+# 而且點不動——使用者會以為壞了。改成讓他點得下去，由 consume() 用當下的時間
+# 回一個準確的秒數；點擊本身就會觸發重跑，狀態永遠是新的。
+# 每日上限則相反：它持續 24 小時，disable 不會有卡住的問題，而且明確擋住比較清楚。
 _clicked = generate_slot.button(
-    "✨ 生成推薦歌單", type="primary", use_container_width=True, key="btn_generate"
+    "🚦 今日次數已用完" if _rl_exhausted else "✨ 生成推薦歌單",
+    type="primary",
+    use_container_width=True,
+    key="btn_generate",
+    disabled=_rl_exhausted,
 )
+if _rl_exhausted:
+    generate_slot.caption(
+        "🚦 本站的 AI 由站方自備、所有人共用同一份免費配額，因此設有每日上限。"
+        "額度會在 24 小時內逐步恢復。"
+    )
+elif _rl_wait:
+    generate_slot.caption(f"⏳ 剛生成過，約 {_rl_wait} 秒後可以再按一次。")
+elif _rl_left <= 5:
+    generate_slot.caption(f"🚦 今日還可以生成 {_rl_left} 次。")
 if _total_hist_n > 0:
     generate_slot.caption(f"🧠 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
 
 if _clicked:
-    # 清空舊結果
-    for k in ("found", "context_interp"):
-        st.session_state.pop(k, None)
-
+    # ⚠️ 先驗輸入、後扣額度：順序反過來的話，使用者什麼都沒填就按下去也會被扣一次，
+    # 等於用「填錯」把自己的每日額度耗光。
     if not auto_ctx and not text_ctx.strip() and not uploaded:
         st.error("請至少啟用自動偵測、輸入文字，或上傳圖片其中一個。")
+    # ⚠️ 真的要送出之前再扣一次額度，不能只信上面的 status()：那是唯讀的，
+    # 跟這裡之間使用者可能已經多點了幾下（按鈕的 disabled 只是前端狀態）
+    elif not (_rl := ratelimit.consume(_rate_key(), time.time()))[0]:
+        st.warning(
+            f"⏳ 生成太頻繁了，請等 {_rl[1]} 秒再試。" if _rl[1]
+            else "🚦 今日的生成次數已用完，額度會在 24 小時內逐步恢復。",
+            icon="🚦",
+        )
     else:
+        # ⚠️ 清空舊結果一定要放在這裡（確定要生成之後），不能放在 if _clicked 的開頭：
+        # 那樣的話「輸入沒填」或「被冷卻擋下」也會把使用者上一份歌單清掉——
+        # 手滑多點一下就白白失去剛生成好的結果。實測確認過這個症狀。
+        for k in ("found", "context_interp"):
+            st.session_state.pop(k, None)
+
         context_parts = []
 
         # 進度顯示在生成按鈕正下方（跟著 container 走，不會掉到頁面底部）

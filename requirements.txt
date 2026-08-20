@@ -1,6 +1,51 @@
-streamlit>=1.57          # st.expander(key=...) 需要，摘要式標題才不會重建摺疊狀態
-spotipy>=2.26.0,<3.0
-python-dotenv==1.1.0
-google-genai>=1.0
-requests>=2.31
-Pillow>=10.0
+# ── 釘版策略：直接依賴一律精確釘死（==）──────────────────────────
+#
+# 為什麼不用 >= 浮動：
+#   Streamlit Cloud 每次重新建置都會抓當下最新版，等於**部署的版本永遠不是你測過的
+#   那一版**。實測踩到過：requirements 寫 `google-genai>=1.0`、本機裝的是 2.3.0，
+#   而 PyPI 上已經是 2.19.0——正式站跑的 SDK 和本機差了 16 個 minor 版本。
+#   浮動也代表上游任何一個問題版本會**自動上線**，你沒有審核的機會。
+#
+# 為什麼精確釘死不會變成「永遠不更新」：
+#   `.github/dependabot.yml` 已設定每週檢查。⚠️ 但 Dependabot 對 `>=` 範圍幾乎不會動作
+#   （範圍本來就允許新版，沒東西可 bump）——**改成 == 之後它才真正開始工作**，
+#   每週開 PR 讓你審核後再合。
+#
+# 升級流程（尤其 streamlit）：
+#   1. pip install --upgrade <套件>
+#   2. python -m pytest -q                 ← 140 tests
+#   3. streamlit run app.py，用瀏覽器量關鍵選擇器與間距
+#      ⚠️ 本專案大量依賴 data-testid 與 .st-key-* class，升 streamlit 一定要重量一次
+#         （驗收標準：所有垂直間距都要落在 8/16/24 三級制上，見 CLAUDE.md「版面幾何」）
+#   4. 通過才更新這裡的版本號
+#
+# 以下版本組合已於 2026-08-20 完整驗證：140 tests 全過、登入頁與主表單選擇器齊全、
+# 間距序列 24/8/16/8/16/24/16/16/16 全部在三級制上、訪客模式端到端生成成功、
+# 分享圖卡（Pillow）產出正常。
+
+streamlit==1.62.0        # st.expander(key=...) 需要 >=1.57
+spotipy==2.26.0
+python-dotenv==1.2.3     # 1.1.0 有 PYSEC-2026-2270（set_key/unset_key 跟隨符號連結）
+google-genai==2.19.0
+requests==2.34.2
+Pillow==12.3.0           # 12.2.0 以前有 13 個 CVE，多個在影像解析器內
+                         # ⚠️ 這個下限是硬性要求：使用者上傳的圖片會經 st.image() 進到
+                         #    PIL.Image.open()，而 file_uploader 的 type= 只比對副檔名、
+                         #    不做內容嗅探——叫 x.png 但內容是 EPS/JPEG2000 的檔案會被
+                         #    對應的解碼器解析。12.3.0 修掉 EPS 負位元組數、JPEG2000
+                         #    越界寫入等問題。
+
+# ── 傳遞依賴的安全下限（不是直接依賴，故用 >= 避免版本解析衝突）──
+urllib3>=2.7.0           # 2.6.3 以前有 PYSEC-2026-141/142（跨來源轉址洩漏標頭、
+                         # streaming 解壓縮炸彈）。requests 與 spotipy 都走它。
+
+# ── 其他傳遞依賴：已查證，不需要在這裡釘 ──────────────────────
+# cryptography（google-genai → google-auth[requests] 的硬性依賴）與 idna（requests）
+# 都曾出現在漏洞掃描中，但那是**本機全域環境的殘留舊版**造成的假警報。
+# 用 `pip install --dry-run --ignore-installed --report` 在乾淨環境解析本檔，實際會裝到
+# cryptography 50.0.0 / idna 3.19 / certifi 2026.7.22——全部是已修補版本。
+# 所以雲端部署沒有問題，多釘反而增加版本衝突風險。
+#
+# 複查方式（本機全域環境的結果會有雜訊，一定要用 --ignore-installed 才準）：
+#   pip install pip-audit
+#   pip install --dry-run --ignore-installed --report r.json -r requirements.txt
