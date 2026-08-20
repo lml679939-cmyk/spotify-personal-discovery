@@ -753,6 +753,10 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 - **修法**：share.streamlit.io → 該 app 的 **⋮ 選單 → Reboot**（重啟行程、重新 import）。
   再 push 一次沒有用，因為問題不在檔案。
 - **只改 `app.py`** 時不會遇到（腳本本來就每次重跑）；**改了被 import 的模組**就要 Reboot。
+- ✅ **例外：同一個 push 有動到 `requirements.txt` 時不必手動 Reboot**——Cloud 會重跑
+  依賴安裝並重啟行程。實測 2026-08-21 那次 push 同時改了 `requirements.txt` 與
+  `styles.py`／`recommend.py`，部署後新文案直接生效，沒有 ImportError。
+  所以判斷方式是：**這次 push 有沒有動到相依設定**，有就自動好，沒有就要手動 Reboot。
 - ⚠️ **若 Reboot 後錯誤完全相同**，那就不是行程快取，而是伺服器上的檔案真的沒更新
   （pull 靜默失敗）。判別法：`git show origin/main:recommend.py | grep '^OVERGEN_FACTOR'`
   ——遠端有、雲端沒有＝檔案沒同步。這時要用 Manage app 看 pull 那段有沒有錯誤，
