@@ -6,14 +6,31 @@
 import json
 import re
 import time
+from functools import lru_cache
 
 from google import genai
 from google.genai import types
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
+# gemini-2.5-flash 預設會先「思考」再回答，實測這一步就吃掉 13 秒
+# （同一個 prompt：thinking 開啟 18.15s / 關閉 5.03s，thoughts_token 2181–3052）。
+# 推薦歌單是「照規則產出 JSON」的任務，不需要推理鏈；語言/曲風/避開歷史等限制實測都仍遵守。
+_NO_THINKING = types.ThinkingConfig(thinking_budget=0)
+
+
 MAX_TRACKS_PER_ARTIST = 2  # 同一次推薦中，同藝人最多出現幾首
 HISTORY_KEEP = 200          # 注入 prompt 的歷史推薦上限
+
+
+@lru_cache(maxsize=4)
+def _client(api_key: str) -> genai.Client:
+    """共用 genai.Client。
+
+    建構一次實測要 ~2.4 秒，而 app.py 每次按「生成推薦歌單」都會走一次；
+    key 相同就重用（底層 httpx 連線也一併重用，省掉 TLS 握手）。
+    """
+    return genai.Client(api_key=api_key)
 
 
 # ── Gemini 回應處理 ───────────────────────────────────────
@@ -69,10 +86,14 @@ def _parse_json_robust(text: str) -> dict:
 
 # ── 圖片分析 ──────────────────────────────────────────────
 def analyze_image(api_key: str, image_bytes: bytes, mime: str) -> str:
-    client = genai.Client(api_key=api_key)
+    client = _client(api_key)
     try:
         response = client.models.generate_content(
             model=GEMINI_MODEL,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                thinking_config=_NO_THINKING,
+            ),
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type=mime),
                 "請用音樂氛圍的角度分析這張圖片，輸出 JSON：{\"mood\":\"整體情緒\",\"atmosphere\":\"氛圍描述（30字內）\",\"tempo_suggestion\":\"slow/mid/upbeat/dance\",\"energy\":能量1-10,\"keywords\":[\"關鍵字1\",\"關鍵字2\",\"關鍵字3\"]}。只輸出JSON。",
@@ -284,7 +305,7 @@ def get_recommendations(
     history: list[dict] | None = None,
     fav_artists: list[str] | None = None,
 ) -> dict:
-    client = genai.Client(api_key=api_key)
+    client = _client(api_key)
     if profile is None:
         prompt = build_guest_prompt(
             context, num_songs, user_traits,
@@ -299,11 +320,11 @@ def get_recommendations(
         )
 
     def _call_gemini(with_mime: bool) -> str:
-        cfg = types.GenerateContentConfig(response_mime_type="application/json") if with_mime else None
-        kwargs = {"model": GEMINI_MODEL, "contents": prompt}
-        if cfg:
-            kwargs["config"] = cfg
-        resp = client.models.generate_content(**kwargs)
+        cfg = types.GenerateContentConfig(
+            response_mime_type="application/json" if with_mime else None,
+            thinking_config=_NO_THINKING,
+        )
+        resp = client.models.generate_content(model=GEMINI_MODEL, contents=prompt, config=cfg)
         return (resp.text or "").strip()
 
     # 最多重試 3 次（含 503 過載）；429 配額用盡 / Key 無效直接給友善訊息，不浪費重試

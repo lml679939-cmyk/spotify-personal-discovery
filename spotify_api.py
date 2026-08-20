@@ -6,7 +6,7 @@ Spotify API 層：OAuth、client、搜尋、歌單、跨 session 歷史。
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 import spotipy
@@ -14,6 +14,12 @@ from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from spotipy.cache_handler import MemoryCacheHandler
 
 PERSISTENT_HISTORY_MAX = 500  # 跨 session 歷史歌單保留上限，超過會修剪最舊的
+
+
+def _local_now() -> datetime:
+    """使用者當地時間；時區偏移由 app.py 的 IP 定位寫進 session_state（伺服器時鐘是 UTC）。"""
+    offset = st.session_state.get("geo_tz_offset", 8 * 3600)
+    return datetime.now(timezone.utc).astimezone(timezone(timedelta(seconds=offset)))
 
 
 def _get_env(key: str, default: str | None = None) -> str | None:
@@ -126,14 +132,36 @@ def fetch_user_profile() -> dict:
     if cache_key in st.session_state:
         return st.session_state[cache_key]
 
-    top_tracks_medium = sp.current_user_top_tracks(limit=20, time_range="medium_term")["items"]
-    top_tracks_short  = sp.current_user_top_tracks(limit=10, time_range="short_term")["items"]
-    top_artists       = sp.current_user_top_artists(limit=15, time_range="medium_term")["items"]
-    recently_played   = sp.current_user_recently_played(limit=50)["items"]
-    saved_tracks = (
-        sp.current_user_saved_tracks(limit=50, offset=0)["items"]
-        + sp.current_user_saved_tracks(limit=50, offset=50)["items"]
-    )
+    # 這 6 個 endpoint 彼此獨立，循序打完要等 6 個 round-trip（實測 2–3 秒，全部卡在
+    # Gemini 開始之前）。改成並行，總時間縮到最慢的那一個。
+    # ⚠️ requests.Session 不是 thread-safe，每個 worker 用自己的 client（同 _search_tracks_parallel）
+    token = st.session_state["spotify_token"]["access_token"]
+    tls = threading.local()
+
+    def _call(fn):
+        client = getattr(tls, "sp", None)
+        if client is None:
+            client = spotipy.Spotify(auth=token)
+            tls.sp = client
+        return fn(client)
+
+    jobs = {
+        "top_medium": lambda c: c.current_user_top_tracks(limit=20, time_range="medium_term")["items"],
+        "top_short":  lambda c: c.current_user_top_tracks(limit=10, time_range="short_term")["items"],
+        "artists":    lambda c: c.current_user_top_artists(limit=15, time_range="medium_term")["items"],
+        "recent":     lambda c: c.current_user_recently_played(limit=50)["items"],
+        "saved0":     lambda c: c.current_user_saved_tracks(limit=50, offset=0)["items"],
+        "saved50":    lambda c: c.current_user_saved_tracks(limit=50, offset=50)["items"],
+    }
+    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        futures = {k: ex.submit(_call, fn) for k, fn in jobs.items()}
+        res = {k: f.result() for k, f in futures.items()}
+
+    top_tracks_medium = res["top_medium"]
+    top_tracks_short  = res["top_short"]
+    top_artists       = res["artists"]
+    recently_played   = res["recent"]
+    saved_tracks      = res["saved0"] + res["saved50"]
 
     def track_str(t):
         return f"{t['name']} - {', '.join(a['name'] for a in t['artists'])}"
@@ -164,7 +192,7 @@ def create_playlist_with_tracks(playlist_name: str, track_uris: list[str]) -> di
         payload={
             "name": playlist_name,
             "public": False,
-            "description": f"由 Spotify Personal Discovery 自動生成・{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            "description": f"由 Spotify Personal Discovery 自動生成・{_local_now().strftime('%Y-%m-%d %H:%M')}",
         },
     )
     # 新 endpoint：POST /playlists/{id}/items（舊的 /tracks 已被改名）

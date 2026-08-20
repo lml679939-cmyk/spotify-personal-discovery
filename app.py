@@ -5,6 +5,7 @@ Spotify Personal Discovery - Web UI
 import io
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
@@ -265,6 +266,10 @@ def _render_api_key_settings(expanded: bool = False) -> None:
 
 
 # ── Context helpers ───────────────────────────────────────
+DEFAULT_TZ_OFFSET = 8 * 3600  # 查不到 IP 時區時的預設（台北 UTC+8）
+_GEO_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="geo")
+
+
 def get_time_of_day(hour: int) -> str:
     if 5 <= hour < 9:  return "清晨"
     if 9 <= hour < 12: return "上午"
@@ -275,18 +280,20 @@ def get_time_of_day(hour: int) -> str:
     return "深夜"
 
 
-def _fetch_geo_weather() -> str:
-    """IP 定位 + 天氣，session 內快取 AUTO_CONTEXT_TTL 秒。查不到時回空字串，不拋例外。"""
-    cached = st.session_state.get("geo_weather_cache")
-    if cached and time.time() - cached["ts"] < AUTO_CONTEXT_TTL:
-        return cached["value"]
-
-    # 取得使用者真實 IP（雲端部署時 Streamlit 伺服器 IP 會是美國）
+def _client_ip() -> str:
+    """使用者真實 IP（雲端部署時伺服器自己的 IP 會是美國）。必須在主執行緒讀。"""
     try:
         forwarded = st.context.headers.get("X-Forwarded-For", "")
-        client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+        return forwarded.split(",")[0].strip() if forwarded else ""
     except Exception:
-        client_ip = ""
+        return ""
+
+
+def _geo_weather_blocking(client_ip: str) -> tuple[str, int]:
+    """IP 定位 + 天氣的純網路查詢，回傳 (顯示字串, 時區偏移秒數)。
+
+    ⚠️ 不碰 st.session_state——這個函式會在背景執行緒跑（worker thread 不能碰 session_state）。
+    """
     ip_segment = f"/{client_ip}" if client_ip else ""
 
     # ipwho.is：免費、HTTPS、無需 API key。
@@ -303,7 +310,9 @@ def _fetch_geo_weather() -> str:
         pass
 
     lat, lon = geo.get("latitude"), geo.get("longitude")
-    st.session_state["geo_tz_offset"] = (geo.get("timezone") or {}).get("offset", 28800)
+    tz_offset = (geo.get("timezone") or {}).get("offset")
+    if not isinstance(tz_offset, int):
+        tz_offset = DEFAULT_TZ_OFFSET
 
     place = ", ".join(p for p in (geo.get("city"), geo.get("country")) if p)
 
@@ -319,16 +328,49 @@ def _fetch_geo_weather() -> str:
         except Exception:
             weather = ""
 
-    value = "｜".join(p for p in (place, weather) if p)
+    return "｜".join(p for p in (place, weather) if p), tz_offset
+
+
+def start_geo_prefetch() -> None:
+    """頁面一載入就在背景查 IP/天氣。
+
+    這兩個 API 是串接的（天氣要先有經緯度），實測 ipwho.is 1.8s + open-meteo 1.5s ≈ 3.3s，
+    以前整段卡在按下生成之後才開始，等於白等 3 秒。提前開跑，按下去時通常已經好了。
+    """
+    if "geo_weather_cache" in st.session_state or "geo_future" in st.session_state:
+        return
+    st.session_state["geo_future"] = _GEO_POOL.submit(_geo_weather_blocking, _client_ip())
+
+
+def _fetch_geo_weather() -> str:
+    """IP 定位 + 天氣，session 內快取 AUTO_CONTEXT_TTL 秒。查不到時回空字串，不拋例外。"""
+    cached = st.session_state.get("geo_weather_cache")
+    if cached and time.time() - cached["ts"] < AUTO_CONTEXT_TTL:
+        st.session_state["geo_tz_offset"] = cached.get("tz", DEFAULT_TZ_OFFSET)
+        return cached["value"]
+
+    future = st.session_state.pop("geo_future", None)
+    try:
+        if future is not None:
+            value, tz_offset = future.result(timeout=12)   # 背景已經在跑，通常直接拿到
+        else:
+            value, tz_offset = _geo_weather_blocking(_client_ip())
+    except Exception:
+        value, tz_offset = "", DEFAULT_TZ_OFFSET
+
+    st.session_state["geo_tz_offset"] = tz_offset
     if value:
-        st.session_state["geo_weather_cache"] = {"ts": time.time(), "value": value}
+        st.session_state["geo_weather_cache"] = {
+            "ts": time.time(), "value": value, "tz": tz_offset,
+        }
     return value
 
 
 def fetch_auto_context() -> str:
-    now = datetime.now()
-    parts = [f"{now.strftime('%H:%M')}（{get_time_of_day(now.hour)}）"]
+    # 先查地理位置：時區偏移是在這裡寫進 session_state 的，順序反過來第一次會抓到舊值
     geo = _fetch_geo_weather()
+    now = _local_now()
+    parts = [f"{now.strftime('%H:%M')}（{get_time_of_day(now.hour)}）"]
     if geo:
         parts.append(geo)
     return "｜".join(parts)
@@ -376,6 +418,9 @@ else:
         st.error(f"Spotify 連線異常：{e}")
         st.stop()
 
+
+# IP 定位 + 天氣在背景先跑（約 3.3 秒），使用者填完情境按下生成時通常已經拿到結果
+start_geo_prefetch()
 
 st.markdown(styles.form_hero_html(), unsafe_allow_html=True)
 
@@ -805,7 +850,7 @@ if "found" in st.session_state and st.session_state.found:
         with save_col1:
             playlist_name = st.text_input(
                 "歌單名稱",
-                value=f"AI Discovery {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                value=f"AI Discovery {_local_now().strftime('%Y-%m-%d %H:%M')}",
                 label_visibility="collapsed",
             )
         with save_col2:
@@ -924,15 +969,14 @@ if "found" in st.session_state and st.session_state.found:
         )
         if st.button("🎨 生成分享圖", use_container_width=True, key="gen_share"):
             seed = str(time.time())
-            _tz_sec = st.session_state.get("geo_tz_offset", 28800)
-            _local_now = datetime.now(timezone(timedelta(seconds=_tz_sec)))
+            _card_now = _local_now()
             with st.spinner("正在生成圖卡..."):
                 ctx_interp = st.session_state.get("context_interp", "")
                 if share_mode == "單張總合卡":
-                    img, palette_name = share_card.generate_single(found, ctx_interp, seed=seed, local_now=_local_now)
+                    img, palette_name = share_card.generate_single(found, ctx_interp, seed=seed, local_now=_card_now)
                     st.session_state["share_images"] = [("總合卡", img)]
                 else:
-                    slides, palette_name = share_card.generate_deck(found, ctx_interp, seed=seed, local_now=_local_now)
+                    slides, palette_name = share_card.generate_deck(found, ctx_interp, seed=seed, local_now=_card_now)
                     st.session_state["share_images"] = slides
                 st.session_state["share_palette"] = palette_name
 
@@ -947,7 +991,7 @@ if "found" in st.session_state and st.session_state.found:
                 st.download_button(
                     "💾 下載 PNG",
                     data=buf.getvalue(),
-                    file_name=f"ai-discovery-{datetime.now().strftime('%Y%m%d-%H%M')}.png",
+                    file_name=f"ai-discovery-{_local_now().strftime('%Y%m%d-%H%M')}.png",
                     mime="image/png",
                     use_container_width=True,
                     type="primary",
@@ -964,7 +1008,7 @@ if "found" in st.session_state and st.session_state.found:
                         st.download_button(
                             "💾 下載",
                             data=buf.getvalue(),
-                            file_name=f"ai-discovery-{i+1}-{label}-{datetime.now().strftime('%Y%m%d-%H%M')}.png",
+                            file_name=f"ai-discovery-{i+1}-{label}-{_local_now().strftime('%Y%m%d-%H%M')}.png",
                             mime="image/png",
                             use_container_width=True,
                             key=f"dl_share_{i}",

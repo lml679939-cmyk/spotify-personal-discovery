@@ -58,6 +58,8 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 ### 推薦流程
 1. `fetch_user_profile()`（spotify_api）— 讀 Spotify 資料（訪客模式跳過）
 2. `fetch_auto_context()`（app）— IP 定位 + 天氣（`_fetch_geo_weather()` 快取 `AUTO_CONTEXT_TTL=600` 秒；時刻每次即時算）
+   - 頁面載入時 `start_geo_prefetch()` 就把查詢丟到背景執行緒（`_GEO_POOL`），按下生成時通常已經好了
+   - 時間一律走 `_local_now()`——**不能用 `datetime.now()`**，見下方「時區」
 3. `analyze_image(api_key, ...)`（recommend）— Gemini Vision 圖片分析（選用）
 4. `build_prompt()` / `build_guest_prompt()`（recommend）— 組裝 LLM prompt
 5. `get_recommendations(api_key, ...)`（recommend）— 呼叫 Gemini，解析 JSON
@@ -211,10 +213,35 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 
 ### Gemini
 - 模型：`gemini-2.5-flash`（`GEMINI_MODEL` 常數，在 `recommend.py`）
+- **`thinking_budget=0`（`_NO_THINKING`）一定要留著**：2.5-flash 預設會先思考再回答，
+  同一個 prompt 實測 **18.15s → 5.03s**（thoughts_token 2181–3052 → 0）。
+  推薦歌單是「照規則產出 JSON」，不需要推理鏈；語言/曲風/避開歷史等限制實測都仍遵守。
+- **`genai.Client()` 建構一次要 ~2.4 秒**，用 `_client()`（`lru_cache`）共用，別在每次生成時 new。
 - `gemini-2.0-flash` 免費 tier 配額為 0，不要用
 - 有 503 重試邏輯（3 次，8s/16s 間隔）
 - 429/RESOURCE_EXHAUSTED 與 API Key 無效不重試，`_friendly_gemini_error()` 直接轉成中文友善訊息
 - JSON 解析有 regex fallback（`_parse_json_robust()`）；code fence 統一由 `_strip_code_fence()` 處理
+
+### 生成速度（2026-08 量測，訪客模式 15 首）
+| 階段 | 改善前 | 改善後 | 作法 |
+|---|---|---|---|
+| IP 定位 + 天氣 | 3.3s（擋在按下生成之後） | ~0s | 頁面載入就背景預抓（`start_geo_prefetch()`） |
+| 建立 genai.Client | 2.4s（每次） | ~0s（首次之後） | `_client()` 用 `lru_cache` 共用 |
+| Gemini 生成 | 18.2s | 5.0s | `thinking_budget=0` |
+| Spotify 搜尋 | 2.6s | 2.6s | 已是 8 workers 並行（提高到 15 反而變慢：2.27s vs 1.82s） |
+| **合計** | **~26s** | **~8–10s** | |
+
+- 登入模式另外會先讀 `fetch_user_profile()`：6 個 endpoint 已改成並行（原本循序 6 個 round-trip）。
+- 量法：`app.py` 內暫時插 `_mark()` 印到 stderr（`streamlit run ... > log 2>&1` 再 grep `[PERF]`），
+  量完記得移除。⚠️ 瀏覽器端量到的時間在無頭視窗下會虛高（rAF 被節流），以伺服器端數字為準。
+
+### 時區（重要）
+- Streamlit Cloud 的伺服器時鐘是 **UTC**，`datetime.now()` 會讓台灣使用者看到少 8 小時
+  （13:58 顯示成 05:58），連帶「深夜/清晨」判斷全錯。
+- 一律用 `_local_now()`（`app.py` / `spotify_api.py` 各一份）：時區偏移取自 ipwho.is 的
+  `timezone.offset`，存在 `st.session_state["geo_tz_offset"]`，查不到則退回 `DEFAULT_TZ_OFFSET`（+8）。
+- 偏移是在 `_fetch_geo_weather()` 裡寫進 session_state 的，所以 `fetch_auto_context()`
+  必須**先查地理位置再取時間**，順序反過來第一次會用到預設值。
 
 ### Widget Key 衝突
 - `_render_api_key_settings()` 在登入頁和 sidebar 共用，因 `st.stop()` 機制兩者不同時渲染
@@ -349,6 +376,7 @@ Streamlit Cloud 會自動偵測 push 並重新部署（約 1–2 分鐘）。
 
 | Commit | 說明 |
 |---|---|
+| （本次） | perf: 生成時間 ~26s → ~8–10s（Gemini thinking 關閉、client 快取、地理資訊預抓、profile 並行）；fix: 時區改用 IP 偏移，不再顯示 UTC |
 | （本次） | feat: 主表單 Hero（插圖 + 漸層標題）、垂直間距改三級制 8/16/32（移除 .y2k-gap） |
 | （本次） | fix: 曲目卡理由標籤被當成程式碼區塊（HTML 縮排 + 空的 album_html）、無理由時不畫空標籤；feat: 授權失敗說明改成失敗才顯示、投射問題按鈕貼齊題目、expander 內距加大、登入頁與情境欄文案精簡 |
 | `4e53694` | feat: 手機視覺層級（粗框只給主 CTA）、理由標籤對比修正、定位失敗優雅降級、訪客模式不顯示新藝人比例、maxUploadSize=10 |
