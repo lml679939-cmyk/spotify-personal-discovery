@@ -1,0 +1,102 @@
+"""app.py 內 context helper 的單元測試。
+
+執行：python -m pytest test_app.py -q
+
+⚠️ 本檔 import app，而 app.py 有 module-level 的 Streamlit 程式碼——import 會把登入頁
+渲染一遍（實測約 5 秒，不發網路請求）。所以這裡只放**非放不可**的東西：
+純邏輯請放 recommend.py + test_recommend.py，那邊 import 是即時的。
+"""
+
+import pytest
+
+import app
+
+
+class _FakeContext:
+    def __init__(self, headers):
+        self.headers = headers
+
+
+@pytest.fixture
+def xff(monkeypatch):
+    """把 X-Forwarded-For 換成指定值；傳 None 代表讀 header 會炸（無 script context）。"""
+    def _set(value):
+        if value is None:
+            class _Boom:
+                @property
+                def headers(self):
+                    raise RuntimeError("no script run context")
+            monkeypatch.setattr(app.st, "context", _Boom())
+        else:
+            monkeypatch.setattr(app.st, "context", _FakeContext({"X-Forwarded-For": value}))
+    return _set
+
+
+def test_real_public_ip_is_used(xff):
+    xff("8.8.8.8")
+    assert app._client_ip() == "8.8.8.8"
+
+
+def test_leftmost_hop_is_taken_from_a_proxy_chain(xff):
+    # 代理鏈是「使用者, proxy1, proxy2」，最左邊那個才是使用者自己
+    xff("8.8.8.8, 70.41.3.18, 150.172.238.178")
+    assert app._client_ip() == "8.8.8.8"
+
+
+def test_ipv6_is_accepted_and_normalised(xff):
+    xff("2606:4700:4700:0000:0000:0000:0000:1111")
+    assert app._client_ip() == "2606:4700:4700::1111"
+
+
+@pytest.mark.parametrize("hostile", [
+    "../../admin",                      # 路徑穿越
+    "'; DROP TABLE x--",
+    "evil.example/x",                   # 想換掉查詢目標
+    "8.8.8.8 OR 1=1",
+    "<script>alert(1)</script>",
+    "%0d%0aX-Injected: 1",              # CRLF
+    "not-an-ip",
+    "",
+])
+def test_non_ip_values_are_rejected(xff, hostile):
+    """這個值會被拼進 https://ipwho.is/{ip} 的路徑。host 改不掉（不是 SSRF），
+    但沒驗證的話任意字串都會被送進網址——一律要求解析得出 IP 才採用。"""
+    xff(hostile)
+    assert app._client_ip() == ""
+
+
+@pytest.mark.parametrize("local", [
+    "127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.0.1", "169.254.1.1", "::1",
+    # ⚠️ RFC 文件保留範圍在 Python 3.12+ 也算 private，寫測試時很容易踩到
+    "203.0.113.7", "198.51.100.1", "192.0.2.1", "2001:db8::1",
+])
+def test_non_global_addresses_are_skipped(xff, local):
+    # 查不到有意義的地理資訊（本機開發就是這種），省下一個請求
+    xff(local)
+    assert app._client_ip() == ""
+
+
+def test_missing_header_or_no_context_is_blank(xff, monkeypatch):
+    xff(None)
+    assert app._client_ip() == ""
+    monkeypatch.setattr(app.st, "context", _FakeContext({}))
+    assert app._client_ip() == ""
+
+
+def test_only_validated_ip_can_reach_the_geo_url(monkeypatch):
+    """端到端：不管 header 塞什麼，實際送出的網址永遠是 ipwho.is 這個 host。"""
+    seen = []
+
+    class _Resp:
+        ok = False
+        headers = {}
+
+    def _fake_get(url, *a, **kw):
+        seen.append(url)
+        return _Resp()
+
+    monkeypatch.setattr(app.requests, "get", _fake_get)
+
+    app._geo_weather_blocking("8.8.8.8")
+    app._geo_weather_blocking("")           # 驗不過時傳進來的就是空字串
+    assert seen == ["https://ipwho.is/8.8.8.8", "https://ipwho.is"]

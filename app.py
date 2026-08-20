@@ -3,10 +3,11 @@ Spotify Personal Discovery - Web UI
 """
 
 import io
+import ipaddress
 import random
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
 import requests
@@ -18,26 +19,33 @@ import styles
 import share_card
 from recommend import (
     HISTORY_KEEP,
-    _norm,
+    OVERGEN_FACTOR,
+    PLAY_PLATFORMS,
+    REFILL_MAX,
+    _track_key,
     analyze_image,
-    dedupe_tracks,
+    curate_tracks,
     get_recommendations,
+    play_link,
 )
 from spotify_api import (
-    _get_auth_manager,
     _get_credential,
     _get_env,
     _get_search_token,
     _has_scope,
+    _local_now,
     _search_tracks_parallel,
     append_to_persistent_history,
     clear_persistent_history,
     consume_oauth_callback,
     create_playlist_with_tracks,
     fetch_user_profile,
+    get_login_url,
     get_spotify_client,
     is_authenticated,
     load_persistent_history,
+    search_cache_info,
+    start_profile_prefetch,
 )
 
 load_dotenv()
@@ -103,6 +111,39 @@ PROJECTIVE_QUESTIONS = [
 ]
 
 
+# Spotify 授權失敗的說明文字。
+# ⚠️ 一律用「代碼 → 寫死的句子」查表，**不要把代碼本身插進訊息裡**——
+# 代碼源自 ?error= 網址參數，而 st.warning() 會渲染 Markdown，回顯就等於讓攻擊者
+# 在本站登入頁的官方警告框內插入釣魚連結或追蹤圖片（見 spotify_api._set_auth_error）。
+# 查不到的 key 一律落到 unknown_error。
+_AUTH_ERR_ALLOWLIST_HINT = (
+    "先用上面的「🎶 直接開始推薦」即可，或展開下方進階設定用自己的 Spotify 登入。"
+)
+AUTH_ERROR_MESSAGES = {
+    "access_denied":
+        "⚠️ 你在 Spotify 頁面取消了授權。想改用個人化推薦的話再點一次登入即可。",
+    "state_mismatch":
+        "⚠️ 這個登入連結無法驗證，已為你中止。可能只是停留太久（超過 10 分鐘）或用了舊的書籤——"
+        "請回到本頁重新點一次「🎧 用 Spotify 登入」。\n\n"
+        "如果你是從別人傳來的連結點進來的，請不要再使用那個連結。",
+    "invalid_client":
+        "⚠️ Spotify 授權失敗：這個 App 的設定有誤（invalid_client）。"
+        + _AUTH_ERR_ALLOWLIST_HINT,
+    "invalid_scope":
+        "⚠️ Spotify 授權失敗：要求的權限範圍無效。" + _AUTH_ERR_ALLOWLIST_HINT,
+    "server_error":
+        "⚠️ Spotify 伺服器暫時出錯，請稍後再試一次。",
+    "temporarily_unavailable":
+        "⚠️ Spotify 服務暫時無法使用，請稍後再試一次。",
+    "token_exchange_failed":
+        "⚠️ 與 Spotify 交換憑證時失敗。本站的 Spotify 登入有人數上限，"
+        "你的帳號可能還沒被加入授權名單——" + _AUTH_ERR_ALLOWLIST_HINT,
+    "unknown_error":
+        "⚠️ Spotify 授權失敗。本站的 Spotify 登入有人數上限，"
+        "你的帳號可能還沒被加入授權名單——" + _AUTH_ERR_ALLOWLIST_HINT,
+}
+
+
 WMO_CODES = {
     0: "晴朗", 1: "大致晴朗", 2: "局部多雲", 3: "陰天",
     45: "霧", 48: "結霜霧",
@@ -120,11 +161,17 @@ def logout() -> None:
         "spotify_token",
         "user_profile",
         "user_display_name",
-        "found", "context_interp",
+        "found", "context_interp", "novelty_notice", "novelty_stats",
         "recommend_history",
+        "user_profile_future",
         "share_images", "share_palette",
         "guest_mode",
     ):
+        st.session_state.pop(k, None)
+    # 聆聽資料快取的 key 帶了 user id（user_profile::v2::xxx），不清掉的話重新登入會
+    # 拿到舊資料——而新增 scope 後正是要靠重新授權才讀得到追蹤歌手；
+    # 殘留的 key 還會擋住 start_profile_prefetch() 的 guard，讓之後整個 session 都改走同步抓取
+    for k in [k for k in st.session_state if k.startswith("user_profile::")]:
         st.session_state.pop(k, None)
     st.rerun()
 
@@ -175,11 +222,9 @@ def show_login_required() -> None:
     )
 
     if has_spotify_creds:
-        auth_manager = _get_auth_manager()
-        auth_url = auth_manager.get_authorize_url()
         st.link_button(
             "🎧 用 Spotify 登入",
-            auth_url,
+            get_login_url(),   # 已帶上綁定本瀏覽器的 state，見 spotify_api._make_oauth_state()
             type="secondary",
             use_container_width=True,
         )
@@ -188,13 +233,7 @@ def show_login_required() -> None:
         # 授權名單的說明只在真的登入失敗時才出現，平常不佔首頁版面
         auth_err = st.session_state.get("spotify_auth_error")
         if auth_err:
-            st.warning(
-                "⚠️ Spotify 授權失敗（"
-                f"`{auth_err}`）。本站的 Spotify 登入有人數上限，"
-                "你的帳號可能還沒被加入授權名單——"
-                "先用上面的「🎶 直接開始推薦」即可，"
-                "或展開下方進階設定用自己的 Spotify 登入。"
-            )
+            st.warning(AUTH_ERROR_MESSAGES.get(auth_err, AUTH_ERROR_MESSAGES["unknown_error"]))
     else:
         st.warning("本站尚未設定 Spotify 登入，請用上方的訪客模式，或在下方進階設定填入自己的 Spotify App。")
 
@@ -222,10 +261,15 @@ def _render_api_key_settings(expanded: bool = False) -> None:
         )
 
         # ── Spotify 步驟卡 ──
-        st.markdown(
-            styles.byok_spotify_steps_html(default_redirect),
-            unsafe_allow_html=True,
-        )
+        # 卡片刻意拆成上下兩半，中間夾一個原生的 st.code()：它自帶可用的複製圖示
+        # （自製 <button onclick> 是死的，Streamlit 會把事件處理器整個濾掉），
+        # 而且 redirect_uri 因此完全不經過 unsafe_allow_html。
+        # 接縫靠 styles.py 的 .st-key-byok_steps / .st-key-byok_uri 規則畫成一張卡。
+        with st.container(key="byok_steps"):
+            st.markdown(styles.byok_spotify_steps_head_html(), unsafe_allow_html=True)
+            with st.container(key="byok_uri"):
+                st.code(default_redirect, language=None)
+            st.markdown(styles.byok_spotify_steps_tail_html(), unsafe_allow_html=True)
 
         # ── Spotify 輸入欄 ──
         c1, c2 = st.columns(2)
@@ -249,10 +293,8 @@ def _render_api_key_settings(expanded: bool = False) -> None:
         if not st.session_state.get("custom_SPOTIFY_REDIRECT_URI"):
             st.session_state["custom_SPOTIFY_REDIRECT_URI"] = default_redirect
 
-        st.caption(
-            f"✅ Redirect URI 已自動設定為：`{default_redirect}`　"
-            "（如需修改請展開進階設定）"
-        )
+        # 網址本身已經在上面步驟 3 的 st.code 裡（附複製圖示），這裡不再重複一次
+        st.caption("✅ Redirect URI 已自動帶入上方步驟 3 的網址　（如需修改請展開進階設定）")
         with st.expander("🔧 進階：手動修改 Redirect URI", expanded=False):
             st.text_input(
                 "Redirect URI（需與 Spotify Dashboard 設定一致）",
@@ -281,12 +323,28 @@ def get_time_of_day(hour: int) -> str:
 
 
 def _client_ip() -> str:
-    """使用者真實 IP（雲端部署時伺服器自己的 IP 會是美國）。必須在主執行緒讀。"""
+    """使用者真實 IP（雲端部署時伺服器自己的 IP 會是美國）。必須在主執行緒讀。
+
+    ⚠️ X-Forwarded-For 最左邊那一段是**使用者自己送的**、可任意偽造，而這個值會被
+    直接拼進 `https://ipwho.is/{ip}` 的路徑。host 改不掉（不是 SSRF），但沒驗證的話
+    任意字串都會被送進網址——所以一律用 ipaddress 解析過才採用，解不出來就當作查無。
+    偽造的後果僅止於「使用者謊報自己的地點/時區」，那只影響推薦情境，不是安全決策。
+    """
     try:
         forwarded = st.context.headers.get("X-Forwarded-For", "")
-        return forwarded.split(",")[0].strip() if forwarded else ""
     except Exception:
         return ""
+    if not forwarded:
+        return ""
+    candidate = forwarded.split(",")[0].strip()
+    try:
+        ip = ipaddress.ip_address(candidate)
+    except ValueError:
+        return ""
+    # is_global 一個判斷就涵蓋 private / loopback / link-local / reserved / multicast，
+    # 連 RFC 文件保留範圍（203.0.113.x、2001:db8::）也算在內。這些查不到有意義的
+    # 地理資訊（本機開發時就是這種），直接省下一個請求。
+    return str(ip) if ip.is_global else ""
 
 
 def _geo_weather_blocking(client_ip: str) -> tuple[str, int]:
@@ -421,6 +479,8 @@ else:
 
 # IP 定位 + 天氣在背景先跑（約 3.3 秒），使用者填完情境按下生成時通常已經拿到結果
 start_geo_prefetch()
+# 聆聽資料（18 個 endpoint）同樣在背景先抓，按下生成時通常已經好了
+start_profile_prefetch()
 
 st.markdown(styles.form_hero_html(), unsafe_allow_html=True)
 
@@ -524,7 +584,10 @@ with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False
                 "新藝人佔比",
                 min_value=0, max_value=100, value=70, step=10,
                 format="%d%%", key="new_artist_ratio",
-                help="0% = 全部從你熟悉的藝人推｜70% = 平衡｜100% = 完全沒接觸過的新藝人",
+                help="0% = 全部從你熟悉的藝人挖深軌｜70% = 平衡｜"
+                     "100% = 只推完全沒接觸過的音樂人。\n\n"
+                     "研究顯示「有點陌生」才是最耐聽的位置，太熟和太陌生的歌單滿意度都會下降，"
+                     "所以預設 70%；100% 是硬核探索模式，過濾很嚴，有時會湊不滿。",
             )
 
     st.markdown("---")
@@ -749,10 +812,13 @@ if _clicked:
                     f"（{_ratio_msg}語言：{lang_msg}・曲風：{genre_msg}"
                     f"・避開過往 {len(history)} 首）..."
                 )
+                # 登入模式多要一些候選：驗證鏈會刷掉「其實聽過」的那些，
+                # 沒有這層餘裕，過濾完就湊不滿使用者要的首數。訪客模式不過濾，維持原樣。
+                _gen_n = num_songs if is_guest_mode() else min(int(num_songs * OVERGEN_FACTOR), 40)
                 try:
                     result = get_recommendations(
                         _gemini_key(),
-                        profile, "\n".join(context_parts), num_songs, new_artist_ratio, user_traits,
+                        profile, "\n".join(context_parts), _gen_n, new_artist_ratio, user_traits,
                         languages=languages or None,
                         genres=genres or None,
                         history=history or None,
@@ -762,13 +828,13 @@ if _clicked:
                     st.error(f"推薦生成失敗：{e}")
                     st.stop()
 
-                # 在 Spotify 搜尋之前先把 LLM 輸出做一次去重（依 title+artist）
+                # 在 Spotify 搜尋之前先把 LLM 輸出做一次去重（正規化後的 歌名+藝人）
                 raw_recs = result.get("recommendations", [])
                 pre_dedupe_n = len(raw_recs)
                 seen_rec: set[tuple[str, str]] = set()
                 unique_recs = []
                 for rec in raw_recs:
-                    k = (_norm(rec.get("title", "")), _norm(rec.get("artist", "")))
+                    k = _track_key(rec.get("title", ""), rec.get("artist", ""))
                     if k in seen_rec:
                         continue
                     seen_rec.add(k)
@@ -780,36 +846,166 @@ if _clicked:
                     and _get_credential("SPOTIFY_CLIENT_SECRET")
                 )
                 if _has_spotify:
-                    st.write(f"🔍 Spotify 搜尋歌曲...（{len(unique_recs)}/{pre_dedupe_n} 首去重後，並行搜尋）")
+                    _cand_msg = (
+                        f"{len(unique_recs)} 首候選 → 篩出 {num_songs} 首"
+                        if not is_guest_mode() else f"{len(unique_recs)}/{pre_dedupe_n} 首去重後"
+                    )
+                    st.write(f"🔍 Spotify 搜尋歌曲...（{_cand_msg}，並行搜尋）")
                     _search_token = _get_search_token()
                 else:
                     st.write(f"⚠️ 未設定 Spotify API，跳過搜尋（{len(unique_recs)} 首）")
 
-                if _search_token:
-                    search_results = _search_tracks_parallel(unique_recs, _search_token)
-                else:
-                    search_results = [None] * len(unique_recs)
+                _rate_limited: list[bool] = []   # 這裡是模組層級，用 list 當旗標比 global 乾淨
 
-                found = []
-                for rec, r in zip(unique_recs, search_results):
-                    if r:
-                        r["reason"] = rec["reason"]
-                        found.append(r)
+                def _resolve(recs: list[dict]) -> list[dict]:
+                    """候選 → 曲目卡。搜不到的以搜尋連結卡呈現，不中斷整批。"""
+                    if _search_token and recs:
+                        results, hit = _search_tracks_parallel(recs, _search_token)
+                        if hit:
+                            _rate_limited.append(True)
                     else:
-                        _search_q = quote(f"{rec['title']} {rec['artist']}", safe="")
-                        found.append({
-                            "name": rec["title"],
-                            "artist": rec["artist"],
-                            "album": "",
-                            "url": f"https://open.spotify.com/search/{_search_q}",
-                            "uri": None,
-                            "cover": "",
-                            "reason": rec["reason"],
-                            "_no_spotify": True,
-                        })
+                        results = [None] * len(recs)
+                    cards = []
+                    for rec, r in zip(recs, results):
+                        if r:
+                            r["reason"] = rec.get("reason", "")
+                            # Spotify 已停止提供 popularity，改由 LLM 自評的 fame 遞補
+                            r["fame"] = rec.get("fame")
+                            cards.append(r)
+                        else:
+                            _q = quote(f"{rec['title']} {rec['artist']}", safe="")
+                            cards.append({
+                                "name": rec["title"],
+                                "artist": rec["artist"],
+                                "album": "",
+                                "url": f"https://open.spotify.com/search/{_q}",
+                                "uri": None,
+                                "cover": "",
+                                "reason": rec.get("reason", ""),
+                                "fame": rec.get("fame"),
+                                "_no_spotify": True,
+                            })
+                    return cards
 
-                # 後處理：去重 + 同藝人最多 N 首 + 排除歷史
-                found = dedupe_tracks(found, history=history, profile=profile, new_ratio=new_artist_ratio)
+                found = _resolve(unique_recs)
+
+                # 驗證鏈：去重 → 排除聽過的曲目 → 分探索/熟悉兩桶 → 探索桶套流行度天花板
+                # → 依「LLM 順位 + 新穎度」重排取額
+                def _curate(cards: list[dict]) -> tuple[list[dict], dict]:
+                    return curate_tracks(
+                        cards, history=history, profile=profile,
+                        new_ratio=new_artist_ratio, num_songs=num_songs,
+                        # 撞到限流時搜不到不代表歌是假的，補位卡不該再套比例上限
+                        spare_capped=not _rate_limited,
+                    )
+
+                raw_found = found
+                found, _novelty = _curate(raw_found)
+
+                # 補生成：過濾後湊不滿時，帶著「已經出現過」的清單再要一輪更冷門的。
+                # 不是把清單縮短、也不是回退熱門——這是 Melo 那種 reflective retry。
+                # ⚠️ 判斷「夠不夠」要看**能播的**首數：搜不到的補位卡也算進去的話，
+                # 清單看起來是滿的、補生成永遠不會觸發，使用者卻拿到一堆死連結。
+                def _playable(cards: list[dict], st_: dict) -> int:
+                    return len(cards) - st_["spare_used"]
+
+                # 撞到速率限制時不要補生成——再打只會罰更久，而且問題不在候選不夠
+                if (not _rate_limited and profile is not None
+                        and _playable(found, _novelty) < num_songs):
+                    for _ in range(REFILL_MAX):
+                        _short = num_songs - _playable(found, _novelty)
+                        st.write(f"🔁 過濾後少了 {_short} 首，補生成一輪更冷門的...")
+                        try:
+                            _extra = get_recommendations(
+                                _gemini_key(),
+                                profile, "\n".join(context_parts),
+                                min(max(_short * 2, 6), 30), new_artist_ratio, user_traits,
+                                languages=languages or None,
+                                genres=genres or None,
+                                history=history or None,
+                                fav_artists=fav_artists,
+                                refill_exclude=[
+                                    (r.get("title", ""), r.get("artist", "")) for r in unique_recs
+                                ],
+                            )
+                        except Exception as e:
+                            st.write(f"⚠️ 補生成失敗，沿用現有結果（{e}）")
+                            break
+                        _new_recs = []
+                        for rec in _extra.get("recommendations", []):
+                            k = _track_key(rec.get("title", ""), rec.get("artist", ""))
+                            if k in seen_rec:
+                                continue
+                            seen_rec.add(k)
+                            _new_recs.append(rec)
+                            unique_recs.append(rec)
+                        if not _new_recs:
+                            break
+                        # 整批重跑而不是把兩份結果相加——否則同藝人上限會被算兩次
+                        raw_found = raw_found + _resolve(_new_recs)
+                        found, _novelty = _curate(raw_found)
+                        if _playable(found, _novelty) >= num_songs:
+                            break
+                # ⚠️ 提示一律寫進 session_state：這段程式跑在 st.status 容器裡，
+                # 結尾的 st.rerun() 會把容器內容清掉，直接 st.warning() 使用者根本看不到。
+                # ⚠️ 而且要放在補生成迴圈**之後**——限流可能是補生成那一輪才撞到的，
+                # 在迴圈前組訊息的話那種情況會兩則都不出現，使用者拿到短少的清單且零解釋。
+                _notices: list[str] = []
+                if _rate_limited:
+                    _n_link = _novelty["spare_used"] if profile is not None else 0
+                    _notices.append(
+                        "Spotify 搜尋暫時達到請求上限"
+                        + (f"，這次有 {_n_link} 首只能附搜尋連結" if _n_link else "")
+                        + "。過一陣子再試就會恢復。"
+                    )
+                if profile is not None:
+                    # 量測用：新歌手比例、探索額度的平均熱門度、各關卡刷掉幾首
+                    print(
+                        f"[NOVELTY] {_novelty} known={profile.get('known_stats')} "
+                        f"search_cache={search_cache_info()}",
+                        file=sys.stderr, flush=True,
+                    )
+                    if not profile.get("known_artist_ids"):
+                        _notices.append(
+                            "讀不到你的聆聽紀錄（Spotify 可能暫時擋住了請求），"
+                            "這次推薦沒有個人化過濾。稍後重試通常就會恢復。"
+                        )
+                    # 過濾太嚴時寧可少幾首，但要講清楚——不要讓清單默默縮水
+                    # （撞到速率限制時不重複解釋，上面那則訊息已經說明原因）
+                    if not _rate_limited and _playable(found, _novelty) < num_songs:
+                        # ⚠️ 三個原因都要列。只報 known_track / pop_blocked 的話，
+                        # 100% 模式下最大宗的「熟悉歌手候選用不上」不會被算到，
+                        # 訊息會變成自相矛盾的「擋掉了 0 首…0 首」
+                        _unused_familiar = _novelty["familiar_pool"] - _novelty["picked_familiar"]
+                        _hist_dup = _novelty["dup_history"]
+                        _why = []
+                        if _hist_dup:
+                            _why.append(f"{_hist_dup} 首之前已經推薦過的歌")
+                        if _novelty["known_track"]:
+                            _why.append(f"{_novelty['known_track']} 首你已經聽過的歌")
+                        if _unused_familiar > 0:
+                            _why.append(f"{_unused_familiar} 首你熟悉歌手的歌")
+                        if _novelty["pop_blocked"]:
+                            _why.append(f"{_novelty['pop_blocked']} 首熱門到「幾乎不可能沒聽過」的歌")
+                        if _novelty["spare_used"]:
+                            _why.append(f"{_novelty['spare_used']} 首在 Spotify 找不到（只附搜尋連結）")
+                        # 建議要對得上真正的主因，不然會出現「歷史太滿」卻叫人調新藝人佔比
+                        if _hist_dup >= max(1, _novelty["candidates"] // 3):
+                            _advice = "想要更多首可以到「⚙️ 推薦歌曲數」裡清除推薦歷史。"
+                        elif new_artist_ratio > 0:
+                            _advice = "想要更多首可以把「新藝人佔比」調低一點。"
+                        else:
+                            _advice = "想要更多首可以清除推薦歷史，或把推薦數量調低。"
+                        _notices.append(
+                            f"嚴格過濾後這次只湊到 {_playable(found, _novelty)} 首可播放的歌"
+                            f"（原本要 {num_songs} 首）："
+                            + (f"扣掉了{'、'.join(_why)}。" if _why else "可用的候選不足。")
+                            + _advice
+                        )
+
+                st.session_state["novelty_notice"] = _notices
+                # 結果頁要顯示「這批有幾首真的出圈」，得撐過結尾的 st.rerun()
+                st.session_state["novelty_stats"] = _novelty if profile is not None else None
 
                 # 更新 session 歷史
                 new_session = session_history + [
@@ -833,6 +1029,22 @@ if _clicked:
         st.rerun()
 
 
+# ── 提示訊息（放在結果區之外）────────────────────────────
+# ⚠️ 不能放進下面的 `if st.session_state.found:`：過濾太嚴導致一首都不剩時，
+# 原因說明剛好也跟著消失，畫面變成什麼都沒發生——那正是最需要解釋的情況。
+_notice_state = st.session_state.get("novelty_notice") or []
+if isinstance(_notice_state, str):      # 舊版存字串，直接迭代會逐字元印出來
+    _notice_state = [_notice_state]
+for _notice in _notice_state:
+    st.info(_notice, icon="🔭")
+
+if "found" in st.session_state and not st.session_state.found:
+    st.warning(
+        "這次過濾後一首都沒剩下。可以把「新藝人佔比」調低、清除推薦歷史，"
+        "或換個情境描述再試一次。",
+        icon="🫥",
+    )
+
 # ── 顯示結果（從 session_state 讀取，這樣即使重跑也不會消失）─────────
 if "found" in st.session_state and st.session_state.found:
     found = st.session_state.found
@@ -842,6 +1054,18 @@ if "found" in st.session_state and st.session_state.found:
             styles.context_interpretation_html(st.session_state.context_interp),
             unsafe_allow_html=True,
         )
+
+    # 出圈成果一行摘要。對使用者是透明度，對開發是免費的儀表板——
+    # 「新歌手比例」是這次改版唯一真正的驗收指標
+    _ns = st.session_state.get("novelty_stats")
+    if _ns:
+        _parts = [f"🧭 這批有 **{_ns['picked_new']}/{len(found)}** 首來自你沒接觸過的音樂人"]
+        if _ns.get("avg_pop_new") is not None:
+            _parts.append(f"平均知名度 {_ns['avg_pop_new']}/100（越低越冷門）")
+        _blocked = _ns["known_track"] + _ns["pop_blocked"] + _ns["dup_history"]
+        if _blocked:
+            _parts.append(f"幫你擋掉 {_blocked} 首可能聽過的")
+        st.caption("　·　".join(_parts))
 
     # 加入 Spotify 歌單按鈕（訪客模式隱藏）
     save_clicked = False
@@ -892,7 +1116,7 @@ if "found" in st.session_state and st.session_state.found:
                     st.error(f"寫入失敗：{e}")
 
     st.markdown(styles.results_header_html(len(found)), unsafe_allow_html=True)
-    view_col, slider_col = st.columns([2, 3])
+    view_col, plat_col, slider_col = st.columns([2, 2, 3])
     with view_col:
         view_mode = st.radio(
             "顯示方式",
@@ -900,6 +1124,17 @@ if "found" in st.session_state and st.session_state.found:
             index=1,
             horizontal=True,
             label_visibility="collapsed",
+        )
+    with plat_col:
+        play_platform = st.radio(
+            "用什麼聽",
+            options=list(PLAY_PLATFORMS),
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="play_platform",
+            help="YouTube 走搜尋連結，不需要 Spotify 帳號也能聽；"
+                 "Spotify 搜不到的歌換成 YouTube 通常反而找得到。",
         )
     with slider_col:
         if view_mode == "網格":
@@ -919,19 +1154,20 @@ if "found" in st.session_state and st.session_state.found:
                             show_album = cols_per_row <= 5
                             card_track = track if show_album else {**track, "album": "", "reason": ""}
                             st.markdown(
-                                styles.track_card_html(card_track, idx),
+                                # 密集網格連專輯名和理由都放不下，標籤也要縮成只有圖示
+                                styles.track_card_html(card_track, idx, compact_badge=not show_album),
                                 unsafe_allow_html=True,
                             )
-                            btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
-                            st.link_button(btn_label, track["url"], use_container_width=True)
+                            _label, _url = play_link(track, play_platform)
+                            st.link_button(_label, _url, use_container_width=True)
     else:
         for i, track in enumerate(found):
             st.markdown(
                 styles.track_list_html(track, i),
                 unsafe_allow_html=True,
             )
-            btn_label = "🔍 搜尋" if track.get("_no_spotify") else "▶ Spotify"
-            st.link_button(btn_label, track["url"], use_container_width=True)
+            _label, _url = play_link(track, play_platform)
+            st.link_button(_label, _url, use_container_width=True)
 
     # ── 複製 / 分享到 LINE ──────────────────────────────────
     st.divider()
@@ -944,8 +1180,9 @@ if "found" in st.session_state and st.session_state.found:
     for _i, _t in enumerate(found, 1):
         _lines.append(f"{_i}. {_t['name']} — {_t['artist']}")
         _lines.append(f"   💡 {_t['reason']}")
-        if _t.get("url"):
-            _lines.append(f"   ▶ {_t['url']}")
+        _, _share_url = play_link(_t, play_platform)   # 分享文字跟著使用者選的平台走
+        if _share_url:
+            _lines.append(f"   ▶ {_share_url}")
         _lines.append("")
     _share_text = "\n".join(_lines).strip()
 
@@ -955,7 +1192,7 @@ if "found" in st.session_state and st.session_state.found:
 
     with share_col:
         st.subheader("📋 複製或分享歌單")
-        st.caption("點擊右上角複製圖示即可一鍵複製（含 Spotify 連結）")
+        st.caption(f"點擊右上角複製圖示即可一鍵複製（含 {play_platform} 連結）")
         st.code(_share_text, language=None)
 
     with ig_col:

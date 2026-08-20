@@ -1,0 +1,293 @@
+"""spotify_api.py 的單元測試（用假 client，不碰網路）。
+
+執行：python -m pytest test_spotify_api.py -v
+
+⚠️ 本檔會 import streamlit（spotify_api 需要），比 test_recommend.py 慢一點。
+純邏輯請放 recommend.py + test_recommend.py，這裡只測需要 Spotify 資料結構的部分。
+"""
+
+import pytest
+
+import spotify_api
+from recommend import _track_key
+
+
+class _FakeSession:
+    """_harden() 會在 client 上掛 HTTPAdapter。"""
+    def mount(self, prefix, adapter):
+        pass
+
+
+def _track_payload(name="Song A", artist="Artist X", aid="aid1"):
+    return {
+        "name": name,
+        "artists": [{"name": artist, "id": aid}],
+        "album": {"name": "Album", "images": [{"url": "cover.jpg"}]},
+        "external_urls": {"spotify": "https://open.spotify.com/track/1"},
+        "uri": "spotify:track:1",
+        "popularity": 42,
+    }
+
+
+class FakeSpotify:
+    """記錄被呼叫幾次，讓測試能驗證「有沒有真的打 API」。"""
+
+    def __init__(self, items=None):
+        self._session = _FakeSession()
+        self.calls = 0
+        self._items = _track_payload() if items is None else items
+
+    def search(self, q, type, limit):
+        self.calls += 1
+        items = [self._items] if self._items and "track:" in q else []
+        return {"tracks": {"items": items}}
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    spotify_api._SEARCH_CACHE.clear()
+    spotify_api._SEARCH_STATS.update(hits=0, misses=0)
+    yield
+    spotify_api._SEARCH_CACHE.clear()
+
+
+# ── 搜尋快取 ──────────────────────────────────────────────
+def test_search_result_is_cached_and_not_refetched():
+    sp = FakeSpotify()
+    first = spotify_api.search_track("Song A", "Artist X", sp=sp)
+    second = spotify_api.search_track("Song A", "Artist X", sp=sp)
+    assert first["name"] == second["name"] == "Song A"
+    assert sp.calls == 1, "第二次應該走快取，不該再打 API"
+    assert spotify_api.search_cache_info()["hits"] == 1
+
+
+def test_cache_returns_a_copy_so_callers_cannot_poison_it():
+    # 呼叫端會往回傳值塞 reason / fame / _discovery。若回傳的是快取裡那個物件本身，
+    # 第一次生成就會把快取內容污染，之後所有人都拿到上一批的理由
+    sp = FakeSpotify()
+    first = spotify_api.search_track("Song A", "Artist X", sp=sp)
+    first["reason"] = "第一批的理由"
+    first["fame"] = 5
+    second = spotify_api.search_track("Song A", "Artist X", sp=sp)
+    assert "reason" not in second
+    assert "fame" not in second
+    assert first is not second
+
+
+def test_cache_key_is_normalised_so_variants_share_one_entry():
+    sp = FakeSpotify()
+    spotify_api.search_track("Song A", "Artist X", sp=sp)
+    spotify_api.search_track("Song A (Remastered 2011)", "Artist X", sp=sp)
+    assert sp.calls == 1
+    assert _track_key("Song A", "Artist X") in spotify_api._SEARCH_CACHE
+
+
+def test_misses_are_cached_too():
+    # 幻覺曲目會被不同使用者一再推薦，每次重搜要打兩個請求（嚴格 + 模糊），
+    # 快取「找不到」省下來的其實最多
+    sp = FakeSpotify(items=None)
+    sp._items = None
+    assert spotify_api.search_track("Ghost", "Nobody", sp=sp) is None
+    assert spotify_api.search_track("Ghost", "Nobody", sp=sp) is None
+    assert sp.calls == 2, "第一次要打嚴格 + 模糊兩次，第二次應該完全走快取"
+
+
+def test_rate_limit_error_is_not_cached():
+    """撞到 429 不能被當成「找不到」寫進快取，否則會毒化到限流結束為止。"""
+    import spotipy
+
+    class Boom(FakeSpotify):
+        def search(self, q, type, limit):
+            self.calls += 1
+            raise spotipy.SpotifyException(429, -1, "rate limited")
+
+    sp = Boom()
+    with pytest.raises(spotipy.SpotifyException):
+        spotify_api.search_track("Song A", "Artist X", sp=sp)
+    assert _track_key("Song A", "Artist X") not in spotify_api._SEARCH_CACHE
+
+
+def test_cache_is_bounded():
+    spotify_api._SEARCH_CACHE.update(
+        {(f"t{i}", f"a{i}"): None for i in range(spotify_api.SEARCH_CACHE_MAX)}
+    )
+    spotify_api.search_track("Song A", "Artist X", sp=FakeSpotify())
+    assert len(spotify_api._SEARCH_CACHE) <= spotify_api.SEARCH_CACHE_MAX
+
+
+# ── 重試設定（429 絕不能讓底層自己 sleep）────────────────
+def test_client_never_retries_429():
+    sp = spotify_api._sp("dummy-token")
+    retry = sp._session.get_adapter("https://api.spotify.com").max_retries
+    assert retry.respect_retry_after_header is False
+    assert retry.is_retry("GET", 429, True) is False, "429 重試會遵守 Retry-After 睡好幾小時"
+    assert retry.is_retry("GET", 503, True) is True, "5xx 仍要重試，否則會被誤判成限流"
+
+
+# ── client-credentials token 不落地 ───────────────────────
+def test_client_credentials_token_never_written_to_disk(monkeypatch):
+    """spotipy 沒收到 cache_handler 時預設 CacheFileHandler()，會把 token 寫進 CWD 的
+    `.cache`——與「token 只存記憶體」的設計相違。"""
+    from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
+
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "cid_A")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "secret")
+    auth = spotify_api._client_credentials()
+    assert isinstance(auth.cache_handler, MemoryCacheHandler)
+    assert not isinstance(auth.cache_handler, CacheFileHandler)
+
+
+def test_client_credentials_cache_is_shared_per_client_id(monkeypatch):
+    # 同一個 Client ID 共用記憶體快取，才不會每次生成都重新換 token
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "cid_A")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "secret")
+    assert spotify_api._client_credentials().cache_handler is \
+        spotify_api._client_credentials().cache_handler
+
+
+def test_client_credentials_cache_is_isolated_between_client_ids(monkeypatch):
+    # BYOK 使用者填的是自己的 Client ID，共用一份快取會讓不同 app 的 token 互相污染
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "cid_A")
+    a = spotify_api._client_credentials().cache_handler
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "cid_B")
+    b = spotify_api._client_credentials().cache_handler
+    assert a is not b
+
+
+# ── OAuth state：防授權碼注入 / login CSRF ────────────────
+class _FakeContext:
+    def __init__(self, cookies):
+        self.cookies = cookies
+
+
+def _xsrf_cookie(raw_token_hex: str, mask_hex: str) -> str:
+    """組出 Tornado v2 格式的 XSRF cookie：2|<mask>|<masked token>|<ts>。
+
+    同一個 raw token 每次送出的 mask 都不一樣（實測過），所以測試一定要用
+    「兩組不同 mask、同一個 raw token」來驗證解遮罩後的值真的穩定。
+    """
+    mask = bytes.fromhex(mask_hex)
+    raw = bytes.fromhex(raw_token_hex)
+    masked = bytes(b ^ mask[i % len(mask)] for i, b in enumerate(raw))
+    return f"2|{mask_hex}|{masked.hex()}|1787211642"
+
+
+@pytest.fixture
+def browser(monkeypatch):
+    """把 st.context.cookies 換成假的，回傳一個「切換瀏覽器」的函式。"""
+    def _use(cookies: dict | None):
+        if cookies is None:
+            class _Boom:
+                @property
+                def cookies(self):
+                    raise RuntimeError("no script run context")
+            monkeypatch.setattr(spotify_api.st, "context", _Boom())
+        else:
+            monkeypatch.setattr(spotify_api.st, "context", _FakeContext(cookies))
+    return _use
+
+
+_TOKEN_A = "682ffabcee3c29d10e5eb7ded33bbf33"
+_TOKEN_B = "0011223344556677889900aabbccddee"
+
+
+def test_browser_secret_is_stable_across_remasked_cookies(browser):
+    """Tornado 每次送 cookie 都換 mask——沒解遮罩的話 state 永遠驗不過，登入直接壞掉。"""
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    first = spotify_api._browser_secret()
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "61aae4da")})
+    second = spotify_api._browser_secret()
+    assert first == second == _TOKEN_A
+
+
+def test_browser_secret_differs_between_browsers(browser):
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    a = spotify_api._browser_secret()
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_B, "c7a369ce")})
+    assert a != spotify_api._browser_secret()
+
+
+def test_browser_secret_empty_when_context_unavailable(browser):
+    browser(None)
+    assert spotify_api._browser_secret() == ""
+    browser({})
+    assert spotify_api._browser_secret() == ""
+
+
+def test_state_round_trips_for_the_same_browser(browser):
+    """同一個瀏覽器發起、同一個瀏覽器導回——必須驗得過，否則正常登入會壞。"""
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    state = spotify_api._make_oauth_state()
+    # 導回時 cookie 已經換了一組 mask，但 raw token 相同
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "61aae4da")})
+    assert spotify_api._verify_oauth_state(state) is True
+
+
+def test_state_from_another_browser_is_rejected(browser):
+    """核心防護：攻擊者用自己的瀏覽器拿到 code+state，塞給受害者也驗不過。"""
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    attacker_state = spotify_api._make_oauth_state()
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_B, "61aae4da")})
+    assert spotify_api._verify_oauth_state(attacker_state) is False
+
+
+def test_missing_or_malformed_state_is_rejected(browser):
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    for bad in (None, "", "nonsense", "a.b", "a.b.c.d", "notanint.nonce.sig"):
+        assert spotify_api._verify_oauth_state(bad) is False
+
+
+def test_tampered_signature_is_rejected(browser):
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    ts, nonce, sig = spotify_api._make_oauth_state().split(".")
+    flipped = ("0" if sig[0] != "0" else "1") + sig[1:]
+    assert spotify_api._verify_oauth_state(f"{ts}.{nonce}.{flipped}") is False
+    assert spotify_api._verify_oauth_state(f"{ts}.{nonce}x.{sig}") is False
+
+
+def test_expired_and_future_states_are_rejected(browser, monkeypatch):
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    state = spotify_api._make_oauth_state()
+    real_time = spotify_api.time.time
+    monkeypatch.setattr(
+        spotify_api.time, "time",
+        lambda: real_time() + spotify_api._OAUTH_STATE_TTL + 60,
+    )
+    assert spotify_api._verify_oauth_state(state) is False
+    monkeypatch.setattr(spotify_api.time, "time", lambda: real_time() - 600)
+    assert spotify_api._verify_oauth_state(state) is False
+
+
+# ── ?error= 白名單（防釣魚內容注入）──────────────────────
+def test_known_error_codes_pass_through():
+    for code in ("access_denied", "invalid_client", "state_mismatch"):
+        spotify_api._set_auth_error(code)
+        assert spotify_api.st.session_state["spotify_auth_error"] == code
+
+
+def test_markdown_payload_is_collapsed_to_unknown_error():
+    """?error= 是攻擊者可控的網址參數，回顯到 st.warning() 會被當 Markdown 渲染——
+    反引號跳脫 code span 之後就能在官方警告框裡插釣魚連結。"""
+    payload = "x`\n\n[點此重新驗證你的 Spotify 帳號](https://evil.example)\n\n`"
+    spotify_api._set_auth_error(payload)
+    stored = spotify_api.st.session_state["spotify_auth_error"]
+    assert stored == "unknown_error"
+    assert "evil.example" not in stored
+    assert "`" not in stored
+
+
+def test_allowlisted_codes_contain_no_markdown_metacharacters():
+    """白名單裡的代碼是「原樣留著」的，所以它們本身必須是安全的字面值。
+
+    這條擋的是未來有人往白名單塞一個帶反引號/中括號的代碼——那等於自己開後門，
+    讓回顯又變回可注入 Markdown。
+    """
+    import re
+    for code in spotify_api._ALLOWED_OAUTH_ERRORS:
+        assert re.fullmatch(r"[a-z_]+", code), f"{code!r} 不是純小寫識別字"
+
+
+def test_unknown_error_is_itself_allowlisted():
+    """_set_auth_error() 的 fallback 值若不在白名單裡，語意會自相矛盾。"""
+    assert "unknown_error" in spotify_api._ALLOWED_OAUTH_ERRORS

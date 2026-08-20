@@ -355,6 +355,52 @@ h2.y2k-form-title {{ font-size: 2rem !important; }}
 .st-key-ctx_label_spacer,
 .st-key-ctx_label_spacer * {{ visibility: hidden !important; }}
 
+/* ── BYOK 步驟卡：上半 + st.code(Redirect URI) + 下半，接成一張卡 ──
+   為什麼要拆：自製的複製按鈕是死的（Streamlit 會濾掉 onclick），改用 st.code() 才真的
+   能複製；順帶讓 redirect_uri 完全不經過 unsafe_allow_html。但 Streamlit 每個元件各自
+   一個容器，HTML 標籤跨不過去，所以只能「畫成」一張卡：
+     上半 → 無下框線、只有上圓角     中間 → 補左右框線、無圓角     下半 → 無上框線、只有下圓角
+   陰影同理要拆：上半與中間只給右側（4px 0），下半才給右+下（4px 4px），
+   否則接縫處會出現兩道重疊的投影。 */
+/* ⚠️ 這兩條要成對出現，少一條就會有縫或重疊（量出來的，別憑感覺調）：
+   ① gap 要下在 .st-key-byok_steps **自己**身上——它本身就是那個 stVerticalBlock，
+      寫成後代選擇器 `.st-key-byok_steps [data-testid="stVerticalBlock"]` 選不到自己，
+      外層仍是 16px。
+   ② 同時要歸零 stMarkdownContainer 的 -16px 負邊界。原本 head→mid 量到 0 是**碰巧**
+      ——那 16px 剛好被負邊界抵銷；只設 gap:0 的話負邊界就變成 16px 重疊。
+   實測：修好前 head→mid 0 / mid→tail 16，修好後兩處都是 0。 */
+.st-key-byok_steps {{ gap: 0 !important; }}
+.st-key-byok_steps [data-testid="stMarkdownContainer"] {{ margin-bottom: 0 !important; }}
+.y2k-byok-card {{
+    border: 3px solid var(--y2k-deep-purple);
+    background: white;
+    padding: 16px 18px;
+    box-sizing: border-box;
+}}
+.y2k-byok-head {{
+    border-bottom: none;
+    border-radius: var(--y2k-border-radius) var(--y2k-border-radius) 0 0;
+    box-shadow: 4px 0 0 rgba(29,185,84,0.25);
+    padding-bottom: 4px;
+}}
+.y2k-byok-tail {{
+    border-top: none;
+    border-radius: 0 0 var(--y2k-border-radius) var(--y2k-border-radius);
+    box-shadow: 4px 4px 0 rgba(29,185,84,0.25);
+    padding-top: 4px;
+}}
+/* 中段（st.code）：補上左右框線，讓上下兩半連起來 */
+.st-key-byok_uri {{
+    border-left: 3px solid var(--y2k-deep-purple);
+    border-right: 3px solid var(--y2k-deep-purple);
+    background: white;
+    box-shadow: 4px 0 0 rgba(29,185,84,0.25);
+    padding: 0 18px 8px 18px;
+}}
+/* stCode 預設有 margin-bottom，會在中段底部撐出一條白縫 */
+.st-key-byok_uri [data-testid="stCode"],
+.st-key-byok_uri pre {{ margin-bottom: 0 !important; }}
+
 /* ── 推薦網格：同一列的卡片等高，Spotify 按鈕才會對齊 ──
    歌名 1/2 行、專輯有無、理由有無都會讓卡片高度不同；
    把 column → verticalBlock → 第一個 elementContainer 這條鏈都拉成 flex 並給高度，
@@ -480,6 +526,31 @@ _ACCENT_COLORS = ["#00D4AA", "#FF69B4", "#FFD700", "#9B59B6"]
 # 亮底（青/粉/黃）配深紫字（5.1–9.6:1），深底（紫）才配白字（4.7:1）。
 _ACCENT_TEXT_COLORS = ["#2D1B4E", "#2D1B4E", "#2D1B4E", "#FFFFFF"]
 
+# 「出圈」標籤刻意用固定色（不跟著 _ACCENT_COLORS 輪替）——它是語意標記不是裝飾，
+# 顏色一變就沒有辨識度了。青底配深紫字，對比 9.6:1。
+_DISCOVERY_BG = "#00D4AA"
+_DISCOVERY_FG = "#2D1B4E"
+
+
+def _discovery_badge_html(track, *, floating: bool, compact: bool = False) -> str:
+    """「這首來自你沒接觸過的音樂人」的標記。floating=True 是浮貼在封面上的版本。
+
+    ⚠️ 標籤寬度固定，但網格愈密卡片愈窄。每列 10 首時封面只有 58px、標籤 54px——
+    會超出封面邊界還蓋掉 35% 的專輯圖。所以密集網格改用 compact（只留指南針圖示）。
+    """
+    if not track.get("_discovery"):
+        return ""
+    pos = ("position:absolute;top:6px;left:6px;z-index:2;" if floating
+           else "display:inline-block;vertical-align:1px;margin-right:6px;")
+    pad = "1px 4px" if compact else "1px 7px"
+    text = "🧭" if compact else "🧭 出圈"
+    return (
+        f'<span title="來自你沒接觸過的音樂人" style="{pos}padding:{pad};border-radius:9px;'
+        f'font-size:0.62rem;font-weight:900;color:{_DISCOVERY_FG};background:{_DISCOVERY_BG};'
+        f"border:2px solid #2D1B4E;font-family:'Nunito','Noto Sans TC',sans-serif;"
+        f'white-space:nowrap">{text}</span>'
+    )
+
 
 def section_header_html(text, icon="notes"):
     svg_map = {"notes": SVG_NOTES, "vinyl": SVG_VINYL, "cassette": SVG_CASSETTE, "boombox": SVG_BOOMBOX}
@@ -599,7 +670,7 @@ def _tidy(html: str) -> str:
     return "\n".join(stripped for line in html.splitlines() if (stripped := line.strip()))
 
 
-def track_card_html(track, index):
+def track_card_html(track, index, compact_badge=False):
     accent = _ACCENT_COLORS[index % 4]
     accent_text = _ACCENT_TEXT_COLORS[index % 4]
     name = html_mod.escape(track.get("name", ""))
@@ -637,11 +708,17 @@ def track_card_html(track, index):
         else ""
     )
 
+    # 標籤浮貼在封面左上角，不佔垂直空間——卡片要等高，多一列就會讓 ▶ Spotify 按鈕跑掉
+    cover_block = (
+        f'<div style="position:relative">'
+        f'{_discovery_badge_html(track, floating=True, compact=compact_badge)}{cover_html}</div>'
+    )
+
     return _tidy(f"""<div style="border:3px solid #2D1B4E;border-radius:18px;padding:10px;
   box-shadow:4px 4px 0px {accent};background:white;margin-bottom:8px;
   height:100%;box-sizing:border-box;
   transition:transform 0.15s ease,box-shadow 0.15s ease">
-  {cover_html}
+  {cover_block}
   <div style="padding:6px 2px 2px 2px">
     <div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:0.88rem;
       color:#2D1B4E;line-height:1.3;overflow:hidden;display:-webkit-box;
@@ -674,6 +751,7 @@ def track_list_html(track, index):
     )
 
     album_part = f"💿 {album}　·　" if album else ""
+    disc_part = _discovery_badge_html(track, floating=False)
 
     return f"""<div style="display:flex;align-items:center;gap:14px;padding:10px 14px;
   border-left:5px solid {accent};border-radius:0 14px 14px 0;margin-bottom:6px;
@@ -688,7 +766,7 @@ def track_list_html(track, index):
       <span style="font-weight:400;color:#666"> — {artist}</span>
     </div>
     <div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.78rem;color:#888;margin-top:2px">
-      {album_part}💡 {reason}
+      {disc_part}{album_part}💡 {reason}
     </div>
   </div>
 </div>"""
@@ -711,70 +789,51 @@ def results_header_html(count):
 
 # ── BYOK Guide ───────────────────────────────────────────
 
-def byok_spotify_steps_html(redirect_uri: str) -> str:
-    """Render a visual step-by-step guide for obtaining Spotify API keys."""
-    escaped_uri = html_mod.escape(redirect_uri)
+# BYOK 步驟卡刻意拆成上下兩半，中間讓 app.py 夾一個原生的 st.code(redirect_uri)。
+#
+# 為什麼不把網址直接畫進 HTML：
+#  ① 之前那顆自製的「📋 複製」按鈕**根本是死的**——Streamlit 的 markdown 管線
+#     （rehype-raw → React）會把 onclick 這類事件處理器整個濾掉（實測整頁 0 個元素
+#     帶 onclick）。按鈕有 cursor:pointer，看起來可點卻毫無反應。
+#     st.code() 有 Streamlit 原生的複製圖示，是真的能複製（分享歌單那區同一個做法）。
+#  ② 順帶把注入面整個移除：redirect_uri 是使用者可填的值，改由 st.code() 呈現之後
+#     **完全不再經過 unsafe_allow_html**，不必再煩惱 HTML/JS 情境該用哪種跳脫。
+#
+# ⚠️ 兩半要看起來像一張完整的卡片，靠的是 _build_global_css() 裡的 .st-key-byok_steps
+#    規則（上半無下框線、下半無上框線、中間補左右框線、垂直 gap 歸零）。
+#    改這裡的圓角/框線寬度，那邊要一起改，改完務必用瀏覽器量過接縫。
 
-    steps = [
-        (
-            "#00D4AA",
-            "1",
-            "🌐",
-            "開啟 Spotify Developer Dashboard",
-            f'前往 <a href="https://developer.spotify.com/dashboard" target="_blank" '
-            f'style="color:#00D4AA;font-weight:700;text-decoration:none">'
-            f'developer.spotify.com/dashboard</a> 並登入你的 Spotify 帳號。',
-        ),
-        (
-            "#FF69B4",
-            "2",
-            "➕",
-            "建立新 App",
-            '點擊右上角 <strong>Create App</strong>，'
-            'App Name 和 Description 隨意填寫都沒關係。',
-        ),
-        (
-            "#FFD700",
-            "3",
-            "🔗",
-            "設定 Redirect URI（最重要！）",
-            f'在 <strong>Redirect URIs</strong> 欄位填入以下網址，'
-            f'必須<strong>一字不差</strong>：'
-            f'<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-            f'  <code style="background:#2D1B4E;color:#FFD700;padding:6px 12px;border-radius:8px;'
-            f'font-size:0.88rem;font-family:monospace;flex:1;min-width:0;word-break:break-all">'
-            f'{escaped_uri}</code>'
-            f'  <button onclick="navigator.clipboard.writeText(\'{escaped_uri}\').then(()=>{{'
-            f'this.textContent=\'✅ 已複製!\';setTimeout(()=>{{this.textContent=\'📋 複製\';}},2000);}})" '
-            f'style="cursor:pointer;padding:6px 14px;border-radius:20px;border:2.5px solid #2D1B4E;'
-            f'background:#FFD700;color:#2D1B4E;font-weight:700;font-family:Nunito,sans-serif;'
-            f'font-size:0.82rem;white-space:nowrap;box-shadow:2px 2px 0 #2D1B4E;'
-            f'transition:all 0.15s ease">📋 複製</button>'
-            f'</div>',
-        ),
-        (
-            "#9B59B6",
-            "4",
-            "☑️",
-            "勾選 Web API",
-            '在 <strong>Which API/SDKs are you planning to use?</strong> 區塊，'
-            '勾選 <strong>Web API</strong>，然後儲存。',
-        ),
-        (
-            "#00D4AA",
-            "5",
-            "🔑",
-            "複製 Client ID 和 Client Secret",
-            '建立完成後，在 App 的 Settings 頁面就能看到 '
-            '<strong>Client ID</strong> 和 <strong>Client Secret</strong>，複製後貼到下方欄位。',
-        ),
-    ]
+_BYOK_STEPS_HEAD = (
+    ("#00D4AA", "1", "🌐", "開啟 Spotify Developer Dashboard",
+     '前往 <a href="https://developer.spotify.com/dashboard" target="_blank" '
+     'style="color:#00D4AA;font-weight:700;text-decoration:none">'
+     'developer.spotify.com/dashboard</a> 並登入你的 Spotify 帳號。'),
+    ("#FF69B4", "2", "➕", "建立新 App",
+     '點擊右上角 <strong>Create App</strong>，'
+     'App Name 和 Description 隨意填寫都沒關係。'),
+    ("#FFD700", "3", "🔗", "設定 Redirect URI（最重要！）",
+     '在 <strong>Redirect URIs</strong> 欄位填入下面這個網址，必須<strong>一字不差</strong>'
+     '（點右上角圖示可一鍵複製）：'),
+)
 
-    steps_html = ""
-    for color, num, icon, title, desc in steps:
-        steps_html += f"""
+_BYOK_STEPS_TAIL = (
+    ("#9B59B6", "4", "☑️", "勾選 Web API",
+     '在 <strong>Which API/SDKs are you planning to use?</strong> 區塊，'
+     '勾選 <strong>Web API</strong>，然後儲存。'),
+    ("#00D4AA", "5", "🔑", "複製 Client ID 和 Client Secret",
+     '建立完成後，在 App 的 Settings 頁面就能看到 '
+     '<strong>Client ID</strong> 和 <strong>Client Secret</strong>，複製後貼到下方欄位。'),
+)
+
+
+def _byok_step_rows(steps, *, last_has_border: bool = True) -> str:
+    rows = ""
+    for i, (color, num, icon, title, desc) in enumerate(steps):
+        last = i == len(steps) - 1
+        border = "none" if (last and not last_has_border) else f"2px dashed {color}33"
+        rows += f"""
 <div style="display:flex;gap:12px;align-items:flex-start;padding:12px 0;
-  border-bottom:2px dashed {color}33">
+  border-bottom:{border}">
   <div style="flex-shrink:0;width:36px;height:36px;border-radius:50%;
     background:{color};border:2.5px solid #2D1B4E;
     display:flex;align-items:center;justify-content:center;
@@ -787,11 +846,13 @@ def byok_spotify_steps_html(redirect_uri: str) -> str:
       color:#444;line-height:1.6">{desc}</div>
   </div>
 </div>"""
+    return rows
 
+
+def byok_spotify_steps_head_html() -> str:
+    """步驟卡上半：標題 + 步驟 1–3。後面緊接著 app.py 的 st.code(redirect_uri)。"""
     return f"""
-<div style="border:3px solid #2D1B4E;
-  border-radius:18px;padding:16px 18px;margin:8px 0;
-  box-shadow:4px 4px 0px rgba(29,185,84,0.25);background:white">
+<div class="y2k-byok-card y2k-byok-head">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
     <svg viewBox='0 0 24 24' width='28' fill='#1DB954' xmlns='http://www.w3.org/2000/svg'>
       <circle cx='12' cy='12' r='12' fill='#1DB954'/>
@@ -808,7 +869,15 @@ def byok_spotify_steps_html(redirect_uri: str) -> str:
       style="margin-left:auto;font-family:'Nunito',sans-serif;font-size:0.8rem;
       color:#1DB954;font-weight:700;text-decoration:none">前往 Dashboard →</a>
   </div>
-  {steps_html}
+  {_byok_step_rows(_BYOK_STEPS_HEAD, last_has_border=False)}
+</div>"""
+
+
+def byok_spotify_steps_tail_html() -> str:
+    """步驟卡下半：步驟 4–5。接在 st.code(redirect_uri) 之後。"""
+    return f"""
+<div class="y2k-byok-card y2k-byok-tail">
+  {_byok_step_rows(_BYOK_STEPS_TAIL, last_has_border=False)}
 </div>"""
 
 

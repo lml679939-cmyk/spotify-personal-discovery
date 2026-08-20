@@ -3,17 +3,107 @@ Spotify API 層：OAuth、client、搜尋、歌單、跨 session 歷史。
 只在函式被呼叫時才碰 session_state——import 本模組不會執行任何 UI 程式碼。
 """
 
+import binascii
+import hashlib
+import hmac
 import os
+import secrets
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 import spotipy
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from spotipy.cache_handler import MemoryCacheHandler
 
+from recommend import _track_key, _track_key_from, resolution_matches
+
 PERSISTENT_HISTORY_MAX = 500  # 跨 session 歷史歌單保留上限，超過會修剪最舊的
+
+# ── 聆聽資料抓取範圍 ──────────────────────────────────────
+# 以前只抓 top 30 + 最近 50 + 收藏 100 ≈ 180 首，兩年前天天聽、最近沒播的歌手
+# 會被判成「全新藝人」——「選了全新卻推熟歌」有一半是這裡漏掉的。
+TOP_FETCH_LIMIT = 50        # top tracks/artists 每個時間範圍各抓幾筆（API 上限 50）
+SAVED_FETCH_MAX = 500       # 收藏曲目抓到第幾首（分頁並行）
+PROFILE_WORKERS = 10        # profile 抓取的並行度
+TIME_RANGES = ("short_term", "medium_term", "long_term")
+PROMPT_HEARD_TITLES_MAX = 60   # 放進 prompt 的曲目樣本上限（完整清單只在程式端比對）
+PROMPT_EXCLUDE_ARTISTS_MAX = 50  # 放進 prompt 的排除歌手上限（清單太長 LLM 反而不遵守）
+
+_PROFILE_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="profile")
+
+# ── 搜尋結果快取 ─────────────────────────────────────────
+# 單次推薦要打上百個搜尋請求，而所有使用者共用同一組 Client ID 的配額。
+# LLM 的推薦重複性很高（同一個情境不同人跑，常出現同一批歌），跨使用者共用快取
+# 是降低請求量最省事的一招。
+# client-credentials token 的記憶體快取，依 client id 分開（見 _client_credentials()）。
+# 用 module 層級是為了讓 token 在 process 內共用，不必每次生成都重新換一次。
+_CC_CACHES: dict[str, MemoryCacheHandler] = {}
+_CC_CACHE_LOCK = threading.Lock()
+
+SEARCH_CACHE_MAX = 2000
+_SEARCH_CACHE: dict[tuple[str, str], dict | None] = {}
+_SEARCH_CACHE_LOCK = threading.Lock()
+_SEARCH_STATS = {"hits": 0, "misses": 0}
+
+
+def _cache_search(key: tuple[str, str], value: dict | None) -> dict | None:
+    """寫入快取並回傳原值。
+
+    ⚠️ 只有「真的搜過而且有結論」才會走到這裡——撞到 429 時 spotipy 會拋例外，
+    不會回到這一行，所以限流造成的「找不到」不會被寫進快取毒化後續查詢。
+    """
+    with _SEARCH_CACHE_LOCK:
+        if len(_SEARCH_CACHE) >= SEARCH_CACHE_MAX:
+            _SEARCH_CACHE.clear()      # 夠用的淘汰策略：滿了就整批丟掉重建
+        # 存複本、回原件——呼叫端會往回傳值裡塞 reason / fame / _discovery，
+        # 存同一個物件的話第一次生成就把快取內容污染了
+        _SEARCH_CACHE[key] = dict(value) if value is not None else None
+    return value
+
+
+def search_cache_info() -> dict:
+    with _SEARCH_CACHE_LOCK:
+        return {"size": len(_SEARCH_CACHE), **_SEARCH_STATS}
+
+# ⚠️ 429 絕對不能讓底層自己重試。實測撞到限制時 Retry-After 是 21315 秒（約 6 小時），
+# urllib3 會遵守它並真的 sleep 下去，整個頁面凍在「搜尋歌曲中」不動。
+#
+# 兩個直覺的做法都不對：
+#   1. `retries=0` —— 確實不會睡，但 urllib3 第一次 increment() 就丟 MaxRetryError，
+#      spotipy 的 handler 寫死轉成 SpotifyException(429)，**所有 5xx 與連線中斷都會被
+#      誤判成速率限制**，一顆暫時性 503 就讓整批搜尋短路。
+#   2. 只把 429 移出 `status_forcelist` —— 沒用。urllib3 的 Retry.is_retry() 有一條
+#      獨立路徑：只要 total>0、respect_retry_after_header=True 且回應帶 Retry-After，
+#      429 就算不在 forcelist 也照樣重試（429 在 Retry.RETRY_AFTER_STATUS_CODES 裡）。
+# 正解是自己掛一個 respect_retry_after_header=False 的 adapter：
+# 429 立刻拋出、5xx 與連線問題仍照常重試。
+SPOTIFY_RETRIES = 3
+SPOTIFY_RETRY_CODES = (500, 502, 503, 504)
+
+
+def _harden(sp: spotipy.Spotify) -> spotipy.Spotify:
+    retry = Retry(
+        total=SPOTIFY_RETRIES,
+        connect=SPOTIFY_RETRIES,
+        read=SPOTIFY_RETRIES,
+        status=SPOTIFY_RETRIES,
+        backoff_factor=0.3,
+        status_forcelist=SPOTIFY_RETRY_CODES,
+        respect_retry_after_header=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    sp._session.mount("http://", adapter)
+    sp._session.mount("https://", adapter)
+    return sp
+
+
+def _sp(auth: str) -> spotipy.Spotify:
+    return _harden(spotipy.Spotify(auth=auth))
 
 
 def _local_now() -> datetime:
@@ -41,24 +131,125 @@ def _get_credential(key: str) -> str | None:
     return _get_env(key)
 
 SCOPES = (
-    "user-top-read user-read-recently-played user-library-read "
+    "user-top-read user-read-recently-played user-library-read user-follow-read "
     "playlist-read-private playlist-modify-public playlist-modify-private"
 )
 
 # 跨 session 歷史（存在 Spotify 私人歌單裡）
 HISTORY_PLAYLIST_NAME = "🤖 AI Discovery History (請勿手動刪除)"
 
+# ── OAuth state（防授權碼注入 / login CSRF）──────────────
+# 沒有 state 的話，攻擊者可以用自己的帳號授權、拿到 ?code= 之後不讓自己的分頁載入，
+# 再把 https://本站/?code=攻擊者的code 傳給受害者——受害者一點開就被靜默綁到攻擊者的
+# Spotify 帳號，之後生成的歌單與推薦歷史全部寫進攻擊者的帳號（攻擊者可回頭讀取）。
+#
+# ⚠️ 教科書寫法「nonce 存 session_state、回來再比對」在 Streamlit 上行不通：
+# 使用者跳去 Spotify 再導回來是**整頁重新載入**，session_state 會整個重生
+# （實測 nonce e2b32d96 → 909f0aa6），比對永遠失敗＝登入直接壞掉。
+#
+# 解法是做成無狀態的簽章：state = 時間戳.nonce.HMAC(瀏覽器祕密, 時間戳.nonce)。
+# 「瀏覽器祕密」取自 Streamlit 的 _streamlit_xsrf cookie——它撐得過整頁導向，
+# 而且是逐瀏覽器獨立的。攻擊者拿到的 state 是用**攻擊者的**瀏覽器祕密簽的，
+# 到了受害者的瀏覽器就驗不過，攻擊即失效。伺服器端不需要存任何東西。
+_OAUTH_STATE_TTL = 600   # 授權來回的有效秒數（Spotify 的 code 本身也只有 ~10 分鐘）
+
+
+def _browser_secret() -> str:
+    """逐瀏覽器獨立、且能撐過整頁導向的祕密值。取不到時回空字串。
+
+    ⚠️ Tornado 的 XSRF cookie 是 `2|<mask>|<masked token>|<timestamp>`，**每次送出都會
+    換一組 mask**，所以不能直接拿 cookie 字串當祕密（值會變、比對必失敗）。
+    要先解遮罩還原成底層 raw token，那個才是穩定的（實測兩次載入都是 682ffabc…）。
+    """
+    try:
+        raw = st.context.cookies.get("_streamlit_xsrf", "") or ""
+    except Exception:
+        return ""
+    parts = raw.split("|")
+    if len(parts) == 4 and parts[0] == "2":
+        try:
+            mask = binascii.a2b_hex(parts[1].encode())
+            masked = binascii.a2b_hex(parts[2].encode())
+            if mask:
+                return bytes(b ^ mask[i % len(mask)] for i, b in enumerate(masked)).hex()
+        except (binascii.Error, ValueError):
+            pass
+    return raw   # 格式變了就退回原字串——保護力較弱，但不會把登入弄壞
+
+
+def _sign_state(nonce: str, issued_at: int) -> str:
+    return hmac.new(
+        _browser_secret().encode(), f"{issued_at}.{nonce}".encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def _make_oauth_state() -> str:
+    # token_urlsafe 只會產生 [A-Za-z0-9_-]，不含 "."，所以下面用 "." 切三段是安全的
+    nonce = secrets.token_urlsafe(16)
+    issued_at = int(time.time())
+    return f"{issued_at}.{nonce}.{_sign_state(nonce, issued_at)}"
+
+
+def _verify_oauth_state(state: str | None) -> bool:
+    if not state:
+        return False
+    parts = state.split(".")
+    if len(parts) != 3:
+        return False
+    ts_str, nonce, sig = parts
+    try:
+        issued_at = int(ts_str)
+    except ValueError:
+        return False
+    # 未來時間也擋掉（時鐘漂移留 60 秒寬容）
+    age = time.time() - issued_at
+    if not -60 <= age <= _OAUTH_STATE_TTL:
+        return False
+    return hmac.compare_digest(sig, _sign_state(nonce, issued_at))
+
+
 # ── Spotify 多用戶 OAuth ────────────────────────────────
-def _get_auth_manager() -> SpotifyOAuth:
-    """每次 call 都新建一個 OAuth manager，搭配 MemoryCacheHandler 確保多用戶獨立。"""
+def _get_auth_manager(state: str | None = None) -> SpotifyOAuth:
+    """每次 call 都新建一個 OAuth manager，搭配 MemoryCacheHandler 確保多用戶獨立。
+
+    state 只有「產生授權網址」時需要；換 token / refresh 時不必帶。
+    """
     return SpotifyOAuth(
         client_id=_get_credential("SPOTIFY_CLIENT_ID"),
         client_secret=_get_credential("SPOTIFY_CLIENT_SECRET"),
         redirect_uri=_get_credential("SPOTIFY_REDIRECT_URI"),
         scope=SCOPES,
+        state=state,
         cache_handler=MemoryCacheHandler(),  # 不寫 .cache 檔，避免多用戶污染
         open_browser=False,
         show_dialog=False,
+    )
+
+
+def get_login_url() -> str:
+    """Spotify 授權網址（已帶上綁定本瀏覽器的 state）。"""
+    return _get_auth_manager(state=_make_oauth_state()).get_authorize_url()
+
+
+# ⚠️ ?error= 是網址參數＝完全由攻擊者控制，**絕對不能原樣存起來再回顯**。
+# 登入頁是用 st.warning(f"…（`{auth_err}`）…") 呈現的，Streamlit 的 alert 會渲染
+# Markdown（雖然不允許 HTML）——payload 裡放一個反引號就跳出 code span，之後可以插入
+# 任意 Markdown。在官方網域、官方樣式的警告框裡放一句「點此重新驗證你的 Spotify 帳號」
+# 連到釣魚站，可信度極高；`![](https://evil/x.png)` 也能靜默外洩受害者 IP。
+# 所以這裡改成白名單：認得的照原樣留（對排錯有用），不認得的一律收斂成 unknown_error。
+_ALLOWED_OAUTH_ERRORS = frozenset({
+    # Spotify / RFC 6749 會回的
+    "access_denied", "invalid_client", "invalid_request", "invalid_scope",
+    "unauthorized_client", "unsupported_response_type", "server_error",
+    "temporarily_unavailable",
+    # 本站自己產生的
+    "state_mismatch", "token_exchange_failed", "unknown_error",
+})
+
+
+def _set_auth_error(code: str) -> None:
+    st.session_state["spotify_auth_error"] = (
+        code if code in _ALLOWED_OAUTH_ERRORS else "unknown_error"
     )
 
 
@@ -67,50 +258,77 @@ def consume_oauth_callback() -> None:
 
     失敗訊息寫入 st.session_state["spotify_auth_error"]，由登入頁決定呈現方式——
     不在這裡 st.error()，否則錯誤會出現在 hero 之前。
+    ⚠️ 寫進去的一律是白名單內的錯誤代碼，不是使用者可控的原始字串（見上）。
     """
     if "spotify_token" in st.session_state:
         return
 
-    err = st.query_params.get("error")
-    if err:
-        st.session_state["spotify_auth_error"] = err
+    def _clear_qp() -> None:
         try:
             st.query_params.clear()
         except Exception:
             pass
+
+    err = st.query_params.get("error")
+    if err:
+        _set_auth_error(err)
+        _clear_qp()
         return
 
     code = st.query_params.get("code")
     if not code:
         return
+
+    # ⚠️ 一定要在換 token「之前」驗 state：驗不過就代表這個 code 不是這個瀏覽器
+    # 自己發起的授權（多半是別人塞過來的），照換就等於把 session 綁到對方的帳號。
+    if not _verify_oauth_state(st.query_params.get("state")):
+        _set_auth_error("state_mismatch")
+        _clear_qp()
+        return
+
     try:
-        auth_manager = _get_auth_manager()
-        token_info = auth_manager.get_access_token(code, as_dict=True, check_cache=False)
+        token_info = _get_auth_manager().get_access_token(
+            code, as_dict=True, check_cache=False
+        )
         st.session_state["spotify_token"] = token_info
         st.session_state.pop("spotify_auth_error", None)
-    except Exception as e:
-        st.session_state["spotify_auth_error"] = str(e)
+    except Exception:
+        # ⚠️ 別把 str(e) 存進去——例外訊息含 Spotify 回傳的內容，同樣會被回顯到警告框
+        _set_auth_error("token_exchange_failed")
     finally:
         # 清掉 URL 上的 code，避免重新整理時重複交換
-        try:
-            st.query_params.clear()
-        except Exception:
-            pass
+        _clear_qp()
 
 
 def is_authenticated() -> bool:
     return "spotify_token" in st.session_state
 
-def _get_guest_spotify_client() -> spotipy.Spotify | None:
-    """Client-credentials flow for search without user login."""
+def _client_credentials() -> SpotifyClientCredentials | None:
+    """App 層級（client-credentials）的 auth manager。
+
+    ⚠️ 一定要自己帶 cache_handler：spotipy 沒收到時預設是 `CacheFileHandler()`，
+    會把 token 寫進 CWD 的 `.cache` 檔——與「token 只存記憶體」的設計相違。
+    ⚠️ 而且快取要**依 client id 分開**：BYOK 使用者填的是自己的 Client ID，
+    共用一份快取（不論檔案或記憶體）會讓不同 app 的 token 互相污染。
+    """
     cid = _get_credential("SPOTIFY_CLIENT_ID")
     csec = _get_credential("SPOTIFY_CLIENT_SECRET")
     if not cid or not csec:
         return None
+    with _CC_CACHE_LOCK:
+        handler = _CC_CACHES.setdefault(cid, MemoryCacheHandler())
+    return SpotifyClientCredentials(
+        client_id=cid, client_secret=csec, cache_handler=handler,
+    )
+
+
+def _get_guest_spotify_client() -> spotipy.Spotify | None:
+    """Client-credentials flow for search without user login."""
+    auth = _client_credentials()
+    if auth is None:
+        return None
     try:
-        return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-            client_id=cid, client_secret=csec,
-        ))
+        return _harden(spotipy.Spotify(auth_manager=auth))
     except Exception:
         return None
 
@@ -121,64 +339,157 @@ def get_spotify_client() -> spotipy.Spotify:
     if auth_manager.is_token_expired(token_info):
         token_info = auth_manager.refresh_access_token(token_info["refresh_token"])
         st.session_state["spotify_token"] = token_info
-    return spotipy.Spotify(auth=token_info["access_token"])
+    return _sp(token_info["access_token"])
+
+
+def _fetch_profile_blocking(token: str) -> dict:
+    """實際去 Spotify 抓聆聽資料。純函式——不碰 session_state，所以可以丟背景執行緒。
+
+    抓 18 個 endpoint（3 個時間範圍 × top tracks/artists、最近播放、收藏 10 頁、
+    追蹤中的歌手），彼此獨立所以全部並行。單一 endpoint 失敗（例如舊 token 沒有
+    user-follow-read scope）只讓那一項變空，不影響其他資料。
+    """
+    # ⚠️ requests.Session 不是 thread-safe，每個 worker 用自己的 client（同 _search_tracks_parallel）
+    tls = threading.local()
+    failures: list[str] = []   # list.append 在 CPython 下是 thread-safe
+
+    def _call(fn):
+        client = getattr(tls, "sp", None)
+        if client is None:
+            client = _sp(token)
+            tls.sp = client
+        try:
+            return fn(client) or []
+        except Exception as e:
+            failures.append(type(e).__name__)
+            return []
+
+    def _saved_page(c, off):
+        return [i["track"] for i in c.current_user_saved_tracks(limit=50, offset=off)["items"]
+                if i.get("track")]
+
+    jobs = {}
+    for tr in TIME_RANGES:
+        jobs[f"tt_{tr}"] = lambda c, tr=tr: c.current_user_top_tracks(
+            limit=TOP_FETCH_LIMIT, time_range=tr)["items"]
+        jobs[f"ta_{tr}"] = lambda c, tr=tr: c.current_user_top_artists(
+            limit=TOP_FETCH_LIMIT, time_range=tr)["items"]
+    jobs["recent"] = lambda c: [
+        i["track"] for i in c.current_user_recently_played(limit=50)["items"] if i.get("track")
+    ]
+    # 收藏先只抓第一頁——順便拿到 total，才知道真的需要幾頁。
+    # 以前無條件送 10 個分頁請求，只收藏 20 首的人有 9 個請求是白打的（共用同一組
+    # Client ID 的 rate limit，撞到 429 會讓整個 profile 變空）。
+    jobs["saved_head"] = lambda c: c.current_user_saved_tracks(limit=50, offset=0)
+    jobs["followed"] = lambda c: c.current_user_followed_artists(limit=50)["artists"]["items"]
+
+    with ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as ex:
+        futures = {k: ex.submit(_call, fn) for k, fn in jobs.items()}
+        res = {k: f.result() for k, f in futures.items()}
+
+    head = res["saved_head"] if isinstance(res["saved_head"], dict) else {}
+    saved = [i["track"] for i in (head.get("items") or []) if i.get("track")]
+    offsets = list(range(50, min(head.get("total") or 0, SAVED_FETCH_MAX), 50))
+    if offsets:
+        with ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as ex:
+            for page in ex.map(lambda off: _call(lambda c, off=off: _saved_page(c, off)), offsets):
+                saved.extend(page)
+
+    top_tracks = {tr: res[f"tt_{tr}"] for tr in TIME_RANGES}
+    top_artists = {tr: res[f"ta_{tr}"] for tr in TIME_RANGES}
+    all_tracks = [t for v in top_tracks.values() for t in v] + res["recent"] + saved
+    all_artists = [a for v in top_artists.values() for a in v] + res["followed"]
+
+    def track_str(t):
+        return f"{t['name']} - {', '.join(a['name'] for a in t.get('artists', []))}"
+
+    def uniq(seq):
+        return list(dict.fromkeys(x for x in seq if x))
+
+    # 「已知宇宙」：程式端比對用的完整集合。歌手用 ID 為主鍵——名稱有太多變體
+    #（IU / 아이유、五月天 / Mayday），ID 比對不會漏。
+    known_artist_ids = {a["id"] for a in all_artists if a.get("id")}
+    known_artist_names = {a["name"] for a in all_artists if a.get("name")}
+    for t in all_tracks:
+        for a in t.get("artists", []):
+            if a.get("id"):
+                known_artist_ids.add(a["id"])
+            if a.get("name"):
+                known_artist_names.add(a["name"])
+
+    known_track_keys = {
+        _track_key_from(t["name"], t["artists"][0]["name"])
+        for t in all_tracks if t.get("name") and t.get("artists")
+    }
+
+    # prompt 用的樣本：清單太長 LLM 反而不遵守（文獻：50 條內較穩、200+ 明顯衰退），
+    # 而且長 context 中段的資訊利用率最低。真正的排除保證在程式端，這裡只求少浪費候選。
+    prompt_artists = uniq(
+        [a["name"] for tr in ("medium_term", "short_term", "long_term") for a in top_artists[tr]]
+    )
+    prompt_titles = uniq([t["name"] for t in top_tracks["short_term"] + top_tracks["medium_term"]]
+                         + [t["name"] for t in res["recent"]])
+
+    return {
+        "top_tracks_recent":  [track_str(t) for t in top_tracks["short_term"][:10]],
+        "top_tracks_overall": [track_str(t) for t in top_tracks["medium_term"][:20]],
+        "top_artists":  prompt_artists[:20],
+        "top_genres":   list({g for a in all_artists for g in a.get("genres", [])}),
+        "heard_titles":  prompt_titles[:PROMPT_HEARD_TITLES_MAX],
+        "heard_artists": prompt_artists[:PROMPT_EXCLUDE_ARTISTS_MAX],
+        "known_artist_ids":   known_artist_ids,
+        "known_artist_names": known_artist_names,
+        "known_track_keys":   known_track_keys,
+        "known_stats": {
+            "tracks": len(known_track_keys),
+            "artists": len(known_artist_ids),
+            "saved": len(saved),
+            "followed": len(res["followed"]),
+            # Spotify 已從 artist 物件拿掉 genres（client credentials 實測）。若用登入
+            # token 也拿不到，這裡會是 0，prompt 的「風格」就退回寫死的 "pop, indie pop"——
+            # 推薦會變得很泛而且看不出原因，所以要能一眼從 log 看到。
+            "genres": len({g for a in all_artists for g in a.get("genres", [])}),
+            # 全部 endpoint 都失敗時 profile 會是空的，出圈過濾等於整條失效——
+            # 這個數字要一路帶到 [NOVELTY] log 與 UI 警告，不能默默降級
+            "failed_calls": len(failures),
+        },
+    }
+
+
+def start_profile_prefetch() -> None:
+    """登入後頁面一載入就在背景抓聆聽資料（18 個 endpoint，並行後約 1–1.5 秒）。
+
+    比照 start_geo_prefetch()：token 必須在主執行緒讀（worker 不能碰 session_state），
+    使用者填完情境按下生成時通常已經好了。
+    """
+    if not is_authenticated():
+        return
+    if "user_profile_future" in st.session_state:
+        return
+    if any(k.startswith("user_profile::") for k in st.session_state):
+        return
+    token = _get_search_token()   # 會順便觸發必要的 token refresh
+    if not token:
+        return
+    st.session_state["user_profile_future"] = _PROFILE_POOL.submit(_fetch_profile_blocking, token)
 
 
 def fetch_user_profile() -> dict:
     """讀使用者聆聽資料；以 user_id 為 key 快取在 session_state（per-user safe）。"""
     sp = get_spotify_client()
     user = sp.current_user()
-    cache_key = f"user_profile::{user['id']}"
+    # v2：改版後多了 known_* 三個集合，舊快取沒有這些鍵，換 key 強制重抓
+    cache_key = f"user_profile::v2::{user['id']}"
     if cache_key in st.session_state:
         return st.session_state[cache_key]
 
-    # 這 6 個 endpoint 彼此獨立，循序打完要等 6 個 round-trip（實測 2–3 秒，全部卡在
-    # Gemini 開始之前）。改成並行，總時間縮到最慢的那一個。
-    # ⚠️ requests.Session 不是 thread-safe，每個 worker 用自己的 client（同 _search_tracks_parallel）
     token = st.session_state["spotify_token"]["access_token"]
-    tls = threading.local()
+    future = st.session_state.pop("user_profile_future", None)
+    try:
+        profile = future.result(timeout=30) if future is not None else _fetch_profile_blocking(token)
+    except Exception:
+        profile = _fetch_profile_blocking(token)
 
-    def _call(fn):
-        client = getattr(tls, "sp", None)
-        if client is None:
-            client = spotipy.Spotify(auth=token)
-            tls.sp = client
-        return fn(client)
-
-    jobs = {
-        "top_medium": lambda c: c.current_user_top_tracks(limit=20, time_range="medium_term")["items"],
-        "top_short":  lambda c: c.current_user_top_tracks(limit=10, time_range="short_term")["items"],
-        "artists":    lambda c: c.current_user_top_artists(limit=15, time_range="medium_term")["items"],
-        "recent":     lambda c: c.current_user_recently_played(limit=50)["items"],
-        "saved0":     lambda c: c.current_user_saved_tracks(limit=50, offset=0)["items"],
-        "saved50":    lambda c: c.current_user_saved_tracks(limit=50, offset=50)["items"],
-    }
-    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
-        futures = {k: ex.submit(_call, fn) for k, fn in jobs.items()}
-        res = {k: f.result() for k, f in futures.items()}
-
-    top_tracks_medium = res["top_medium"]
-    top_tracks_short  = res["top_short"]
-    top_artists       = res["artists"]
-    recently_played   = res["recent"]
-    saved_tracks      = res["saved0"] + res["saved50"]
-
-    def track_str(t):
-        return f"{t['name']} - {', '.join(a['name'] for a in t['artists'])}"
-
-    all_tracks = (
-        top_tracks_medium + top_tracks_short
-        + [i["track"] for i in recently_played]
-        + [i["track"] for i in saved_tracks]
-    )
-    profile = {
-        "top_tracks_recent":  [track_str(t) for t in top_tracks_short],
-        "top_tracks_overall": [track_str(t) for t in top_tracks_medium],
-        "top_artists":  [a["name"] for a in top_artists],
-        "top_genres":   list({g for a in top_artists for g in a.get("genres", [])}),
-        "heard_titles":  sorted({t["name"] for t in all_tracks}),
-        "heard_artists": sorted({a["name"] for t in all_tracks for a in t["artists"]}),
-    }
     st.session_state[cache_key] = profile
     return profile
 
@@ -205,6 +516,21 @@ def create_playlist_with_tracks(playlist_name: str, track_uris: list[str]) -> di
 
 
 def search_track(title: str, artist: str, sp: spotipy.Spotify | None = None) -> dict | None:
+    """在 Spotify 找出 LLM 推薦的那首歌。找不到、或找到的明顯是別首歌，一律回 None。
+
+    結果會快取（跨使用者共用）——LLM 的推薦高度重複，同一首歌會被不同使用者、
+    不同批次一再搜尋，而**所有人共用同一組 Client ID 的配額**，重複搜尋是最沒必要的浪費。
+    """
+    key = _track_key(title, artist)
+    with _SEARCH_CACHE_LOCK:
+        if key in _SEARCH_CACHE:
+            _SEARCH_STATS["hits"] += 1
+            hit = _SEARCH_CACHE[key]
+            # ⚠️ 一定要回複本：呼叫端會往裡面塞 reason / fame / _discovery，
+            # 直接回同一個 dict 的話快取內容會被前一次生成的資料污染
+            return dict(hit) if hit is not None else None
+        _SEARCH_STATS["misses"] += 1
+
     if sp is None:
         sp = get_spotify_client() if is_authenticated() else _get_guest_spotify_client()
     if sp is None:
@@ -212,20 +538,31 @@ def search_track(title: str, artist: str, sp: spotipy.Spotify | None = None) -> 
     results = sp.search(q=f"track:{title} artist:{artist}", type="track", limit=1)
     items = results["tracks"]["items"]
     if not items:
-        results = sp.search(q=f"{title} {artist}", type="track", limit=1)
-        items = results["tracks"]["items"]
+        # 模糊搜尋常撈到「同一位藝人的另一首熱門歌」，照收就等於推了一首八成聽過的歌。
+        # 多取幾筆並逐一驗證，挑第一個真的對得上的。
+        # ⚠️ Spotify 的搜尋結果偶爾夾帶 null，沒擋的話一顆 TypeError 會讓整首降級成搜尋卡
+        loose = sp.search(q=f"{title} {artist}", type="track", limit=5)["tracks"]["items"]
+        items = [
+            it for it in loose
+            if it and it.get("name") and it.get("artists")
+            and resolution_matches(title, artist, it["name"], [a["name"] for a in it["artists"]])
+        ]
     if not items:
-        return None
+        return _cache_search(key, None)
     t = items[0]
     images = t["album"].get("images") or []
-    return {
+    return _cache_search(key, {
         "name": t["name"],
         "artist": ", ".join(a["name"] for a in t["artists"]),
         "album": t["album"]["name"],
         "url": t["external_urls"]["spotify"],
         "uri": t["uri"],
         "cover": images[1]["url"] if len(images) > 1 else (images[0]["url"] if images else ""),
-    }
+        # 以下三個給 recommend.curate_tracks() 的驗證鏈用
+        "popularity": t.get("popularity"),
+        "artist_ids": [a["id"] for a in t["artists"] if a.get("id")],
+        "artist_names": [a["name"] for a in t["artists"]],
+    })
 
 
 def _get_search_token() -> str | None:
@@ -233,34 +570,45 @@ def _get_search_token() -> str | None:
     if is_authenticated():
         get_spotify_client()  # 觸發必要的 token refresh
         return st.session_state["spotify_token"]["access_token"]
-    cid = _get_credential("SPOTIFY_CLIENT_ID")
-    csec = _get_credential("SPOTIFY_CLIENT_SECRET")
-    if not cid or not csec:
+    auth = _client_credentials()
+    if auth is None:
         return None
     try:
-        auth = SpotifyClientCredentials(client_id=cid, client_secret=csec)
         return auth.get_access_token(as_dict=False)
     except Exception:
         return None
 
 
-def _search_tracks_parallel(recs: list[dict], token: str, max_workers: int = 8) -> list[dict | None]:
+def _search_tracks_parallel(
+    recs: list[dict], token: str, max_workers: int = 8
+) -> tuple[list[dict | None], bool]:
     """並行搜尋 Spotify，保持輸入順序。單首失敗視為找不到（回 None），不中斷整批。
-    每個 worker thread 用自己的 Spotify client（requests.Session 非 thread-safe）。"""
+    每個 worker thread 用自己的 Spotify client（requests.Session 非 thread-safe）。
+
+    回傳 (結果, 是否撞到速率限制)。撞到 429 時每首都會「找不到」，整份清單會變成
+    一堆搜尋連結卡——那要明確告訴使用者，而不是讓它看起來像 AI 推了一堆不存在的歌。
+    """
     tls = threading.local()
+    rate_limited = threading.Event()
 
     def _worker(rec: dict) -> dict | None:
         sp = getattr(tls, "sp", None)
         if sp is None:
-            sp = spotipy.Spotify(auth=token)
+            sp = _sp(token)
             tls.sp = sp
+        if rate_limited.is_set():
+            return None      # 已經撞牆就別再打，免得罰得更久
         try:
             return search_track(rec["title"], rec["artist"], sp=sp)
+        except spotipy.SpotifyException as e:
+            if e.http_status == 429:
+                rate_limited.set()
+            return None
         except Exception:
             return None
 
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(recs)))) as ex:
-        return list(ex.map(_worker, recs))
+        return list(ex.map(_worker, recs)), rate_limited.is_set()
 
 
 # ── 跨 session 歷史（持久化在 Spotify 私人歌單） ────────────
