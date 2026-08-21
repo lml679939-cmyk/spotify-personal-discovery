@@ -117,6 +117,32 @@ def test_no_client_ip_means_no_geo_request_at_all(monkeypatch):
     assert tz == app.DEFAULT_TZ_OFFSET
 
 
+@pytest.mark.parametrize("mins,expected", [
+    (-480, 28800),    # 台北 UTC+8：JS 回報「落後 -480 分」
+    (0, 0),           # UTC+0——⚠️ 不能用 `or` 判斷，0 是 falsy
+    (300, -18000),    # 紐約 UTC-5
+    (None, None),
+    ("-480", None),   # 型別不對就當拿不到
+    (True, None),     # bool 是 int 的子類別，要擋掉
+])
+def test_browser_tz_offset_converts_minutes_behind_to_seconds_ahead(monkeypatch, mins, expected):
+    class _Ctx:
+        timezone_offset = mins
+    monkeypatch.setattr(app.st, "context", _Ctx())
+    assert app._browser_tz_offset() == expected
+
+
+def test_browser_timezone_wins_over_ip(monkeypatch):
+    """瀏覽器時區優先：雲端拿不到 client IP，而且使用者掛 VPN 時 IP 的時區是錯的。"""
+    class _Ctx:
+        timezone_offset = -480
+    monkeypatch.setattr(app.st, "context", _Ctx())
+    state = {}
+    monkeypatch.setattr(app.st, "session_state", state)
+    app.sync_browser_timezone()
+    assert state["geo_tz_offset"] == 28800
+
+
 def test_local_dev_may_still_geolocate_itself(monkeypatch):
     """本機開發是唯一例外：伺服器就是開發者自己的機器，定位自己才是對的。
 

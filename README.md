@@ -40,8 +40,9 @@ Developer Dashboard → User Management 逐一加入 email。不在名單內但�
 | BYOK（自備 Spotify App）+ 訪客模式 | ✅ 完成 | `app.py` |
 | 出圈演算法（避免推到已經聽過的歌） | ✅ 完成 | `recommend.py` |
 | Spotify / YouTube 播放平台切換 | ✅ 完成 | `recommend.play_link()` |
-| 位置與天氣自動偵測 | ⚠️ 雲端拿不到使用者 IP，暫不顯示（時間正確） | `app.py` |
-| 單元測試（155 tests） | ✅ 完成 | `test_*.py` 共 5 個檔案 |
+| 當地時間偵測 | ✅ 完成（改由瀏覽器提供時區，不靠 IP） | `app.py` |
+| 位置與天氣自動偵測 | ⚠️ 雲端的代理鏈拿不到使用者 IP，暫不顯示 | `app.py` |
+| 單元測試（168 tests） | ✅ 完成 | `test_*.py` 共 5 個檔案 |
 
 主要使用方式是 **`app.py` Streamlit Web UI**，CLI 檔案保留作為單元測試與功能驗證用。
 
@@ -161,7 +162,7 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ├── test_recommend.py            ← recommend.py 的 pytest（87 tests，不依賴 streamlit）
 ├── test_spotify_api.py          ← spotify_api.py 的 pytest（22：搜尋快取、重試、OAuth state）
 ├── test_styles.py               ← styles.py 的 pytest（9：HTML 產出與注入防護）
-├── test_app.py                  ← app.py 的 pytest（24：client IP、錯誤白名單）
+├── test_app.py                  ← app.py 的 pytest（37：時區換算、client IP、錯誤白名單）
 ├── test_ratelimit.py            ← ratelimit.py 的 pytest（13）
 ├── share_card.py                ← IG Story 分享圖卡生成
 ├── CLAUDE.md                    ← 交接文件：架構、踩過的坑、量測數據

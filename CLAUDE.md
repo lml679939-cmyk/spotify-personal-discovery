@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（87）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（30）+ `test_ratelimit.py`（13），共 161 tests
+- **測試**：`test_recommend.py`（87）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 168 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 161 tests，改任何 .py 都要跑
+python -m pytest -q                     # 168 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -54,11 +54,13 @@ python -m pytest -q                     # 161 tests，改任何 .py 都要跑
    見下方「部署：跨模組改動要 Reboot」。本機改被 import 的模組也一樣要重啟。
 10. 拿不到使用者 IP 還照樣打 ipwho.is — 那會定位到**伺服器自己**（顯示 The Dalles），
     時刻判斷全錯。見「位置偵測」。
+11. 用 IP 推時區 — 雲端拿不到 client IP、使用者掛 VPN 也會錯。
+    一律用 `st.context.timezone_offset`（注意單位是分鐘、正負號相反），見「時區」。
 
 **現在還沒做的**（依價值排序）
-- **修好雲端的位置偵測**：目前拿不到使用者 IP，位置與天氣一律不顯示（時間仍正確）。
-  下次部署後看 Manage app 日誌的 `[GEO]` 那行，把正確標頭補進 `_CLIENT_IP_HEADERS`。
-  這是唯一一個「已知壞掉、修法也已經鋪好」的項目，優先做。
+- **雲端的位置與天氣**：已確認 Streamlit Cloud 的代理鏈拿不到 client IP（見「位置偵測」），
+  時區已改由瀏覽器提供、時間正確，但位置與天氣在雲端一律不顯示。
+  要恢復得走前端（Geolocation API 或前端打 IP API），成本不低，目前判斷可以不做。
 - LLM 只提名歌手、曲目改由 `artist_albums` + `album_tracks` 取得，可根治歌名幻覺
   （實測 12 首有 3 首是曲名與歌手配錯；代價是每位歌手約 3 個請求，
   要先解決共用 Client ID 的速率限制）
@@ -575,6 +577,23 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - 偏移是在 `_fetch_geo_weather()` 裡寫進 session_state 的，所以 `fetch_auto_context()`
   必須**先查地理位置再取時間**，順序反過來第一次會用到預設值。
 
+### ⭐ 時區：向瀏覽器要，不要用 IP（2026-08-21 定案）
+
+**`st.context` 有這些東西，不要再自己解 HTTP 標頭**：
+`timezone`（`'Asia/Taipei'`）、`timezone_offset`（int）、`ip_address`、`locale`、`url`、`theme`。
+
+- `_browser_tz_offset()` 讀 `st.context.timezone_offset`，寫進 `st.session_state["geo_tz_offset"]`，
+  `_local_now()` 就正確了。**不需要網路請求、不受代理鏈影響、使用者掛 VPN 時也是他當地時間。**
+- ⚠️ **單位與正負號**：`timezone_offset` 與 JS 的 `getTimezoneOffset()` 同慣例——
+  「**落後** UTC 幾**分鐘**」，台北 UTC+8 回傳 **-480**。本專案 `geo_tz_offset` 是
+  「領先 UTC 幾**秒**」，換算要 **`-mins * 60`**。有參數化測試釘住（含 UTC+0 與紐約）。
+- ⚠️ **判斷有沒有值一定要用 `is not None`**：UTC+0 的偏移是 `0`，用 `or` 會被當成沒拿到。
+- `sync_browser_timezone()` 在**每次頁面載入**就呼叫（module 層級，緊鄰 `start_geo_prefetch()`）——
+  不能只在「自動偵測位置」開啟時做，關掉自動偵測的使用者一樣需要正確時刻
+  （歌單名稱、推薦情境的「深夜/清晨」都靠它）。
+- `st.context.ip_address` 在本機是 `'::ffff:127.0.0.1'`（socket 對端），雲端會是代理的 IP，
+  **不能拿來做地理定位**。
+
 ### 位置偵測：拿不到使用者 IP 就別查（2026-08 修）
 
 **症狀**：使用者在台北，畫面卻顯示「📍 08:27（清晨）｜The Dalles, United States｜晴朗 22.2°C」。
@@ -601,7 +620,19 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 ⚠️ 去 port 不能無腦 `split(":")[0]`：IPv6 本身含冒號，`::1` 會被切成空字串（有測試釘住）。
 ⚠️ `_client_ip()` / `_is_local_dev()` 都碰 `st.context`，**必須在主執行緒算好再傳進背景執行緒**。
 
-**待辦**：Streamlit Cloud 實際送哪個標頭沒有文件。實測本機只有
+**雲端的結論（2026-08-21 從 Manage app 日誌確認）**：Streamlit Cloud **有送 `X-Forwarded-For`**，
+但整條鏈裡**找不到任何公開 IP**——真實 client IP 在代理層就被剝掉了。雲端實際的標頭是：
+```
+['Accept-Encoding','Accept-Language','Cache-Control','Connection','Host','Origin','Pragma',
+ 'Sec-Websocket-*','Upgrade','User-Agent','X-Forwarded-For','X-Streamlit-User']
+```
+（`X-Streamlit-User` 是 Streamlit 自己加的使用者識別，不是 IP。）
+→ **時區已改由瀏覽器提供**（見上一節），不再受影響。
+→ **位置與天氣在雲端就是拿不到**，會靜默略過。要恢復的話只剩兩條路：
+  改用瀏覽器的 Geolocation API（會跳權限提示），或前端打第三方 IP API 再回傳。
+  兩者都要新增前端元件，成本不低——目前判斷「沒有位置」是可接受的。
+
+**歷史紀錄**：實測本機只有
 `['Accept-Encoding','Accept-Language','Cache-Control','Connection','Cookie','Host','Origin',
 'Pragma','Sec-Websocket-*','Upgrade','User-Agent']`（直連本來就沒有 proxy 標頭）。
 下次部署後到 Manage app 日誌看那行 `[GEO]`，把雲端實際送的標頭名補進 `_CLIENT_IP_HEADERS`
@@ -757,6 +788,12 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
   依賴安裝並重啟行程。實測 2026-08-21 那次 push 同時改了 `requirements.txt` 與
   `styles.py`／`recommend.py`，部署後新文案直接生效，沒有 ImportError。
   所以判斷方式是：**這次 push 有沒有動到相依設定**，有就自動好，沒有就要手動 Reboot。
+- **為什麼熱重載在雲端不可靠——找到根因了**：日誌裡每隔幾分鐘就刷一次
+  `OSError: [Errno 24] inotify instance limit reached`（偶爾是 `[Errno 28] watch limit reached`），
+  Streamlit 的檔案監看器**在 Cloud 上根本啟動不了**（容器的 inotify 配額被吃光）。
+  所以它偵測不到檔案變動、也就不會重新載入模組。這是平台限制，不是我們能修的，
+  唯一對策就是 Reboot。⚠️ 這些 traceback 在日誌裡占了 95% 的篇幅，**是雜訊不是錯誤**，
+  排查問題時直接略過，只找 `[GEO]`、`ImportError`、`NameError` 這類真正的訊息。
 - ⚠️ **若 Reboot 後錯誤完全相同**，那就不是行程快取，而是伺服器上的檔案真的沒更新
   （pull 靜默失敗）。判別法：`git show origin/main:recommend.py | grep '^OVERGEN_FACTOR'`
   ——遠端有、雲端沒有＝檔案沒同步。這時要用 Manage app 看 pull 那段有沒有錯誤，

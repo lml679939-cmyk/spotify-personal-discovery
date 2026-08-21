@@ -373,6 +373,38 @@ def _first_global_ip(raw: str) -> str:
     return ""
 
 
+def _browser_tz_offset() -> int | None:
+    """瀏覽器回報的 UTC 偏移（秒）。拿不到回 None。
+
+    這是**最可靠的時區來源**：由瀏覽器的 JS 直接回報，不需要網路請求、不受代理鏈影響，
+    使用者掛 VPN 時也仍然是他當地的時間。
+    實測 Streamlit Cloud 的代理鏈只剩內網位址（見 `_client_ip` 的說明），IP 定位在雲端
+    根本拿不到位置，所以時區絕對不能依賴它。
+
+    ⚠️ `st.context.timezone_offset` 與 JS 的 `getTimezoneOffset()` 同慣例——
+    是「**落後** UTC 幾分鐘」，台北（UTC+8）回傳 **-480**。
+    本專案 `geo_tz_offset` 的慣例是「領先 UTC 幾秒」，所以要乘 -60。
+    """
+    try:
+        mins = st.context.timezone_offset
+    except Exception:
+        return None
+    if not isinstance(mins, int) or isinstance(mins, bool):
+        return None
+    return -mins * 60
+
+
+def sync_browser_timezone() -> None:
+    """頁面載入時就把瀏覽器時區寫進 session_state，讓 `_local_now()` 立刻正確。
+
+    不能只在「自動偵測位置」開啟時才做——關掉自動偵測的使用者一樣需要正確的時刻，
+    歌單名稱、推薦情境的「深夜/清晨」判斷都靠它。
+    """
+    off = _browser_tz_offset()
+    if off is not None:
+        st.session_state["geo_tz_offset"] = off
+
+
 def _is_local_dev() -> bool:
     """瀏覽器是否直連本機的 streamlit（沒有任何反向代理）。
 
@@ -494,7 +526,10 @@ def _fetch_geo_weather() -> str:
     """IP 定位 + 天氣，session 內快取 AUTO_CONTEXT_TTL 秒。查不到時回空字串，不拋例外。"""
     cached = st.session_state.get("geo_weather_cache")
     if cached and time.time() - cached["ts"] < AUTO_CONTEXT_TTL:
-        st.session_state["geo_tz_offset"] = cached.get("tz", DEFAULT_TZ_OFFSET)
+        _browser_off = _browser_tz_offset()
+        st.session_state["geo_tz_offset"] = (
+            _browser_off if _browser_off is not None else cached.get("tz", DEFAULT_TZ_OFFSET)
+        )
         return cached["value"]
 
     future = st.session_state.pop("geo_future", None)
@@ -506,7 +541,10 @@ def _fetch_geo_weather() -> str:
     except Exception:
         value, tz_offset = "", DEFAULT_TZ_OFFSET
 
-    st.session_state["geo_tz_offset"] = tz_offset
+    # ⚠️ 瀏覽器回報的時區優先，IP 查到的只是備援——雲端根本拿不到 client IP，
+    # 而且使用者掛 VPN 時 IP 的時區是錯的。`is not None` 不能寫成 `or`：UTC+0 是 0，會被當成 falsy。
+    _browser_off = _browser_tz_offset()
+    st.session_state["geo_tz_offset"] = _browser_off if _browser_off is not None else tz_offset
     if value:
         st.session_state["geo_weather_cache"] = {
             "ts": time.time(), "value": value, "tz": tz_offset,
@@ -567,6 +605,8 @@ else:
         st.stop()
 
 
+# 時區直接向瀏覽器要，不依賴 IP（雲端的代理鏈拿不到 client IP，見 _client_ip）
+sync_browser_timezone()
 # IP 定位 + 天氣在背景先跑（約 3.3 秒），使用者填完情境按下生成時通常已經拿到結果
 start_geo_prefetch()
 # 聆聽資料（18 個 endpoint）同樣在背景先抓，按下生成時通常已經好了
