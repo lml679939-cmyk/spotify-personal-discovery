@@ -32,18 +32,30 @@ python -m pytest -q                     # 199 tests，改任何 .py 都要跑
 
 | 你要做的事 | 先看 | 一定要先讀的段落 |
 |---|---|---|
-| 改推薦品質／出圈程度 | `recommend.py` 的 `build_prompt()` / `curate_tracks()` | 「出圈演算法」整段 |
+| 改推薦品質／出圈程度 | `recommend.py` 的 `build_prompt()` / `curate_tracks()` | 「出圈演算法」整段＋**「驗收流程」（改演算法前後都要跑分）** |
 | 改版面、間距、顏色 | `styles.py`（CSS 全在 `_build_global_css()`） | 「版面幾何」「視覺層級」（含垂直間距三級制） |
+| 加／改圖示 | `styles.py` 的 SVG 常數；原生元件用 `icon=":material/xxx:"` | 「圖示系統」（兩層制、三種 testid 的字型地雷） |
 | 改 Spotify 相關 | `spotify_api.py` | 「Spotify API 限制」「速率限制與 spotipy 重試」 |
 | 查為什麼很慢 | 「生成速度」表 | 同段的量法（`_mark()` 印 stderr） |
 | 時間顯示不對 | `_local_now()` | 「時區」 |
+
+**這個專案的三條工作紀律**（前人踩過才立的規矩，請沿用）
+1. **版面問題一律先量再改**——起 `streamlit run app.py --server.headless true --server.port 8599`
+   用瀏覽器跑 `getBoundingClientRect()` / `getComputedStyle()`，改完再量一次。
+   目測分不出 1px 和 12px，這個專案的版面 bug 幾乎都是「量了才知道真正原因」。
+2. **演算法改動前後各跑一輪 `eval_bench.py`，數字進 `EVAL.md`**——沒有對照數字的
+   演算法改動不要上線（使用者定的）。
+3. **改了行為就順手更新這份文件**，尤其是踩到新坑時：寫下「症狀 → 真正原因 → 量法」，
+   不要只寫結論。這份文件的價值全在那些細節上。
 
 **最容易重蹈的覆轍**（每一條都真的發生過，細節在對應段落）
 1. `datetime.now()` — 雲端是 UTC，台灣少 8 小時。一律 `_local_now()`。
 2. Gemini 的 `thinking_budget=0` 被拿掉 — 生成時間會從 5s 變回 18s。
 3. spotipy 預設重試 — 429 的 `Retry-After` 是 6 小時，urllib3 會真的睡下去，整頁凍住。
 4. 注入的 HTML 有縮排 — Streamlit markdown 會當成程式碼區塊印出原始碼。
-5. 憑感覺調 CSS — 這個專案的版面問題幾乎都要「量了才知道真正原因」。
+5. Material 圖示顯示成文字（「music_note」而不是圖示）— 全域 span 的 Nunito
+   `!important` 把圖示字型蓋掉、連字失效。圖示 span 有**三種**變體，`:not()` 排除清單
+   缺一不可（這次踩了三次才收齊），見「圖示系統」。
 6. prompt 裡塞長排除清單 — 遵守率會掉，保證要寫在程式端（`curate_tracks()`）。
 7. 以為 `st.session_state` 撐得過 OAuth 來回 — **不會**，跳去 Spotify 再導回是整頁重載，
    session_state 整個重生。OAuth state 因此做成無狀態簽章，見「OAuth state」。
@@ -56,16 +68,60 @@ python -m pytest -q                     # 199 tests，改任何 .py 都要跑
     時刻判斷全錯。見「位置偵測」。
 11. 用 IP 推時區 — 雲端拿不到 client IP、使用者掛 VPN 也會錯。
     一律用 `st.context.timezone_offset`（注意單位是分鐘、正負號相反），見「時區」。
+12. **在 GitHub Codespaces／dev container 裡開發時，測試會紅、安全機制會失效**——
+    但那不是你改壞的，是 `.devcontainer/devcontainer.json` 的設定，見下方「dev container 的兩個陷阱」。
 
-**現在還沒做的**（依價值排序）
-- **驗收第 1 輪**：`eval_bench.py` 已就緒（冒煙測過 S1/S3），完整的 S1–S6 基準輪
-  還沒跑——見「驗收流程」段與 `EVAL.md`
+**⚠️ dev container 的兩個陷阱**（`.devcontainer/devcontainer.json`，GitHub Codespaces 會吃）
+
+這個檔案是 GitHub 自動產生的樣板、**沒有跟著本專案調整過**，裡面兩個設定與專案的
+前提衝突。本機 Windows 開發不受影響，只有在 Codespaces／dev container 裡才會中招：
+
+| 設定 | 衝突 | 症狀 |
+|---|---|---|
+| `image: …python:1-3.11-bookworm` | 專案要求 **Python 3.12+** | `test_app.py` 有幾條測試依賴 3.12 才把 `203.0.113.x` / `2001:db8::` 算成 private，在 3.11 上會失敗——乾淨的 checkout 卻看到紅色測試 |
+| `postAttachCommand` 帶 `--server.enableXsrfProtection false` | 關掉 XSRF＝拿不到 `_streamlit_xsrf` cookie | `_browser_secret()` 回空字串 → **OAuth state 綁定失效**（見「OAuth state」的限制段）＋**節流桶退回 per-session 隨機 id**（重整就能洗掉額度）。兩道防線都靜默降級，不會報錯 |
+
+要在容器裡認真開發就先把 image 換成 3.12、拿掉那個 XSRF flag；只是隨手跑一下就
+知道上面兩件事即可。**別因為容器裡測試紅就去改測試或改 `_client_ip()` 的邏輯。**
+
+**接手後的第一件事**（2026-08-22 交接狀態）
+
+> 程式碼與線上版同步（HEAD = `861984d`，工作區乾淨、199 tests 全過）。
+> 最近三批改動是「演算法基建（幻覺補救＋訪客天花板＋驗收工具）」與「Y2K 圖示系統
+> 兩層制取代全站 emoji」。**唯一的未竟事項是驗收第 1 輪還沒跑。**
+
+1. **跑驗收第 1 輪，建立基準**（最高優先，一小時內可完成）
+   `python eval_bench.py --tag round1` 跑訪客 S1–S5（需本機 `.env` 金鑰），
+   再照 `EVAL.md` 的固定輸入手動跑 S6，把機器指標與人工三題填進 `EVAL.md` 的表。
+   **在此之前不要改演算法**——沒有基準就沒有對照，改了也說不出好壞。
+   已知待查的訊號：冒煙測時訪客的 LLM 幾乎不給 fame ≤ 2（驚喜佔比 0），
+   代表訪客版的 fame 天花板可能形同虛設，這是第 1 輪該確認的第一個問題。
+2. **驗證幻覺補救真的在線上生效**：Manage app 日誌撈 `[NOVELTY]`，看 `repaired` 有沒有
+   上升、`spare_used`（死連結卡）有沒有下降。這是 `5c70d25` 的驗收指標。
+
+**還沒做的**（依價值排序，都不急）
 - **回饋持久化（登入版）**：回饋目前是 session 級，關分頁歸零；使用者已定案
-  「登入版之後再做」（寫進 Spotify 歌單那招）。訪客要 localStorage（自訂元件）成本高，緩
+  「登入版之後再做」（寫進 Spotify 歌單那招）。訪客要 localStorage（自訂元件）成本高，緩。
+  ⚠️ 目前**站方端沒有任何使用者資料留存**（歌單只寫進使用者自己的 Spotify、
+  回饋只在分頁記憶體、日誌是暫時性的）——要做持久化就得接資料庫，
+  屆時登入頁那句「不儲存任何資料」要同步改，並補告知同意。
 - **雲端的位置與天氣**：已確認 Streamlit Cloud 的代理鏈拿不到 client IP（見「位置偵測」），
   時區已改由瀏覽器提供、時間正確，但位置與天氣在雲端一律不顯示。
   要恢復得走前端（Geolocation API 或前端打 IP API），成本不低，目前判斷可以不做。
+- **導流分潤**：Apple Music 已是第三播放平台，聯盟 token（`&at=`）掛在
+  `apple_music_search_url()` 即可；但申請要有流量數字與自有網域，等有再說。
+  ⚠️ 自家點擊追蹤**做過且證實在雲端不可行**（iframe sandbox），別再重做——
+  見「播放點擊計數」段的驗屍報告。
 - 歌單寫入仍是 403（需要 Spotify Quota Extension，個人開發者實際上申請不到）
+
+**已經調查過、結論是「不要做」的**（省下重複踩坑的時間）
+| 想法 | 為什麼不做 | 細節在 |
+|---|---|---|
+| 播放點擊中繼計數 | Streamlit Cloud 的 app iframe sandbox 沒有 `allow-top-navigation`，轉導必被平台擋成「拒絕連線」 | 「播放點擊計數」 |
+| Apple Music 曲目直連 | iTunes Search API 對中文召回率極差（實測四種搜法全找不到），且 ~20 req/min 共用 IP | 「播放平台選擇」 |
+| YouTube Data API | `search.list` 一次 100 units／日配額 10000，全站一天約 100 次搜尋 | 「播放平台選擇」 |
+| LLM 只提歌手、曲目全由 Spotify 給 | 成本 +70 請求／批；改成「只修失敗案例」的 repair-on-miss 用一成成本拿九成效益 | 「出圈演算法」 |
+| 回饋加「無感」中間選項 | 對演算法沒有可執行的指令、稀釋訊號；業界（Netflix）也已從五星收斂到二元 | — |
 
 ## 關鍵架構
 
@@ -359,7 +415,9 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
   `PERSISTENT_HISTORY_MAX=500`（Spotify 歷史歌單保留上限）。
   **完整的排除靠程式端 `curate_tracks()`，prompt 只是機率優化。**
 - **Session 內**：`st.session_state["recommend_history"]`
-- **跨 Session**（僅登入模式）：寫入 Spotify 私人歌單 `🤖 AI Discovery History`
+- **跨 Session**（僅登入模式）：寫入 Spotify 私人歌單
+  `🤖 AI Discovery History (請勿手動刪除)`（完整字串在 `HISTORY_PLAYLIST_NAME`，
+  歌單是靠**名稱**找回來的，改字串等於讓所有現存使用者的歷史失聯）
 - 訪客模式只有 session 內歷史
 - 歷史歌單上限 `PERSISTENT_HISTORY_MAX=500` 首，超過時 `_trim_persistent_history()` 自動修剪最舊的
 - 清空/修剪都用 `_playlist_replace_items()`：`PUT /playlists/{id}/items` 整批取代（失敗 fallback 舊 `/tracks` 路徑）
@@ -368,7 +426,9 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 
 ### styles.py 結構
 - **CSS**：`_build_global_css()` — 在 f-string 內，所有 CSS `{}` 須寫成 `{{}}` 否則 Python SyntaxError
-- **SVG 常數**：`SVG_CASSETTE`, `SVG_VINYL`, `SVG_NOTES`, `SVG_BOOMBOX`, `SVG_SPARKLE`
+- **SVG 常數**（9 個）：裝飾用 `SVG_CASSETTE`, `SVG_VINYL`, `SVG_NOTES`, `SVG_BOOMBOX`,
+  `SVG_SPARKLE`；圖示系統用 `SVG_CLIPBOARD`（複製歌單）、`SVG_QUESTION`（投射問題）、
+  `SVG_CHAT`（情境輸入標題）、`SVG_LOCK`（隱私徽章）——後四個見「圖示系統」段
   - 改 SVG 後要驗證「同色的形狀是不是連在一起」：把 SVG 序列化成 data URL → 畫進 canvas →
     `getImageData()` 後對每個顏色做連通分量分析。舊版 `SVG_NOTES` 的綠色是**兩塊**
     （符桁 rect 的下緣 y=9.5、左符桿頂端 y=10，差 0.5px 就斷開），修好後是一塊。
@@ -710,10 +770,12 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   （13:58 顯示成 05:58），連帶「深夜/清晨」判斷全錯。
 - 一律用 `_local_now()`（定義在 `spotify_api.py`，`app.py` 從那裡 import——
   ⚠️ 曾經整個漏掉這個 import，症狀是「自動偵測失敗：name '_local_now' is not defined」，
-  自動定位/天氣永遠失敗、登入模式顯示結果時直接 NameError）：時區偏移取自 ipwho.is 的
-  `timezone.offset`，存在 `st.session_state["geo_tz_offset"]`，查不到則退回 `DEFAULT_TZ_OFFSET`（+8）。
-- 偏移是在 `_fetch_geo_weather()` 裡寫進 session_state 的，所以 `fetch_auto_context()`
-  必須**先查地理位置再取時間**，順序反過來第一次會用到預設值。
+  自動定位/天氣永遠失敗、登入模式顯示結果時直接 NameError）。
+  偏移存在 `st.session_state["geo_tz_offset"]`，查不到則退回 `DEFAULT_TZ_OFFSET`（+8）。
+- ~~偏移取自 ipwho.is 的 `timezone.offset`，所以 `fetch_auto_context()` 必須先查地理位置
+  再取時間。~~ **← 此段已於 2026-08-21 作廢，見下一節**：偏移改由瀏覽器提供
+  （`sync_browser_timezone()` 在頁面載入時就寫好），IP 查到的只剩備援，
+  `fetch_auto_context()` 的先後順序不再影響時間正確性。
 
 ### ⭐ 時區：向瀏覽器要，不要用 IP（2026-08-21 定案）
 
@@ -811,7 +873,7 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
   手機圖示 56/62/46、標題 32px 單行、hero 高 109px；兩者皆無水平溢出。
 
 ```
-第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
+第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → 生成按鈕
 第二層（摺疊 expander） 推薦歌曲數 · 音樂偏好 · 現在的心情 · 關於你（圖示走 Material，見「圖示系統」）
 （活動情境 pills 已於 2026-08 移除——與「分享一下你的日常吧」文字欄重複）
 ```
@@ -861,7 +923,10 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 - expander 內距 `[data-testid="stExpanderDetails"]` 上下各 1.35rem（21.6px），0.75rem 太擠。
 - 「推薦歌曲數」緊接在生成按鈕下方（程式碼也放在 `generate_slot` 之後、其他 expander 之前）。
   清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
-- ⚠️ 別再用 `st.session_state["mbti"] = ...` 手動寫入——widget 有 `key` 時 Streamlit 會報錯。
+- ⚠️ **widget 已經渲染之後**再用 `st.session_state["mbti"] = ...` 手動寫入會被 Streamlit 擋下。
+  但「在該 widget 這一輪還沒建立**之前**先寫」是合法的——`app.py` 的「換一題」就靠這招
+  重設 `projective_a`（寫完馬上 `st.rerun()`，下一輪 widget 才讀到新值）。
+  看到那行不要當成 bug 去「修正」，會弄壞換題重設。
 
 ## 輸入欄位說明（登入頁）
 
@@ -875,16 +940,24 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 > Gemini 欄位已於 2026-08 移除——AI 由本站提供，見上方 Credential 管理。
 
 ### 推薦偏好輸入
-| 欄位 | 變數 | 說明 |
-|---|---|---|
-| 情境文字 | `text_ctx` | 標籤「**分享一下你的日常吧（也可以上傳圖片給 AI 分析）**」，自由描述當下情境 |
-| 自動偵測 | `auto_ctx` | 開啟後讀取 IP/天氣；隱私說明收在 `help=`（問號 tooltip），不再用 `st.caption` 佔版面。IP 取自 `X-Forwarded-For` 最左段＝**使用者可偽造**，`_client_ip()` 會用 `ipaddress` 驗過、且只收 `is_global` 的位址才拼進 `https://ipwho.is/{ip}`（⚠️ RFC 文件範圍 `203.0.113.x` / `2001:db8::` 在 Python 3.12+ 算 private，寫測試時很容易踩到） |
-| 圖片上傳 | `uploaded` | Gemini Vision 分析氛圍 |
-| 語言 | `languages` | Pills 多選 |
-| 曲風 | `genres` | Pills 多選 |
-| **指定歌手** | `fav_artists` | 文字輸入，逗號分隔，傳入 prompt 讓 AI 優先推薦 |
-| 推薦數量 | `num_songs` | 5–30 首 |
-| 新藝人佔比 | `new_artist_ratio` | 0–100%（僅登入模式） |
+
+⚠️ **widget key 與 Python 變數名不一定一樣**——摺疊區的即時摘要必須在 expander 建立
+**之前**從 `st.session_state` 讀值（見「主表單版面」），讀的是 **key 欄**那一格，
+不是變數名。寫 `st.session_state["languages"]` 會拿到 KeyError。
+
+| 欄位 | Python 變數 | widget key（session_state 用這個） | 說明 |
+|---|---|---|---|
+| 情境文字 | `text_ctx` | `text_ctx` | 標籤走 `styles.context_label_html()`（含對話氣泡圖示） |
+| 自動偵測 | `auto_ctx` | `auto_ctx` | 開啟後讀取 IP/天氣；隱私說明收在 `help=`（問號 tooltip）。IP 取自 `X-Forwarded-For` 最左段＝**使用者可偽造**，`_client_ip()` 會用 `ipaddress` 驗過、且只收 `is_global` 的位址才拼進 `https://ipwho.is/{ip}`（⚠️ RFC 文件範圍 `203.0.113.x` / `2001:db8::` 在 Python 3.12+ 才算 private，寫測試時很容易踩到——也是 dev container 用 3.11 會紅的那幾條） |
+| 圖片上傳 | `uploaded` | `ctx_image` | Gemini Vision 分析氛圍 |
+| 語言 | `languages` | **`lang_pills`** | Pills 多選 |
+| 曲風 | `genres` | **`genre_pills`** | Pills 多選 |
+| **指定歌手** | `fav_artists` | **`fav_artists_input`** | 文字輸入，逗號分隔，傳入 prompt 讓 AI 優先推薦 |
+| 推薦數量 | `num_songs` | `num_songs` | 5–30 首 |
+| 新藝人佔比 | `new_artist_ratio` | `new_artist_ratio` | 0–100%（僅登入模式） |
+| 投射問題回答 | `projective_answer` | `projective_a` | 題目本身在 `projective_q`、輪替順序在 `proj_order` |
+| MBTI／血型／星座 | 同名 | `mbti` / `blood_type` / `zodiac` | 摘要用 |
+| 心情雙軸 | 同名 | `mood_energy` / `mood_valence` | 1–10 slider |
 
 ## 常見操作
 
@@ -953,24 +1026,29 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `app.py` | Streamlit UI 層 + 登入/訪客流程 | 是 |
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
-| `test_recommend.py` | recommend.py 單元測試（pytest） | 改 recommend.py 時同步 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
+| `test_*.py`（5 個） | `test_recommend`(105) / `test_spotify_api`(27) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) | 改對應模組時同步 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
 | `eval_bench.py` | 固定情境驗收跑分 CLI（訪客 S1–S5，見「驗收流程」） | 改演算法時跑 |
 | `EVAL.md` | 驗收紀錄（每輪一節，含人工三題） | 改演算法時填 |
 | `eval_runs/` | 驗收的 JSON 明細（要進版控，是歷史資料） | 自動產生 |
 | `.streamlit/config.toml` | Streamlit 主題 + toolbarMode | 偶爾 |
-| `requirements.txt` | pip 依賴 | 偶爾 |
+| `requirements.txt` | pip 依賴——**直接依賴一律精確釘版（`==`）**，理由與升級流程寫在檔案開頭的註解，加新套件前先讀（用 `>=` 會讓 Dependabot 失效，且雲端裝到的永遠不是你測過的版本） | 偶爾 |
+| `.github/dependabot.yml` | 每週自動開依賴更新 PR（配合上面的 `==` 釘版才有用） | 否 |
+| `SECURITY.md` | 漏洞回報政策（私人 advisory + email，7 天回應） | 否 |
+| `.devcontainer/` | GitHub 自動產生的樣板，**與本專案前提衝突**——見「dev container 的兩個陷阱」 | 否 |
 | `.env` / `.env.example` | 本地 credentials（不加入 git） | 否 |
 | `CLAUDE.md` | 這份交接文件——**改了行為就順手更新這裡** | 是 |
 | `README.md` | 對使用者/其他開發者的說明（部署、限制、功能總覽） | 偶爾 |
 | `m1~m4_*.py` | CLI 測試腳本（非主程式） | 否 |
+| `fonts/` | ⚠️ **孤兒**：13.6 MB 的中文字型，原為 IG 分享圖卡渲染用，該功能已於 `72bf444` 移除，現在沒有任何程式碼引用——確認不需要就可以 `git rm -r fonts/` | 否 |
+| `.claude/worktrees/` | ⚠️ **搜尋時的假訊號**：裡面有舊版 `app.py` / `README.md` / **`share_card.py`**（早就刪掉的 IG 圖卡）。它被 gitignore 所以 `git status` 看不到，但**全庫 grep 會撈到**——看到 `share_card` 之類的東西先確認路徑，別以為功能還在 | 否 |
 
 ## 近期修改紀錄（最新在上）
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | fix: 氣泡圖示的置中改對齊第一行（flex-start）——文字折行時 center 會讓氣泡浮在兩行中間差 13px，修後 1.1px；情境標題與投射問題兩處同步 |
+| `861984d` | fix: 氣泡圖示的置中改對齊第一行（flex-start）——文字折行時 center 會讓氣泡浮在兩行中間差 13px，修後 1.1px；情境標題與投射問題兩處同步 |
 | `99fe0fa` | fix: 登入 hero「圖示→標題」間距對齊表單版（墨水間距 13px==13px，margin 17px 為量測校準值；h1 要 padding:0）；feat: 情境標題加對話氣泡 SVG_CHAT（context_label_html 統一產出，左右欄同 helper）；移除登入卡片 y2k-mbr 手機強制斷行（標題已短，實測單行） |
 | `a16c525` | feat: 圖示系統第二波全站清掃（登入頁/sidebar/清除鈕/提示框全轉 Material 或貼紙 SVG，新增 SVG_LOCK；刻意保留 🧭 與暫態敘事行）；fix: 投射列置中（div 沒有 p 邊距抵銷 -16px 負邊界）、markdown 行內圖示的第三種字型地雷（translate="no"）、圖示 line-height:1；copy: 「關於你」說明去「選填。」 |
 | `a2bafef` | feat: Y2K 圖示系統兩層制取代全站 emoji——A 層自繪貼紙 SVG（剪貼板＋題目氣泡；投射問題 30 題去 emoji 統一用氣泡）、B 層 Material Rounded 染色（pills/生成鈕/四個 expander/換一題）；⚠️ expander 圖示 testid 是 stExpanderIcon 且會被全域 Nunito 蓋掉連字（:not() 排除清單要含它）。設計稿 artifact d2fc1112 |
@@ -980,11 +1058,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `72bf444` | revert: 撤除播放點擊中繼——Streamlit Cloud 的 app iframe sandbox 沒有 allow-top-navigation，轉導必被平台 X-Frame-Options 擋成「拒絕連線」（見「播放點擊計數」段的驗屍報告），播放按鈕回退直連；feat: 移除 IG 分享圖卡功能（share_card.py 刪除，Pillow 因上傳路徑仍保留釘版） |
 | `5f2db78` | feat: 曲目回饋 👍/👎/🎧（兩種模式，session 級，餵進 prompt＋程式端排除）、播放點擊中繼計數（`?goto=` 白名單防 open redirect、[PLAY] stderr）、Apple Music 第三播放平台（搜尋頁、tw storefront） |
 | `2fcc1c5` | fix: 訪客模式對齊登入版設計原則——prompt 歷史截 40（原本塞整份最多 200 筆）、超額生成 1.25×、補生成＋湊不滿說明開放給訪客、搜不到的卡排最後且超額時最先被裁（原本會佔清單開頭） |
-| （工作區，尚未 commit） | fix(security): 依賴改精確釘版（Pillow 12.3.0 補 13 個 CVE、python-dotenv 1.2.3）、新增生成節流 `ratelimit.py`；順帶修好被擋下的點擊會清掉既有歌單 |
-| （工作區，尚未 commit） | fix(security): `X-Forwarded-For` 改用 `ipaddress` 驗證（只收 is_global）；BYOK 步驟卡的 URI 移出 onclick 改走 `data-` 屬性；`.claude/` 從 git 索引移除。BYOK 步驟卡拆成兩半、中間改夾原生 `st.code()`——那顆自製複製鈕一直是死的（Streamlit 會濾掉 onclick），順帶讓 redirect_uri 完全不經過 unsafe_allow_html |
-| （工作區，尚未 commit） | fix(security): OAuth 補上綁定瀏覽器的 `state`（防授權碼注入／login CSRF）；`?error=` 改走白名單（原本可在登入頁警告框注入釣魚連結與追蹤圖片，已實測確認） |
-| （工作區，尚未 commit） | feat: 出圈演算法 Phase 2——雙通道 prompt（去錨定／相鄰場景／溫和校準）、排除清單瘦身尾置、補生成迴圈；fix: Spotify 拿掉 popularity 改用 LLM 自評 fame、補位卡上限、spotipy 重試關閉（429 的 Retry-After 是 6 小時，會凍住整頁）、提示訊息改走 session_state |
-| （工作區，尚未 commit） | feat: 出圈演算法 Phase 1——擴大已知宇宙（180 → 700+ 首）、搜尋加取 popularity/artist ID、`curate_tracks()` 驗證鏈＋流行度天花板＋EPC 重排；fix: `app.py` 漏掉 `_local_now` import（自動定位一直失敗、登入模式顯示結果會 NameError） |
+| `c37dd28` | feat: 播放平台切換（Spotify/YouTube）、搜尋快取；fix(security): 依賴改精確釘版（Pillow 12.3.0 補 13 個 CVE、python-dotenv 1.2.3）、新增生成節流 `ratelimit.py`、定位查到伺服器自己；順帶修好被擋下的點擊會清掉既有歌單 |
+| `ccce66c` | fix(security): OAuth 補上綁定瀏覽器的 `state`（防授權碼注入／login CSRF）、`?error=` 改走白名單（原本可在登入頁警告框注入釣魚連結與追蹤圖片，已實測確認）、`X-Forwarded-For` 改用 `ipaddress` 驗證（只收 is_global）、BYOK 步驟卡拆兩半中間夾原生 `st.code()`（自製複製鈕一直是死的，Streamlit 會濾掉 onclick）、`.claude/` 從 git 索引移除；feat: 出圈演算法 Phase 1＋2 同批進版——擴大已知宇宙（180 → 700+ 首）、`curate_tracks()` 驗證鏈＋流行度天花板＋EPC 重排、雙通道 prompt（去錨定／相鄰場景）、排除清單瘦身尾置、補生成迴圈、LLM 自評 fame 取代 popularity、spotipy 重試關閉（429 的 Retry-After 是 6 小時，會凍住整頁） |
 | `e839b19` | perf: 生成時間 ~26s → ~8–10s（Gemini thinking 關閉、client 快取、地理資訊預抓、profile 並行）；fix: 時區改用 IP 偏移，不再顯示 UTC |
 | `aa54504` | copy: 主表單標題改成「想成為你專屬的歌單」 |
 | `9924520` | fix: 符桿收進符頭裡（桿底兩角落在旋轉橢圓外，從符頭右下角凸出來） |

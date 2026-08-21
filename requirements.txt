@@ -13,7 +13,7 @@
 #
 # 升級流程（尤其 streamlit）：
 #   1. pip install --upgrade <套件>
-#   2. python -m pytest -q                 ← 140 tests
+#   2. python -m pytest -q                 ← 199 tests（數字會長，以 CLAUDE.md 為準）
 #   3. streamlit run app.py，用瀏覽器量關鍵選擇器與間距
 #      ⚠️ 本專案大量依賴 data-testid 與 .st-key-* class，升 streamlit 一定要重量一次
 #         （驗收標準：所有垂直間距都要落在 8/16/24 三級制上，見 CLAUDE.md「版面幾何」）
