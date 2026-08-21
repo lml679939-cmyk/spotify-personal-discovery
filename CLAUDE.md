@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（100）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 181 tests
+- **測試**：`test_recommend.py`（100）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 184 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 181 tests，改任何 .py 都要跑
+python -m pytest -q                     # 184 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -743,6 +743,11 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
   改成 `flex:0 0 auto; width:auto`、`gap:1.25rem`——題目長度 170–403px 差很多，固定欄寬時
   短題目後面會空一大片（量到 500px）。改完不論題目長短，按鈕都固定在題目右側 20px，
   最長那題也還在同一行（row 高度維持 40px）。
+- **投射問題題庫 30 題、「換一題」走洗牌輪替**（`_rotate_projective()`，2026-08）：
+  舊版 `random.choice` 只排除當前題，session 內連按幾次就看到舊題回鍋；
+  現在整輪 30 題出完才重洗，重洗後第一題若撞上上一題會移到隊尾（三條測試釘住）。
+  新增題目時維持「投射」性質——問具體小事（桌布/窗外/最後一則訊息），
+  讓 AI 從回答反推狀態與生活風格，不要出直白的「你現在心情如何」。
 - 兩欄情境輸入的高度要手動對齊：`text_area(height=106)` 對上 file_uploader 的實際高度（量出來 104±2）。
   右欄的標題已併進左欄那句「分享一下你的日常吧（也可以上傳圖片給 AI 分析）」，
   括號補充包在 `<span class="y2k-keep">`（`display:inline-block`）裡——窄螢幕換行時整段一起下去，
@@ -873,7 +878,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | revert: 撤除播放點擊中繼——Streamlit Cloud 的 app iframe sandbox 沒有 allow-top-navigation，轉導必被平台 X-Frame-Options 擋成「拒絕連線」（見「播放點擊計數」段的驗屍報告），播放按鈕回退直連；feat: 移除 IG 分享圖卡功能（share_card.py 刪除，Pillow 因上傳路徑仍保留釘版） |
+| （工作區，尚未 commit） | feat: 投射問題題庫 15 → 30、「換一題」改洗牌輪替（整輪出完才重洗、跨輪不連續同題）——舊版 random.choice 換題會回鍋、15 題池子開 5 次頁面約五成機率撞題 |
+| `72bf444` | revert: 撤除播放點擊中繼——Streamlit Cloud 的 app iframe sandbox 沒有 allow-top-navigation，轉導必被平台 X-Frame-Options 擋成「拒絕連線」（見「播放點擊計數」段的驗屍報告），播放按鈕回退直連；feat: 移除 IG 分享圖卡功能（share_card.py 刪除，Pillow 因上傳路徑仍保留釘版） |
 | `5f2db78` | feat: 曲目回饋 👍/👎/🎧（兩種模式，session 級，餵進 prompt＋程式端排除）、播放點擊中繼計數（`?goto=` 白名單防 open redirect、[PLAY] stderr）、Apple Music 第三播放平台（搜尋頁、tw storefront） |
 | `2fcc1c5` | fix: 訪客模式對齊登入版設計原則——prompt 歷史截 40（原本塞整份最多 200 筆）、超額生成 1.25×、補生成＋湊不滿說明開放給訪客、搜不到的卡排最後且超額時最先被裁（原本會佔清單開頭） |
 | （工作區，尚未 commit） | fix(security): 依賴改精確釘版（Pillow 12.3.0 補 13 個 CVE、python-dotenv 1.2.3）、新增生成節流 `ratelimit.py`；順帶修好被擋下的點擊會清掉既有歌單 |

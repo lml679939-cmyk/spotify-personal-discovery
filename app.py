@@ -127,7 +127,38 @@ PROJECTIVE_QUESTIONS = [
     "🍴 你今天最想吃什麼？",
     "🧍 你最近一次發呆是在想什麼？",
     "🎒 如果現在出門你會帶什麼？",
+    # ── 2026-08 擴充 15 → 30：跨 session 的第一題是隨機抽的，15 題的池子
+    #    生日效應很兇（開 5 次頁面約五成機率撞題），加倍直接砍半 ──
+    "🚌 通勤或移動時你通常在做什麼？",
+    "🛒 最近買的一樣東西是什麼？",
+    "⏰ 你今天是被什麼叫醒的？",
+    "🚶 上一次散步是在哪裡？",
+    "📺 睡前最後滑的是什麼？",
+    "🌦️ 用一種天氣形容今天的自己？",
+    "🧺 你房間最亂的角落現在堆著什麼？",
+    "🍜 最近一次吃到「就是這個！」的東西是？",
+    "📅 這週你最期待的一件事是？",
+    "🎁 如果現在收到一個禮物，你希望是什麼？",
+    "🔁 你最近重看／重玩／重聽了什麼？",
+    "🕯️ 你最喜歡的氣味是什麼？（雨後/咖啡/香水…）",
+    "🛋️ 理想的週末下午你會怎麼過？",
+    "📸 如果現在拍一張照，你會拍什麼？",
+    "🗺️ 現在最想逃去哪裡？",
 ]
+
+
+def _rotate_projective(order: list[str], current: str | None) -> tuple[str, list[str]]:
+    """投射問題的洗牌輪替：回傳 (下一題, 剩餘順序)。
+
+    「換一題」不能用 random.choice——它只排除當前題，session 內連按幾次
+    就會看到舊題回鍋。改成整輪洗牌：30 題全部出完才重洗；重洗後的第一題
+    有 1/N 機率剛好是上一輪的最後一題，把它移到隊尾避免連兩題相同。
+    """
+    if not order:
+        order = random.sample(PROJECTIVE_QUESTIONS, len(PROJECTIVE_QUESTIONS))
+        if len(order) > 1 and order[0] == current:
+            order.append(order.pop(0))
+    return order[0], order[1:]
 
 
 # Spotify 授權失敗的說明文字。
@@ -658,7 +689,8 @@ with col2:
 
 # ══ 投射問題（本站特色，從頁面最底下提到這裡）═══════════
 if "projective_q" not in st.session_state:
-    st.session_state["projective_q"] = random.choice(PROJECTIVE_QUESTIONS)
+    _q, _rest = _rotate_projective([], None)
+    st.session_state["projective_q"], st.session_state["proj_order"] = _q, _rest
 
 # 固定比例會讓短題目和按鈕之間留下一大片空白（題目 170–403px 不等，欄寬卻固定）。
 # 改用 key 讓 styles.py 把這一列的兩欄變成 width:auto，按鈕永遠緊跟在題目後面。
@@ -668,10 +700,11 @@ with st.container(key="proj_row"):
         st.markdown(f"**{st.session_state['projective_q']}**")
     with proj_col2:
         if st.button("🔄 換一題"):
-            _cur = st.session_state["projective_q"]
-            st.session_state["projective_q"] = random.choice(
-                [q for q in PROJECTIVE_QUESTIONS if q != _cur]
+            _q, _rest = _rotate_projective(
+                st.session_state.get("proj_order") or [],
+                st.session_state["projective_q"],
             )
+            st.session_state["projective_q"], st.session_state["proj_order"] = _q, _rest
             st.session_state["projective_a"] = ""
             st.rerun()
 

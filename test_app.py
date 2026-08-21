@@ -169,3 +169,27 @@ def test_local_dev_may_still_geolocate_itself(monkeypatch):
 def test_is_local_dev_reads_host_header(monkeypatch, host, expected):
     monkeypatch.setattr(app.st, "context", _FakeContext({"Host": host}))
     assert app._is_local_dev() is expected
+
+
+# ── 投射問題的洗牌輪替 ────────────────────────────────────
+def test_projective_pool_is_expanded_and_unique():
+    assert len(app.PROJECTIVE_QUESTIONS) >= 30
+    assert len(set(app.PROJECTIVE_QUESTIONS)) == len(app.PROJECTIVE_QUESTIONS)
+
+
+def test_projective_rotation_covers_whole_pool_without_repeat():
+    # 一輪剛好每題各出現一次——random.choice 的舊版做不到這件事
+    seen, order, cur = [], [], None
+    for _ in range(len(app.PROJECTIVE_QUESTIONS)):
+        cur, order = app._rotate_projective(order, cur)
+        seen.append(cur)
+    assert sorted(seen) == sorted(app.PROJECTIVE_QUESTIONS)
+
+
+def test_projective_reshuffle_guard_when_first_equals_current(monkeypatch):
+    # 跨輪邊界：重洗出來的第一題剛好撞上當前題時，要移到隊尾（不能連兩題相同）
+    pool = app.PROJECTIVE_QUESTIONS
+    monkeypatch.setattr(app.random, "sample", lambda p, k: list(p))  # 「洗」出原順序
+    nxt, rest = app._rotate_projective([], current=pool[0])
+    assert nxt == pool[1]        # 撞題的第一題被跳過
+    assert rest[-1] == pool[0]   # 移到隊尾，本輪最後才會再出現
