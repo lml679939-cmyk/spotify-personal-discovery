@@ -485,6 +485,7 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 | 兩欄輸入框沒對齊 | 上傳區有自己的 `padding` + 邊框把右欄推低 | 比對兩個 box 的 `top`/`bottom` |
 | 黃底標籤看不到字 | 白字壓 `#FFD700` 對比只有 1.4:1 | 用 WCAG 公式算 relative luminance |
 | 投射列題目與按鈕差 8px | 題目從 `<p>` 改成 `<div>` 後，沒有 p 的 16px 下邊距去抵銷 `stMarkdownContainer` 的 -16px 負邊界 | 量氣泡/文字/按鈕三者 centerY（修後 149/149/149） |
+| 氣泡圖示浮在兩行中間 | 文字折行後 flex 的 `align-items:center` 對齊的是整個兩行文字塊，不是第一行 | 改 `flex-start`（26px 圖示天然對齊 25.6px 行框），量 icon vs 第一行墨水 centerY（13px → 1.1px） |
 
 **做法**：`streamlit run app.py --server.headless true --server.port 8599`
 起服務後用瀏覽器工具跑 `getBoundingClientRect()` / `getComputedStyle()` 量，
@@ -969,7 +970,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | fix: 登入 hero「圖示→標題」間距對齊表單版（墨水間距 13px==13px，margin 17px 為量測校準值；h1 要 padding:0）；feat: 情境標題加對話氣泡 SVG_CHAT（context_label_html 統一產出，左右欄同 helper）；移除登入卡片 y2k-mbr 手機強制斷行（標題已短，實測單行） |
+| （工作區，尚未 commit） | fix: 氣泡圖示的置中改對齊第一行（flex-start）——文字折行時 center 會讓氣泡浮在兩行中間差 13px，修後 1.1px；情境標題與投射問題兩處同步 |
+| `99fe0fa` | fix: 登入 hero「圖示→標題」間距對齊表單版（墨水間距 13px==13px，margin 17px 為量測校準值；h1 要 padding:0）；feat: 情境標題加對話氣泡 SVG_CHAT（context_label_html 統一產出，左右欄同 helper）；移除登入卡片 y2k-mbr 手機強制斷行（標題已短，實測單行） |
 | `a16c525` | feat: 圖示系統第二波全站清掃（登入頁/sidebar/清除鈕/提示框全轉 Material 或貼紙 SVG，新增 SVG_LOCK；刻意保留 🧭 與暫態敘事行）；fix: 投射列置中（div 沒有 p 邊距抵銷 -16px 負邊界）、markdown 行內圖示的第三種字型地雷（translate="no"）、圖示 line-height:1；copy: 「關於你」說明去「選填。」 |
 | `a2bafef` | feat: Y2K 圖示系統兩層制取代全站 emoji——A 層自繪貼紙 SVG（剪貼板＋題目氣泡；投射問題 30 題去 emoji 統一用氣泡）、B 層 Material Rounded 染色（pills/生成鈕/四個 expander/換一題）；⚠️ expander 圖示 testid 是 stExpanderIcon 且會被全域 Nunito 蓋掉連字（:not() 排除清單要含它）。設計稿 artifact d2fc1112 |
 | `5c70d25` | feat: 幻覺補救 repair-on-miss（搜不到→同歌手真實深軌替換，含跨使用者目錄快取；artist_albums limit 上限實測只剩 10）、訪客 fame 天花板（兩段式、只壓國民金曲層級、數量永不縮水）、驗收流程（eval_bench.py＋EVAL.md＋[FEEDBACK] log）；chore: use_container_width → width="stretch"（11 處，import 零棄用警告） |

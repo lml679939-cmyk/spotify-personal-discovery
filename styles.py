@@ -629,8 +629,11 @@ def context_label_html():
     helper**——兩邊內容完全相同，換行行為才一致、兩個輸入框頂端才會永遠對齊。
     括號補充照舊包在 .y2k-keep 裡（窄螢幕整段一起換行）。
     """
+    # ⚠️ align-items 要用 flex-start 不是 center：文字折成兩行時（手機必發生），
+    # center 會讓氣泡浮在兩行中間、離第一行中心 13px。flex-start 讓 26px 的圖示
+    # 對齊 25.6px 的第一行行框（line-height 1.6 × 16px），單行與多行都置中（量測 ±1px）
     return (
-        '<div class="y2k-ctx-label" style="display:flex;align-items:center;gap:10px">'
+        '<div class="y2k-ctx-label" style="display:flex;align-items:flex-start;gap:10px">'
         f'<span style="display:inline-block;width:26px;height:26px;flex:0 0 auto">{SVG_CHAT}</span>'
         '<span style="font-family:\'Nunito\',\'Noto Sans TC\',sans-serif;font-weight:900;font-size:1rem;color:#2D1B4E">'
         '分享一下你的日常吧<span class="y2k-keep">（也可以上傳圖片給 AI 分析）</span></span>'
@@ -645,8 +648,10 @@ def projective_question_html(question):
     輸出保持單行、無縮排（Streamlit 會把縮排行當程式碼區塊）。
     """
     q = html_mod.escape(question)
+    # flex-start 不是 center：長題目在手機折行時，center 會讓氣泡浮在兩行中間
+    # （同 context_label_html 的註解，26px 圖示天然對齊 25.6px 行框）
     return (
-        '<div style="display:flex;align-items:center;gap:10px">'
+        '<div style="display:flex;align-items:flex-start;gap:10px">'
         f'<span style="display:inline-block;width:26px;height:26px;flex:0 0 auto">{SVG_QUESTION}</span>'
         f'<span style="font-family:\'Nunito\',\'Noto Sans TC\',sans-serif;font-weight:900;font-size:1rem;color:#2D1B4E">{q}</span>'
         "</div>"
