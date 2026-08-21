@@ -20,7 +20,13 @@ from urllib3.util.retry import Retry
 from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from spotipy.cache_handler import MemoryCacheHandler
 
-from recommend import _track_key, _track_key_from, resolution_matches
+from recommend import (
+    _loose_match,
+    _norm_artist,
+    _track_key,
+    _track_key_from,
+    resolution_matches,
+)
 
 PERSISTENT_HISTORY_MAX = 500  # 跨 session 歷史歌單保留上限，超過會修剪最舊的
 
@@ -609,6 +615,122 @@ def _search_tracks_parallel(
 
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(recs)))) as ex:
         return list(ex.map(_worker, recs)), rate_limited.is_set()
+
+
+# ── 幻覺補救：同歌手換一首真歌 ─────────────────────────────
+# 實測的幻覺模式是「歌手真實存在、歌名是編的」（Bathe Alone《Your Dog》其實是
+# Soccer Mommy 的歌）——LLM 選的**方向**是對的，錯的只有曲名。所以搜不到時不必
+# 放棄整張卡：找到那位歌手，從他的專輯目錄挑一首真實存在的深軌替換，
+# 推薦意圖（相鄰探索的橋接理由）大多仍然成立。
+# 成本：每位歌手 3–4 個請求（搜歌手 → 專輯清單 → 至多兩張專輯的曲目），
+# 每批上限 REPAIR_MAX_PER_BATCH；目錄跨使用者快取（歌手目錄變動很慢，不設 TTL，
+# 幻覺歌手會被反覆提名——同歌手第二次補救零請求）。
+REPAIR_MAX_PER_BATCH = 5    # 每批最多補救幾首：成本上限 5 × 4 = 20 個請求
+REPAIR_ALBUM_FETCHES = 2    # 每位歌手最多抓幾張專輯的曲目
+_REPAIR_CACHE: dict[str, list[dict] | None] = {}  # _norm_artist(名) → 候選卡（None=找不到）
+_REPAIR_CACHE_LOCK = threading.Lock()
+_REPAIR_STATS = {"hits": 0, "misses": 0}
+
+
+def repair_cache_info() -> dict:
+    with _REPAIR_CACHE_LOCK:
+        return {"size": len(_REPAIR_CACHE), **_REPAIR_STATS}
+
+
+def _artist_catalog(artist: str, sp: spotipy.Spotify | None = None) -> list[dict] | None:
+    """這位歌手的候選曲目卡清單（取自至多 REPAIR_ALBUM_FETCHES 張非合輯專輯）。
+
+    跨使用者快取；「歌手找不到」也快取成 None。429 會往上拋（呼叫端要停止
+    整批補救），跟搜尋快取同一條原則：限流造成的失敗不寫進快取。
+    """
+    key = _norm_artist(artist)
+    if not key:
+        return None
+    with _REPAIR_CACHE_LOCK:
+        if key in _REPAIR_CACHE:
+            _REPAIR_STATS["hits"] += 1
+            hit = _REPAIR_CACHE[key]
+            # 回複本：呼叫端會塞 reason / fame / _repaired，不能污染快取
+            return [dict(t) for t in hit] if hit is not None else None
+        _REPAIR_STATS["misses"] += 1
+
+    if sp is None:
+        sp = get_spotify_client() if is_authenticated() else _get_guest_spotify_client()
+    if sp is None:
+        return None
+
+    # 找歌手實體。驗證名稱對得上才收——補救到「別的歌手」比不補救糟糕得多
+    found = sp.search(q=artist, type="artist", limit=5)["artists"]["items"]
+    match = None
+    for a in found:
+        if a and a.get("name") and (
+            _norm_artist(a["name"]) == key or _loose_match(artist, a["name"])
+        ):
+            match = a
+            break
+    if match is None:
+        with _REPAIR_CACHE_LOCK:
+            _REPAIR_CACHE[key] = None
+        return None
+
+    # ⚠️ artist_albums 的 limit 上限實測只剩 10（2026-08：20 與 50 都回 400
+    # 「Invalid limit」，10 通過——Spotify 又把上限調低了，文件沒跟上）
+    albums = [
+        al for al in sp.artist_albums(match["id"], include_groups="album", limit=10)["items"]
+        if al and al.get("album_type") != "compilation"
+    ]
+    if not albums:  # 只發過單曲的獨立音樂人不少，退一步收單曲
+        albums = [al for al in
+                  sp.artist_albums(match["id"], include_groups="single", limit=10)["items"] if al]
+    # 專輯清單是最新在前；從中段開始試——太新的可能剛發還沒沉澱，最舊的資料常不齊
+    order = albums[len(albums) // 2:] + albums[:len(albums) // 2]
+    cards: list[dict] = []
+    for al in order[:REPAIR_ALBUM_FETCHES]:
+        images = al.get("images") or []
+        cover = images[1]["url"] if len(images) > 1 else (images[0]["url"] if images else "")
+        tracks = [t for t in sp.album_tracks(al["id"], limit=20)["items"]
+                  if t and t.get("name") and t.get("artists")]
+        # 避開第 1 軌（通常是主打單曲），從中段排起——「非合輯專輯的中段曲目」深軌啟發式
+        mid = len(tracks) // 2
+        for t in tracks[mid:] + tracks[1:mid]:
+            cards.append({
+                "name": t["name"],
+                "artist": ", ".join(a["name"] for a in t["artists"]),
+                "album": al.get("name", ""),
+                "url": (t.get("external_urls") or {}).get("spotify", ""),
+                "uri": t.get("uri"),
+                "cover": cover,
+                "popularity": None,
+                "artist_ids": [a["id"] for a in t["artists"] if a.get("id")],
+                "artist_names": [a["name"] for a in t["artists"]],
+            })
+    with _REPAIR_CACHE_LOCK:
+        _REPAIR_CACHE[key] = [dict(t) for t in cards]
+    return cards
+
+
+def repair_hallucinated_track(
+    title: str,
+    artist: str,
+    exclude_keys: set[tuple[str, str]],
+    sp: spotipy.Spotify | None = None,
+) -> dict | None:
+    """搜不到的候選（幻覺）→ 同一位歌手真實存在的深軌，挑不到回 None（維持搜尋卡）。
+
+    exclude_keys 是呼叫端「已經出現過」的 (正規化歌名, 歌手) 集合——歷史、
+    已聽過的曲目、本批其他卡都要在內，否則補救會補出重複。
+    title 目前只用於語意（幻覺的曲名沒有比對價值），保留參數是為了未來
+    想做「挑最像原意圖的曲目」時不用改簽名。
+    """
+    catalog = _artist_catalog(artist, sp)
+    if not catalog:
+        return None
+    for t in catalog:
+        key = _track_key_from(t["name"], (t.get("artist_names") or [""])[0])
+        if key in exclude_keys:
+            continue
+        return dict(t, _repaired=True)
+    return None
 
 
 # ── 跨 session 歷史（持久化在 Spotify 私人歌單） ────────────

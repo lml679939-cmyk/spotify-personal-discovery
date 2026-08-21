@@ -321,6 +321,51 @@ def test_guest_trims_overgenerated_candidates_to_target():
     assert [t["name"] for t in result] == ["S0", "S1", "S2", "S3"]
 
 
+def test_guest_prompt_requests_fame_rating():
+    p = build_guest_prompt("ctx")
+    assert "每首都要標 fame" in p
+    assert '"fame":3' in p          # JSON 範本要有這個鍵，LLM 才會照填
+
+
+def test_guest_ceiling_cuts_mega_hits_first_on_overflow():
+    # 超額時：太紅的（fame 5 → 95 > 80）優先被裁，餘裕留給驚喜選曲
+    tracks = [
+        {**_t("國民金曲", "A"), "fame": 5},
+        {**_t("驚喜 1", "B"), "fame": 2},
+        {**_t("驚喜 2", "C"), "fame": 3},
+    ]
+    result, stats = curate_tracks(tracks, num_songs=2)
+    assert [t["name"] for t in result] == ["驚喜 1", "驚喜 2"]
+    assert stats["pop_blocked"] == 1
+
+
+def test_guest_ceiling_backfills_when_short():
+    # 整批都太紅（使用者可能就是要經典金曲）→ 照樣回補，數量永不縮水
+    tracks = [{**_t("金曲 1", "A"), "fame": 5}, {**_t("金曲 2", "B"), "fame": 5}]
+    result, stats = curate_tracks(tracks, num_songs=2)
+    assert len(result) == 2
+    assert stats["pop_blocked"] == 0
+
+
+def test_guest_ceiling_still_ranks_dead_cards_last():
+    # 優先序：不超標 → 太紅 → 搜不到；太紅的仍排在死連結卡前面
+    tracks = [
+        {"name": "Dead", "artist": "X", "_no_spotify": True},
+        {**_t("金曲", "A"), "fame": 5},
+        {**_t("普通", "B"), "fame": 3},
+    ]
+    result, _ = curate_tracks(tracks)
+    assert [t["name"] for t in result] == ["普通", "金曲", "Dead"]
+
+
+def test_guest_fame_4_passes_the_looser_ceiling():
+    # fame 4 換算 80 剛好貼線（> 80 才算超標）——訪客版只壓 fame 5 的國民金曲層級
+    tracks = [{**_t("熱門但沒到國民", "A"), "fame": 4}, {**_t("普通", "B"), "fame": 3}]
+    result, stats = curate_tracks(tracks, num_songs=1)
+    assert result[0]["name"] == "熱門但沒到國民"   # 沒被降權，維持 LLM 順位
+    assert stats["pop_blocked"] == 0
+
+
 def test_guest_stats_count_each_drop_reason():
     # app.py 拿這些計數組「為什麼湊不滿」的說明，少列任何一個原因訊息就會自相矛盾
     history = [{"title": "Old", "artist": "X"}]

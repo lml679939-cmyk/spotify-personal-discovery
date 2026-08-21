@@ -1,0 +1,143 @@
+{
+ "when": "2026-08-21T21:09:13",
+ "tag": "smoke",
+ "repair": true,
+ "num_songs": 15,
+ "runs": [
+  {
+   "scenario": "S3",
+   "name": "健身（全不限）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 2,
+   "repaired": 0,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 1,
+   "fame_low_share": 0.0,
+   "gemini_s": 7.3,
+   "search_s": 5.8,
+   "tracks": [
+    {
+     "name": "Till I Collapse",
+     "artist": "Eminem, Nate Dogg",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "POWER",
+     "artist": "Kanye West",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "HUMBLE.",
+     "artist": "Kendrick Lamar",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Bulls On Parade",
+     "artist": "Rage Against The Machine",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Immigrant Song - Remaster",
+     "artist": "Led Zeppelin",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Can't Hold Us (feat. Ray Dalton)",
+     "artist": "Macklemore, Ryan Lewis, Macklemore & Ryan Lewis, Ray Dalton",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Enter Sandman - Remastered 2021",
+     "artist": "Metallica",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Sabotage",
+     "artist": "Beastie Boys",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Level Up",
+     "artist": "Ciara",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "In My Mind",
+     "artist": "Dynoro, GIGI D'AGOSTINO",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Run Boy Run",
+     "artist": "Woodkid",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Work Bitch",
+     "artist": "Britney Spears",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "X Gon' Give It To Ya - Int'l Bonus track",
+     "artist": "DMX",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Remember The Name (feat. Eminem & 50 Cent)",
+     "artist": "Ed Sheeran, Eminem, 50 Cent",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Mama Said Knock You Out",
+     "artist": "LL COOL J",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  }
+ ],
+ "search_cache": {
+  "size": 18,
+  "hits": 0,
+  "misses": 18
+ },
+ "repair_cache": {
+  "size": 0,
+  "hits": 0,
+  "misses": 2
+ }
+}

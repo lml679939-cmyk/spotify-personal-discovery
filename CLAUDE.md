@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（100）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 184 tests
+- **測試**：`test_recommend.py`（105）+ `test_spotify_api.py`（27）+ `test_styles.py`（9）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 194 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 184 tests，改任何 .py 都要跑
+python -m pytest -q                     # 194 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -58,16 +58,14 @@ python -m pytest -q                     # 184 tests，改任何 .py 都要跑
     一律用 `st.context.timezone_offset`（注意單位是分鐘、正負號相反），見「時區」。
 
 **現在還沒做的**（依價值排序）
+- **驗收第 1 輪**：`eval_bench.py` 已就緒（冒煙測過 S1/S3），完整的 S1–S6 基準輪
+  還沒跑——見「驗收流程」段與 `EVAL.md`
+- **回饋持久化（登入版）**：回饋目前是 session 級，關分頁歸零；使用者已定案
+  「登入版之後再做」（寫進 Spotify 歌單那招）。訪客要 localStorage（自訂元件）成本高，緩
 - **雲端的位置與天氣**：已確認 Streamlit Cloud 的代理鏈拿不到 client IP（見「位置偵測」），
   時區已改由瀏覽器提供、時間正確，但位置與天氣在雲端一律不顯示。
   要恢復得走前端（Geolocation API 或前端打 IP API），成本不低，目前判斷可以不做。
-- LLM 只提名歌手、曲目改由 `artist_albums` + `album_tracks` 取得，可根治歌名幻覺
-  （實測 12 首有 3 首是曲名與歌手配錯；代價是每位歌手約 3 個請求，
-  要先解決共用 Client ID 的速率限制）
 - 歌單寫入仍是 403（需要 Spotify Quota Extension，個人開發者實際上申請不到）
-- 推薦結果的評分回饋（目前沒有任何學習訊號）
-- `use_container_width` 已被 Streamlit 標記棄用（線上日誌一直在警告），
-  哪天真的移除就會壞，要改成 `width='stretch'` / `width='content'`
 
 ## 關鍵架構
 
@@ -272,9 +270,18 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
   不是推錯歌，目前接受。要修的話得做音譯，成本高。
 - **解析率實測**（配額正常時，訪客模式一般推薦）：15 首中 14–15 首解析成功、耗時 5 秒。
   對照組：登入模式加強冷門指令後只有約 40%——差距全部來自幻覺，不是搜尋能力。
-- **未來方向**：`artist_top_tracks` 已 403，但 `artist_albums` + `album_tracks` 還能用。
-  改成「LLM 只提名歌手 → 曲目由 Spotify 提供」可以徹底消滅這類幻覺
-  （代價是每位歌手約 3 個請求，要先解決上面的速率限制問題）。
+- **✅ 幻覺補救（repair-on-miss，2026-08-21）**：幻覺的模式是「歌手真實、歌名是編的」
+  ＝方向對、細節錯，所以**只修失敗案例**就夠，不必整條管線改成「LLM 只提歌手」。
+  搜不到的候選走 `spotify_api.repair_hallucinated_track()`：搜歌手（驗證名稱對得上
+  才收，補到別的歌手比不補糟糕得多）→ `artist_albums`（跳過合輯，全空才退收單曲）
+  → 一張專輯的曲目 → 避開第 1 軌、從中段挑一首沒出現過的深軌替換，
+  `reason` 沿用（橋接句本來就是歌手層級）、標 `_repaired`。
+  成本每位歌手 3–4 個請求、每批上限 `REPAIR_MAX_PER_BATCH=5`；
+  目錄跨使用者快取（`_REPAIR_CACHE`，不設 TTL，「找不到」也快取），
+  撞 429 立即停止整批補救。`[NOVELTY]` log 的 `repaired`/`repair_cache` 是驗收指標
+  （repaired 上升＋spare_used 下降＝在生效）。
+  ⚠️ **`artist_albums` 的 limit 上限實測只剩 10**（2026-08：20 與 50 都回 400
+  「Invalid limit」，文件沒跟上）；`album_tracks` 給 20 沒問題。
 
 - **歌手比對以 Spotify artist ID 為主**、名稱為輔——名稱變體（IU / 아이유）用 ID 才不會漏。
 - **曲目比對用 `_track_key()` =（正規化歌名, 正規化主要藝人）配對**。舊版只比歌名，
@@ -336,7 +343,14 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 （`dup_history` / `dup_batch` / `artist_capped`），湊不滿時 app.py 拿它組說明訊息
 （訪客分支，建議固定指向「清除推薦歷史」）；
 ④ 補生成對訪客也生效（`build_guest_prompt` 支援 `refill_exclude`，指令是「換別的」
-而非登入版的「往更冷門挑」）。
+而非登入版的「往更冷門挑」）；
+⑤ **訪客也有 fame 天花板（2026-08-21）**：guest prompt 要求 fame 自評（同一套
+可操作錨點，但**不套**登入版「至少一半 1-2」的配額——訪客要的不一定是探索），
+`_basic_dedupe(fame_ceiling=GUEST_POP_CEILING=80)` 兩段式：只擋 fame 5（≈95）
+的國民金曲層級、fame 4（=80）貼線通過；**超標只降權不刪除**——排序優先序是
+「不超標 → 太紅 → 搜不到」，湊不滿時超標的照樣回補，數量永不縮水
+（訪客沒有「想聽經典金曲」的意圖訊號，硬擋會毀掉那種請求）。
+被截掉的超標首數計進 `stats["pop_blocked"]`。
 去重鍵沿用括號剝除的正規化，同藝人的 `Interlude (I)` / `Interlude (II)` 視為同一首。
 
 ### 歷史去重
@@ -488,6 +502,26 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - 修改樣式只改 `styles.py` + `config.toml`，不要在 `app.py` 混入 CSS
 - `_method_card_html()` 使用 `min-height:130px`（非 `height`），讓手機上文字換行後能撐高，不截字
 
+## 驗收流程（2026-08 起）
+
+> 演算法改動**前後各跑一輪、數字進 `EVAL.md`**，commit message 引用輪次。
+> 沒有對照數字的演算法改動不要上線——優化不能憑感覺（這句是使用者定的）。
+
+- **機器指標**：`python eval_bench.py`（訪客 S1–S5，情境輸入逐字固定在腳本裡，
+  **改一個字就開新情境 ID**，否則跨輪不可比）。需要本機 `.env` 金鑰；
+  結果進 `eval_runs/*.json`（要進版控，是歷史資料）。
+  `--no-repair` 關閉幻覺補救（量對照組）、`--only S1 S4` 只跑部分、`--tag` 標記輪次。
+- **與 app 的刻意差異**：不做補生成（湊不滿本身是要量的訊號）、搜尋循序非並行
+  （省共用配額，時間數字比線上慢）。
+- **人工三題**（每情境一分鐘）：認得幾首／契合 1–5／想點開幾首。
+  S6（登入 100% 探索）CLI 做不了 OAuth，照 `EVAL.md` 的固定輸入在 app 手動跑，
+  出圈指標抄結果頁 caption。
+- **判定指引**（不是硬性 CI）：可播 < 13/15 要查；70% 模式認得 > 3 首＝出圈退步；
+  任一指標比上一輪差 15% 以上不上線，除非理由寫進 EVAL.md。
+  LLM 有隨機性——單輪幾個百分點是雜訊，看趨勢與大幅退步。
+- 真實使用者端的品質訊號：`[FEEDBACK]`（見「使用者回饋」）與 `[NOVELTY]` 在
+  Manage app 日誌可撈。
+
 ## 修改注意事項
 
 ### Spotify API 限制（重要）
@@ -556,6 +590,8 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   倒讚＝避開方向、聽過＝出圈校準；每類最多 `FEEDBACK_PROMPT_MAX=20` 筆（短清單原則）。
 - **密集網格（>5/列）不顯示 pills**——欄寬塞不下，跟專輯名/理由走同一條
   「密集就省略」界線（`show_album`）。條列式一律顯示。
+- 每次生成若帶有回饋，印一行 `[FEEDBACK] liked=N disliked=N heard=N guest=…` 到
+  stderr——真實使用者的 👍 率是 EVAL.md 之外的第二個品質訊號源（Manage app 日誌可撈）。
 - 版面量測（probe 頁，2026-08）：桌機 5/列與 3/列兩列——卡片等高（580/561）、
   按鈕齊（604）、pills 齊、列距 16px、pills 收在 column 盒內（bottom 對齊）；
   手機 375px 欄堆疊 343px、pills 單列 134×32 不換行；兩種尺寸皆零水平溢出。
@@ -877,6 +913,9 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `test_recommend.py` | recommend.py 單元測試（pytest） | 改 recommend.py 時同步 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
+| `eval_bench.py` | 固定情境驗收跑分 CLI（訪客 S1–S5，見「驗收流程」） | 改演算法時跑 |
+| `EVAL.md` | 驗收紀錄（每輪一節，含人工三題） | 改演算法時填 |
+| `eval_runs/` | 驗收的 JSON 明細（要進版控，是歷史資料） | 自動產生 |
 | `.streamlit/config.toml` | Streamlit 主題 + toolbarMode | 偶爾 |
 | `requirements.txt` | pip 依賴 | 偶爾 |
 | `.env` / `.env.example` | 本地 credentials（不加入 git） | 否 |
@@ -888,7 +927,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | copy: 結果區「複製或分享歌單」→「複製歌單」；docs: Apple Music 曲目直連調查定案不做（iTunes Search API 中文召回率極差，見「播放平台選擇」段） |
+| （工作區，尚未 commit） | feat: 幻覺補救 repair-on-miss（搜不到→同歌手真實深軌替換，含跨使用者目錄快取；artist_albums limit 上限實測只剩 10）、訪客 fame 天花板（兩段式、只壓國民金曲層級、數量永不縮水）、驗收流程（eval_bench.py＋EVAL.md＋[FEEDBACK] log）；chore: use_container_width → width="stretch"（11 處，import 零棄用警告） |
+| `081d791` | copy: 結果區「複製或分享歌單」→「複製歌單」；docs: Apple Music 曲目直連調查定案不做（iTunes Search API 中文召回率極差，見「播放平台選擇」段） |
 | `5b88680` | feat: 投射問題題庫 15 → 30、「換一題」改洗牌輪替（整輪出完才重洗、跨輪不連續同題）——舊版 random.choice 換題會回鍋、15 題池子開 5 次頁面約五成機率撞題 |
 | `72bf444` | revert: 撤除播放點擊中繼——Streamlit Cloud 的 app iframe sandbox 沒有 allow-top-navigation，轉導必被平台 X-Frame-Options 擋成「拒絕連線」（見「播放點擊計數」段的驗屍報告），播放按鈕回退直連；feat: 移除 IG 分享圖卡功能（share_card.py 刪除，Pillow 因上傳路徑仍保留釘版） |
 | `5f2db78` | feat: 曲目回饋 👍/👎/🎧（兩種模式，session 級，餵進 prompt＋程式端排除）、播放點擊中繼計數（`?goto=` 白名單防 open redirect、[PLAY] stderr）、Apple Music 第三播放平台（搜尋頁、tw storefront） |

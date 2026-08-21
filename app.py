@@ -23,13 +23,16 @@ from recommend import (
     OVERGEN_FACTOR,
     PLAY_PLATFORMS,
     REFILL_MAX,
+    _history_keys,
     _track_key,
+    _track_key_from,
     analyze_image,
     curate_tracks,
     get_recommendations,
     play_link,
 )
 from spotify_api import (
+    REPAIR_MAX_PER_BATCH,
     _browser_secret,
     _get_credential,
     _get_env,
@@ -37,6 +40,9 @@ from spotify_api import (
     _has_scope,
     _local_now,
     _search_tracks_parallel,
+    _sp,
+    repair_cache_info,
+    repair_hallucinated_track,
     append_to_persistent_history,
     clear_persistent_history,
     consume_oauth_callback,
@@ -257,7 +263,7 @@ def show_login_required() -> None:
     if st.button(
         "🎶 直接開始推薦",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         disabled=not has_gemini,
     ):
         enter_guest_mode()
@@ -277,7 +283,7 @@ def show_login_required() -> None:
             "🎧 用 Spotify 登入",
             get_login_url(),   # 已帶上綁定本瀏覽器的 state，見 spotify_api._make_oauth_state()
             type="secondary",
-            use_container_width=True,
+            width="stretch",
         )
         st.caption("🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。")
 
@@ -609,7 +615,7 @@ if is_guest_mode():
     with st.sidebar:
         st.markdown("### 🎶 訪客模式")
         st.caption("未連結 Spotify・推薦不會個人化")
-        if st.button("🔄 切換為 Spotify 登入", use_container_width=True):
+        if st.button("🔄 切換為 Spotify 登入", width="stretch"):
             logout()
         st.markdown("---")
         _render_api_key_settings()
@@ -622,7 +628,7 @@ else:
         with st.sidebar:
             st.markdown(f"### 👤 {st.session_state['user_display_name']}")
             st.caption("已連結 Spotify")
-            if st.button("🚪 登出", use_container_width=True):
+            if st.button("🚪 登出", width="stretch"):
                 logout()
             st.markdown("---")
             _render_api_key_settings()
@@ -685,7 +691,7 @@ with col2:
         label_visibility="collapsed",
     )
     if uploaded:
-        st.image(uploaded, use_container_width=True)
+        st.image(uploaded, width="stretch")
 
 # ══ 投射問題（本站特色，從頁面最底下提到這裡）═══════════
 if "projective_q" not in st.session_state:
@@ -766,7 +772,7 @@ with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False
 
     _clr_hist_col, _clr_fb_col = st.columns(2)
     with _clr_hist_col:
-        if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0, use_container_width=True):
+        if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0, width="stretch"):
             st.session_state["recommend_history"] = []
             if not is_guest_mode():
                 try:
@@ -778,7 +784,7 @@ with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False
             st.rerun()
     with _clr_fb_col:
         _fb_n = len(st.session_state.get("track_feedback", {}))
-        if st.button(f"🗑 清除歌曲回饋（{_fb_n}）", disabled=_fb_n == 0, use_container_width=True):
+        if st.button(f"🗑 清除歌曲回饋（{_fb_n}）", disabled=_fb_n == 0, width="stretch"):
             st.session_state["track_feedback"] = {}
             # widget state 也要一起清：留著的話下次渲染 pills 會把舊選取重新寫回 dict
             for _k in [k for k in st.session_state if isinstance(k, str) and k.startswith("w_fb::")]:
@@ -893,7 +899,7 @@ _rl_exhausted = not _rl_ok and not _rl_wait
 _clicked = generate_slot.button(
     "🚦 今日次數已用完" if _rl_exhausted else "✨ 生成推薦歌單",
     type="primary",
-    use_container_width=True,
+    width="stretch",
     key="btn_generate",
     disabled=_rl_exhausted,
 )
@@ -1025,6 +1031,15 @@ if _clicked:
                 }
                 if not any(feedback.values()):
                     feedback = None
+                else:
+                    # 真實使用者的回饋量進日誌（Manage app 可撈）——除了 EVAL.md 之外
+                    # 第二個演算法品質訊號源：👍 率高的 prompt 改動才是真的有效
+                    print(
+                        f"[FEEDBACK] liked={len(feedback['liked'])} "
+                        f"disliked={len(feedback['disliked'])} heard={len(feedback['heard'])} "
+                        f"guest={is_guest_mode()}",
+                        file=sys.stderr, flush=True,
+                    )
                 lang_msg = "、".join(languages) if languages else "不限"
                 genre_msg = "、".join(genres) if genres else "不限"
                 _ratio_msg = "" if is_guest_mode() else f"新藝人 {new_artist_ratio}%・"
@@ -1081,9 +1096,39 @@ if _clicked:
                     st.write(f"⚠️ 未設定 Spotify API，跳過搜尋（{len(unique_recs)} 首）")
 
                 _rate_limited: list[bool] = []   # 這裡是模組層級，用 list 當旗標比 global 乾淨
+                _repair_budget = [REPAIR_MAX_PER_BATCH]  # 幻覺補救額度，整次生成共用（含補生成輪）
+
+                # 補救的排除集合：歷史＋已聽過的曲目＋本次已出的卡（_resolve 邊出邊加）。
+                # 少了任何一塊，補救就會補出重複的歌
+                _exclude_keys: set[tuple[str, str]] = set(_history_keys(history))
+                if profile is not None:
+                    _exclude_keys |= {tuple(k) for k in (profile.get("known_track_keys") or ())}
+
+                def _repair(rec: dict) -> dict | None:
+                    """幻覺補救：搜不到的候選換成同一位歌手真實存在的深軌。
+
+                    實測的幻覺模式是「歌手真的存在、歌名是編的」——方向對、細節錯，
+                    所以同歌手替換能保留推薦意圖。額度用完或撞到限流就不再嘗試。
+                    """
+                    if _rate_limited or _repair_budget[0] <= 0 or not _search_token:
+                        return None
+                    try:
+                        fixed = repair_hallucinated_track(
+                            rec.get("title", ""), rec.get("artist", ""),
+                            _exclude_keys, sp=_sp(_search_token),
+                        )
+                    except spotipy.SpotifyException as e:
+                        if e.http_status == 429:
+                            _rate_limited.append(True)
+                        return None
+                    except Exception:
+                        return None
+                    if fixed is not None:
+                        _repair_budget[0] -= 1
+                    return fixed
 
                 def _resolve(recs: list[dict]) -> list[dict]:
-                    """候選 → 曲目卡。搜不到的以搜尋連結卡呈現，不中斷整批。"""
+                    """候選 → 曲目卡。搜不到的先試同歌手補救，再不行以搜尋連結卡呈現。"""
                     if _search_token and recs:
                         results, hit = _search_tracks_parallel(recs, _search_token)
                         if hit:
@@ -1092,11 +1137,17 @@ if _clicked:
                         results = [None] * len(recs)
                     cards = []
                     for rec, r in zip(recs, results):
+                        if not r:
+                            r = _repair(rec)
                         if r:
                             r["reason"] = rec.get("reason", "")
                             # Spotify 已停止提供 popularity，改由 LLM 自評的 fame 遞補
+                            # （補救卡沿用原候選的 fame——同歌手的量級大致可轉移）
                             r["fame"] = rec.get("fame")
                             cards.append(r)
+                            _exclude_keys.add(_track_key_from(
+                                r["name"], (r.get("artist_names") or [r.get("artist", "")])[0]
+                            ))
                         else:
                             _q = quote(f"{rec['title']} {rec['artist']}", safe="")
                             cards.append({
@@ -1186,10 +1237,13 @@ if _clicked:
                         + "。過一陣子再試就會恢復。"
                     )
                 if profile is not None:
-                    # 量測用：新歌手比例、探索額度的平均熱門度、各關卡刷掉幾首
+                    # 量測用：新歌手比例、探索額度的平均熱門度、各關卡刷掉幾首、
+                    # 幻覺補救了幾首（repaired 上升＋spare_used 下降＝補救在生效）
+                    _repaired_n = sum(1 for t in found if t.get("_repaired"))
                     print(
                         f"[NOVELTY] {_novelty} known={profile.get('known_stats')} "
-                        f"search_cache={search_cache_info()}",
+                        f"repaired={_repaired_n} "
+                        f"search_cache={search_cache_info()} repair_cache={repair_cache_info()}",
                         file=sys.stderr, flush=True,
                     )
                     if not profile.get("known_artist_ids"):
@@ -1321,7 +1375,7 @@ if "found" in st.session_state and st.session_state.found:
                 label_visibility="collapsed",
             )
         with save_col2:
-            save_clicked = st.button("💾 加入 Spotify", type="primary", use_container_width=True)
+            save_clicked = st.button("💾 加入 Spotify", type="primary", width="stretch")
 
     if save_clicked:
         with st.spinner("建立歌單並寫入 Spotify..."):
@@ -1443,7 +1497,7 @@ if "found" in st.session_state and st.session_state.found:
                                 unsafe_allow_html=True,
                             )
                             _label, _url = play_link(track, play_platform)
-                            st.link_button(_label, _url, use_container_width=True)
+                            st.link_button(_label, _url, width="stretch")
                             if show_album:
                                 # 密集網格（>5/列）欄寬塞不下三顆 pills，回饋鈕跟
                                 # 專輯名/理由走同一條「密集就省略」的界線
@@ -1455,7 +1509,7 @@ if "found" in st.session_state and st.session_state.found:
                 unsafe_allow_html=True,
             )
             _label, _url = play_link(track, play_platform)
-            st.link_button(_label, _url, use_container_width=True)
+            st.link_button(_label, _url, width="stretch")
             _render_feedback(track)
 
     # ── 複製 / 分享到 LINE ──────────────────────────────────

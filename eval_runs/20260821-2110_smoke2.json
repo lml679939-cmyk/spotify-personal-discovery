@@ -1,0 +1,144 @@
+{
+ "when": "2026-08-21T21:10:42",
+ "tag": "smoke2",
+ "repair": true,
+ "num_songs": 15,
+ "runs": [
+  {
+   "scenario": "S1",
+   "name": "深夜放空（華語限定）",
+   "candidates": 18,
+   "unique": 17,
+   "search_miss": 2,
+   "repaired": 0,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 0,
+   "fame_low_share": 0.0,
+   "gemini_s": 8.4,
+   "search_s": 5.7,
+   "lang_conform": 1.0,
+   "tracks": [
+    {
+     "name": "空白格",
+     "artist": "Tanya Chua",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "南山南",
+     "artist": "Di Ma",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "身騎白馬",
+     "artist": "LaLa Hsu",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "還是會寂寞",
+     "artist": "Cheer Chen",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "克卜勒",
+     "artist": "Stefanie Sun",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "如煙",
+     "artist": "Mayday",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "修煉愛情",
+     "artist": "JJ Lin",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "暧昧",
+     "artist": "Joker Xue",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "太想愛你",
+     "artist": "Jeff Chang",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "忽然之間",
+     "artist": "Karen Mok",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "小半",
+     "artist": "陳粒",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "安靜",
+     "artist": "Jay Chou",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "盛夏光年",
+     "artist": "Mayday",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "你啊你啊 - 電視劇「用九柑仔店」插曲",
+     "artist": "Waa Wei",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "有沒有",
+     "artist": "WeiBird",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  }
+ ],
+ "search_cache": {
+  "size": 17,
+  "hits": 0,
+  "misses": 17
+ },
+ "repair_cache": {
+  "size": 2,
+  "hits": 0,
+  "misses": 2
+ }
+}

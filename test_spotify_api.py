@@ -47,8 +47,11 @@ class FakeSpotify:
 def _clear_cache():
     spotify_api._SEARCH_CACHE.clear()
     spotify_api._SEARCH_STATS.update(hits=0, misses=0)
+    spotify_api._REPAIR_CACHE.clear()
+    spotify_api._REPAIR_STATS.update(hits=0, misses=0)
     yield
     spotify_api._SEARCH_CACHE.clear()
+    spotify_api._REPAIR_CACHE.clear()
 
 
 # ── 搜尋快取 ──────────────────────────────────────────────
@@ -291,3 +294,80 @@ def test_allowlisted_codes_contain_no_markdown_metacharacters():
 def test_unknown_error_is_itself_allowlisted():
     """_set_auth_error() 的 fallback 值若不在白名單裡，語意會自相矛盾。"""
     assert "unknown_error" in spotify_api._ALLOWED_OAUTH_ERRORS
+
+
+# ── 幻覺補救（同歌手換一首真歌）──────────────────────────
+class FakeCatalogSpotify:
+    """支援 artist 搜尋 → artist_albums → album_tracks 的假 client。"""
+
+    def __init__(self, artist_name="Bathe Alone", tracks=("T1", "T2", "T3", "T4")):
+        self._session = _FakeSession()
+        self.calls = 0
+        self.artist_name = artist_name
+        self.tracks = tracks
+
+    def search(self, q, type, limit):
+        self.calls += 1
+        assert type == "artist"
+        return {"artists": {"items": [{"name": self.artist_name, "id": "ar1"}]}}
+
+    def artist_albums(self, aid, include_groups, limit):
+        self.calls += 1
+        return {"items": [{
+            "id": "al1", "name": "Album One", "album_type": "album",
+            "images": [{"url": "big.jpg"}, {"url": "mid.jpg"}],
+        }]}
+
+    def album_tracks(self, aid, limit):
+        self.calls += 1
+        return {"items": [
+            {"name": n,
+             "artists": [{"name": self.artist_name, "id": "ar1"}],
+             "external_urls": {"spotify": f"https://open.spotify.com/track/{i}"},
+             "uri": f"spotify:track:{i}"}
+            for i, n in enumerate(self.tracks)
+        ]}
+
+
+def test_repair_swaps_in_a_real_deep_cut_by_the_same_artist():
+    sp = FakeCatalogSpotify()
+    fixed = spotify_api.repair_hallucinated_track("編的歌名", "Bathe Alone", set(), sp=sp)
+    assert fixed is not None and fixed["_repaired"] is True
+    assert fixed["artist_names"] == ["Bathe Alone"]
+    # 深軌啟發式：避開第 1 軌（通常是主打），從專輯中段排起——4 軌的中位是 T3
+    assert fixed["name"] == "T3"
+    assert fixed["cover"] == "mid.jpg"
+    assert fixed["uri"] and fixed["url"]
+
+
+def test_repair_respects_exclusion_keys():
+    sp = FakeCatalogSpotify()
+    excluded = {_track_key("T3", "Bathe Alone")}
+    fixed = spotify_api.repair_hallucinated_track("編的歌名", "Bathe Alone", excluded, sp=sp)
+    assert fixed["name"] == "T4"
+
+
+def test_repair_catalog_is_cached_across_calls():
+    sp = FakeCatalogSpotify()
+    spotify_api.repair_hallucinated_track("編的 A", "Bathe Alone", set(), sp=sp)
+    calls_after_first = sp.calls
+    fixed2 = spotify_api.repair_hallucinated_track("編的 B", "Bathe Alone", set(), sp=sp)
+    assert sp.calls == calls_after_first, "同歌手第二次補救應走快取，零請求"
+    assert fixed2 is not None
+
+
+def test_repair_unknown_artist_is_negative_cached():
+    # 搜回來的歌手名對不上就不能亂補——補到別的歌手比不補救糟糕得多
+    sp = FakeCatalogSpotify(artist_name="Totally Other Band")
+    assert spotify_api.repair_hallucinated_track("X", "Nonexistent Guy", set(), sp=sp) is None
+    calls_after_first = sp.calls
+    assert spotify_api.repair_hallucinated_track("Y", "Nonexistent Guy", set(), sp=sp) is None
+    assert sp.calls == calls_after_first, "找不到的歌手也要快取（幻覺歌手會被反覆提名）"
+
+
+def test_repair_returns_copies_so_callers_cannot_poison_cache():
+    sp = FakeCatalogSpotify()
+    first = spotify_api.repair_hallucinated_track("編的 A", "Bathe Alone", set(), sp=sp)
+    first["reason"] = "第一批的理由"
+    second = spotify_api.repair_hallucinated_track("編的 B", "Bathe Alone", set(), sp=sp)
+    assert "reason" not in second

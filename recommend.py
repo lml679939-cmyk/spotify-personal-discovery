@@ -43,6 +43,10 @@ POP_CEILING_STRICT = 55      # new_ratio == 100（硬核探索）時收緊
 POP_CEILING_RELAX_STEP = 10  # 候選不足時每輪放寬多少（不回退熱門，只逐步放寬）
 POP_CEILING_MAX_RELAX = 80   # 放寬的絕對上限：再上去就是「不可能沒聽過」的大熱門了，
                              # 湊不滿寧可少幾首——不然放寬會把天花板擋掉的歌整批放回來
+GUEST_POP_CEILING = 80       # 訪客版天花板（比登入版寬鬆）：fame 5 換算 95 會超標、
+                             # fame 4 換算 80 剛好貼線通過——只壓「國民金曲」層級。
+                             # 兩段式：超標只降低優先權，湊不滿時照樣回補，數量永不縮水
+                             # （訪客沒有「經典金曲」之類的意圖訊號，硬擋會毀掉那種請求）
 NOVELTY_WEIGHT = 0.35        # 重排權重：0 = 完全照 LLM 順序，1 = 純冷門優先
 UNKNOWN_POP = 50             # 連 fame 都沒有時的中間值——不確定就不加分也不擋
 
@@ -408,6 +412,18 @@ def build_guest_prompt(
     else:
         genre_block = "## 曲風偏好\n- 不限曲風，依情境自由選擇\n"
 
+    # fame 自評（訪客版）：沒有聆聽紀錄可比對時，「太紅」是唯一可用的驚喜度訊號。
+    # 錨點沿用登入版的校準教訓——只給抽象定義時 LLM 從不給 1-2 分；
+    # 但不套登入版「至少一半 1-2」的配額，訪客要的不一定是探索
+    fame_block = (
+        "## 每首都要標 fame（會影響排序，請誠實評估）\n"
+        "這首歌有多紅，填 1-5 整數。**基準：這首在該音樂人的 Spotify 熱門曲目排第幾。**\n"
+        "5=跨圈國民金曲（例：Adele《Someone Like You》）、"
+        "4=該音樂人最紅的前幾首（例：Nick Drake《Pink Moon》）、\n"
+        "3=樂迷普遍知道、2=要聽過整張專輯才知道、1=死忠樂迷才知道。\n"
+        "太紅的歌（5 分）會被降低優先，請混入一部分 2-3 分的驚喜選曲。\n"
+    )
+
     if history:
         # 與登入版同一條原則：prompt 只放最近 PROMPT_HISTORY_MAX 筆做機率優化
         # （清單愈長遵守率愈差），完整排除靠程式端 _basic_dedupe 拿整份歷史比對
@@ -455,6 +471,7 @@ def build_guest_prompt(
 
 {lang_block}
 {genre_block}
+{fame_block}
 {history_block}
 ## 多樣性硬性規則（必須遵守）
 - 同一個藝人最多出現 {MAX_TRACKS_PER_ARTIST} 首
@@ -463,7 +480,7 @@ def build_guest_prompt(
 - 推薦的歌必須是在 Spotify 上找得到的真實歌曲
 {refill_block}
 只輸出 JSON：
-{{"context_interpretation":"情境理解（一句話）","recommendations":[{{"title":"歌名","artist":"藝人","reason":"理由20字內"}}]}}"""
+{{"context_interpretation":"情境理解（一句話）","recommendations":[{{"title":"歌名","artist":"藝人","fame":3,"reason":"理由20字內"}}]}}"""
 
 
 # ── Gemini 推薦 ───────────────────────────────────────────
@@ -705,14 +722,18 @@ def _basic_dedupe(
     history: list[dict] | None = None,
     num_songs: int | None = None,
     stats: dict | None = None,
+    fame_ceiling: int | None = None,
 ) -> list[dict]:
     """同批去重 + 排除歷史 + 同藝人最多 MAX_TRACKS_PER_ARTIST 首。訪客模式走這條。
 
     傳入 stats 時順手計數刷掉的首數（dup_history / dup_batch / artist_capped），
     app.py 拿它組「為什麼湊不滿」的說明——少列任何一個原因都可能出現自相矛盾的訊息。
-    搜不到的（_no_spotify）穩定排序到最後，而且排序在截斷**之前**：
-    超額生成的餘裕優先留給可播放的曲目（與登入模式 spare「湊不滿才用」同一個語意），
-    留下來的也不會佔清單開頭——沒封面又不能播，排最前面看起來像整個功能壞掉。"""
+
+    穩定排序（在截斷**之前**）的優先序：可播放且不超標 → 可播放但太紅（超過
+    fame_ceiling）→ 搜不到的（_no_spotify）。超額生成的餘裕優先留給前面的組；
+    「太紅」只降權不刪除——訪客沒有「想聽經典金曲」之類的意圖訊號，硬擋會毀掉
+    那種請求，所以湊不滿時超標的照樣回補，數量永不縮水。被截掉的超標首數計進
+    stats["pop_blocked"]。"""
     history_keys = _history_keys(history)
     seen = set(history_keys)
     counts: dict[str, int] = {}
@@ -734,8 +755,25 @@ def _basic_dedupe(
         seen.add(key)
         counts[primary] = counts.get(primary, 0) + 1
         out.append(t)
-    out.sort(key=lambda t: bool(t.get("_no_spotify")))  # 穩定排序：兩組內部維持 LLM 順位
+
+    def _too_famous(t: dict) -> bool:
+        if fame_ceiling is None or t.get("_no_spotify"):
+            return False
+        p = t.get("popularity")
+        if p is None:
+            p = _fame_score(t.get("fame"))
+        if p is None:
+            p = UNKNOWN_POP
+        return p > fame_ceiling
+
+    # 穩定排序：各組內部維持 LLM 順位
+    out.sort(key=lambda t: (bool(t.get("_no_spotify")), _too_famous(t)))
     if num_songs:
+        cut = out[num_songs:]
+        if stats is not None and cut:
+            stats["pop_blocked"] = stats.get("pop_blocked", 0) + sum(
+                1 for t in cut if _too_famous(t)
+            )
         out = out[:num_songs]
     return out
 
@@ -774,7 +812,9 @@ def curate_tracks(
         "pop_from_spotify": 0, "pop_from_fame": 0, "pop_unknown": 0,
     }
     if profile is None:
-        picked_guest = _basic_dedupe(tracks, history, num_songs, stats=stats)
+        picked_guest = _basic_dedupe(
+            tracks, history, num_songs, stats=stats, fame_ceiling=GUEST_POP_CEILING
+        )
         stats["picked_familiar"] = len(picked_guest)
         return picked_guest, stats
 
