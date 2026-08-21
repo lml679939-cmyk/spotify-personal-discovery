@@ -2,16 +2,13 @@
 Spotify Personal Discovery - Web UI
 """
 
-import html
-import io
 import ipaddress
 import random
 import secrets
 import sys
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 import requests
 import streamlit as st
@@ -20,7 +17,6 @@ import spotipy
 import ratelimit
 import styles
 
-import share_card
 from recommend import (
     GUEST_OVERGEN_FACTOR,
     HISTORY_KEEP,
@@ -31,7 +27,6 @@ from recommend import (
     analyze_image,
     curate_tracks,
     get_recommendations,
-    is_allowed_play_url,
     play_link,
 )
 from spotify_api import (
@@ -190,7 +185,6 @@ def logout() -> None:
         "found", "context_interp", "novelty_notice", "novelty_stats",
         "recommend_history",
         "user_profile_future",
-        "share_images", "share_palette",
         "guest_mode",
     ):
         st.session_state.pop(k, None)
@@ -571,75 +565,6 @@ st.set_page_config(page_title="Spotify Personal Discovery", page_icon="🎵", la
 styles.inject_global_css()
 
 
-# ── 播放中繼：記一筆點擊再轉導 ─────────────────────────────
-# st.link_button 直連外站的話點擊完全觀測不到（Streamlit 會濾掉 onclick，也沒有
-# 自訂 endpoint 可以收 beacon），所以播放按鈕一律指回本站 `?goto=…&pf=…`：
-# 新分頁載入後記一筆、立刻轉出。這份數字是「該不該做導流分潤」的判斷依據，
-# 也是之後掛聯盟參數的位置。
-# ⚠️ goto 是網址參數＝攻擊者可控，一定要過 is_allowed_play_url 白名單，
-#    否則本站就是 open redirect；擋下時也不要把網址回顯到頁面上。
-# 計數存行程記憶體（重啟歸零）＋印 [PLAY] 到 stderr——Manage app 日誌可以撈到歷史。
-_PLAY_STATS_LOCK = threading.Lock()
-_PLAY_STATS: dict[str, int] = {}
-
-
-def _record_play(platform: str) -> None:
-    with _PLAY_STATS_LOCK:
-        _PLAY_STATS[platform] = _PLAY_STATS.get(platform, 0) + 1
-        snapshot = dict(_PLAY_STATS)
-    print(f"[PLAY] platform={platform} totals={snapshot}", file=sys.stderr, flush=True)
-
-
-def play_stats() -> dict[str, int]:
-    with _PLAY_STATS_LOCK:
-        return dict(_PLAY_STATS)
-
-
-def _own_base_url() -> str:
-    """本站自己的網址（scheme://host/），組不出來就回空字串（退回直連）。"""
-    try:
-        u = urlparse(st.context.url or "")
-        if u.scheme and u.netloc:
-            return f"{u.scheme}://{u.netloc}/"
-    except Exception:
-        pass
-    return ""
-
-
-def _tracked_play_url(url: str, platform: str) -> str:
-    """把播放連結包成中繼網址。分享文字不走這裡——分享出去的連結要能獨立存活。"""
-    if not url or not is_allowed_play_url(url):
-        return url
-    base = _own_base_url()
-    if not base:
-        return url
-    return f"{base}?goto={quote(url, safe='')}&pf={quote(platform, safe='')}"
-
-
-def _handle_play_relay() -> None:
-    goto = st.query_params.get("goto")
-    if not goto:
-        return
-    platform = st.query_params.get("pf", "unknown")
-    if not is_allowed_play_url(goto):
-        st.warning("這個轉導連結不在允許清單內，已擋下。", icon="🛑")
-        st.stop()
-    _record_play(platform)
-    _safe = html.escape(goto, quote=True)
-    # meta refresh 不吃 JS（Streamlit 會濾掉 script/onclick）；萬一瀏覽器不理 body 裡的
-    # meta，下面那行的手動連結是保底
-    st.markdown(f'<meta http-equiv="refresh" content="0;url={_safe}">', unsafe_allow_html=True)
-    st.markdown(
-        f'🎵 正在前往 {html.escape(platform)}…沒有自動跳轉的話請點'
-        f'<a href="{_safe}">這裡</a>。',
-        unsafe_allow_html=True,
-    )
-    st.stop()
-
-
-_handle_play_relay()
-
-
 
 # ── OAuth callback 處理 + 登入閘門 ─────────────────────
 consume_oauth_callback()
@@ -826,13 +751,6 @@ with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False
             for _k in [k for k in st.session_state if isinstance(k, str) and k.startswith("w_fb::")]:
                 del st.session_state[_k]
             st.rerun()
-
-    _play_totals = play_stats()
-    if _play_totals:
-        st.caption(
-            "▶ 播放點擊（伺服器啟動以來、全站合計）："
-            + "、".join(f"{k} {v} 次" for k, v in sorted(_play_totals.items()))
-        )
 
 
 # ══ 第二層：摺疊的偏好設定 ═══════════════════════════════
@@ -1492,10 +1410,7 @@ if "found" in st.session_state and st.session_state.found:
                                 unsafe_allow_html=True,
                             )
                             _label, _url = play_link(track, play_platform)
-                            st.link_button(
-                                _label, _tracked_play_url(_url, play_platform),
-                                use_container_width=True,
-                            )
+                            st.link_button(_label, _url, use_container_width=True)
                             if show_album:
                                 # 密集網格（>5/列）欄寬塞不下三顆 pills，回饋鈕跟
                                 # 專輯名/理由走同一條「密集就省略」的界線
@@ -1507,9 +1422,7 @@ if "found" in st.session_state and st.session_state.found:
                 unsafe_allow_html=True,
             )
             _label, _url = play_link(track, play_platform)
-            st.link_button(
-                _label, _tracked_play_url(_url, play_platform), use_container_width=True
-            )
+            st.link_button(_label, _url, use_container_width=True)
             _render_feedback(track)
 
     # ── 複製 / 分享到 LINE ──────────────────────────────────
@@ -1529,67 +1442,8 @@ if "found" in st.session_state and st.session_state.found:
         _lines.append("")
     _share_text = "\n".join(_lines).strip()
 
-    # ── 複製歌單 ＋ 分享到 IG 限時動態（左右並排）──────────
+    # ── 複製歌單 ─────────────────────────────────────────
     st.divider()
-    share_col, ig_col = st.columns([1, 1], gap="large")
-
-    with share_col:
-        st.subheader("📋 複製或分享歌單")
-        st.caption(f"點擊右上角複製圖示即可一鍵複製（含 {play_platform} 連結）")
-        st.code(_share_text, language=None)
-
-    with ig_col:
-        st.subheader("📲 分享到 IG 限時動態")
-        st.caption("生成 1080×1920 的 Wrapped 風格圖卡，色彩每次隨機，可直接下載發到 IG Story")
-        share_mode = st.radio(
-            "圖卡模式",
-            options=["單張總合卡", "多張分頁（4 張）"],
-            horizontal=True,
-            key="share_mode",
-        )
-        if st.button("🎨 生成分享圖", use_container_width=True, key="gen_share"):
-            seed = str(time.time())
-            _card_now = _local_now()
-            with st.spinner("正在生成圖卡..."):
-                ctx_interp = st.session_state.get("context_interp", "")
-                if share_mode == "單張總合卡":
-                    img, palette_name = share_card.generate_single(found, ctx_interp, seed=seed, local_now=_card_now)
-                    st.session_state["share_images"] = [("總合卡", img)]
-                else:
-                    slides, palette_name = share_card.generate_deck(found, ctx_interp, seed=seed, local_now=_card_now)
-                    st.session_state["share_images"] = slides
-                st.session_state["share_palette"] = palette_name
-
-        if "share_images" in st.session_state and st.session_state["share_images"]:
-            share_images = st.session_state["share_images"]
-            st.info(f"🎨 本次色系：**{st.session_state['share_palette']}**　·　不喜歡可再按一次生成換色")
-            if len(share_images) == 1:
-                label, img = share_images[0]
-                st.image(img, width=300)
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                st.download_button(
-                    "💾 下載 PNG",
-                    data=buf.getvalue(),
-                    file_name=f"ai-discovery-{_local_now().strftime('%Y%m%d-%H%M')}.png",
-                    mime="image/png",
-                    use_container_width=True,
-                    type="primary",
-                )
-                st.caption("下載後在 IG 限時動態選擇此圖即可上傳")
-            else:
-                thumb_cols = st.columns(len(share_images))
-                for i, (label, img) in enumerate(share_images):
-                    with thumb_cols[i]:
-                        st.image(img, use_container_width=True)
-                        st.caption(f"**{i + 1}. {label}**")
-                        buf = io.BytesIO()
-                        img.save(buf, format="PNG")
-                        st.download_button(
-                            "💾 下載",
-                            data=buf.getvalue(),
-                            file_name=f"ai-discovery-{i+1}-{label}-{_local_now().strftime('%Y%m%d-%H%M')}.png",
-                            mime="image/png",
-                            use_container_width=True,
-                            key=f"dl_share_{i}",
-                        )
+    st.subheader("📋 複製或分享歌單")
+    st.caption(f"點擊右上角複製圖示即可一鍵複製（含 {play_platform} 連結）")
+    st.code(_share_text, language=None)

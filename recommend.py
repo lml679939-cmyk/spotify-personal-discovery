@@ -8,7 +8,7 @@ import re
 import time
 import unicodedata
 from functools import lru_cache
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 from google import genai
 from google.genai import types
@@ -564,21 +564,6 @@ def play_link(track: dict, platform: str = "Spotify") -> tuple[str, str]:
     if platform == "YouTube" or track.get("_no_spotify"):
         return "▶ YouTube", youtube_search_url(track.get("name", ""), track.get("artist", ""))
     return "▶ Spotify", track.get("url", "")
-
-
-# 播放中繼（點擊計數）只允許轉導到這些網域。?goto= 是網址參數＝完全由攻擊者控制，
-# 沒有白名單的話本站就是一個 open redirect（釣魚連結掛著我們的網域騙人點）。
-ALLOWED_PLAY_HOSTS = frozenset({
-    "open.spotify.com", "www.youtube.com", "music.youtube.com", "music.apple.com",
-})
-
-
-def is_allowed_play_url(url: str) -> bool:
-    try:
-        u = urlparse(url or "")
-    except ValueError:
-        return False
-    return u.scheme == "https" and (u.hostname or "").lower() in ALLOWED_PLAY_HOSTS
 
 
 # ── 名稱正規化（判斷「這首聽過沒」用） ─────────────────────

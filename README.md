@@ -36,10 +36,10 @@ Developer Dashboard → User Management 逐一加入 email。不在名單內但�
 | M3：LLM 推薦引擎 | ✅ 完成 | `m3_recommend.py` |
 | M4：多模態情境輸入（文字/圖片/自動偵測） | ✅ 完成 | `m4_contextual_recommend.py` |
 | Web UI（Streamlit） | ✅ 完成 | `app.py` |
-| IG Story 分享圖卡 | ✅ 完成 | `share_card.py` |
 | BYOK（自備 Spotify App）+ 訪客模式 | ✅ 完成 | `app.py` |
 | 出圈演算法（避免推到已經聽過的歌） | ✅ 完成 | `recommend.py` |
-| Spotify / YouTube 播放平台切換 | ✅ 完成 | `recommend.play_link()` |
+| Spotify / YouTube / Apple Music 播放平台切換 | ✅ 完成 | `recommend.play_link()` |
+| 曲目回饋 👍/👎/🎧（餵回推薦演算法） | ✅ 完成 | `app.py` + `recommend._feedback_block()` |
 | 當地時間偵測 | ✅ 完成（改由瀏覽器提供時區，不靠 IP） | `app.py` |
 | 位置與天氣自動偵測 | ⚠️ 雲端的代理鏈拿不到使用者 IP，暫不顯示 | `app.py` |
 | 單元測試（168 tests） | ✅ 完成 | `test_*.py` 共 5 個檔案 |
@@ -159,12 +159,11 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ├── recommend.py                 ← prompt 組裝 / Gemini 呼叫 / 驗證鏈（純邏輯，可單獨測試）
 ├── spotify_api.py               ← OAuth / 搜尋 / 歌單 / 跨 session 歷史
 ├── styles.py                    ← Y2K 主題 CSS、SVG 插圖、HTML helpers
-├── test_recommend.py            ← recommend.py 的 pytest（87 tests，不依賴 streamlit）
+├── test_recommend.py            ← recommend.py 的 pytest（100 tests，不依賴 streamlit）
 ├── test_spotify_api.py          ← spotify_api.py 的 pytest（22：搜尋快取、重試、OAuth state）
 ├── test_styles.py               ← styles.py 的 pytest（9：HTML 產出與注入防護）
 ├── test_app.py                  ← app.py 的 pytest（37：時區換算、client IP、錯誤白名單）
 ├── test_ratelimit.py            ← ratelimit.py 的 pytest（13）
-├── share_card.py                ← IG Story 分享圖卡生成
 ├── CLAUDE.md                    ← 交接文件：架構、踩過的坑、量測數據
 ├── m1_top_tracks.py             ← CLI：驗證 OAuth + 讀取 Top Tracks
 ├── m2_create_playlist.py        ← CLI：建立歌單（會 403，留作備案）
@@ -192,8 +191,8 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
    模糊搜尋的結果會驗證是否真的對得上，避免拿到「同歌手的另一首熱門歌」
 6. **驗證鏈**（`curate_tracks()`）：去重 → 排除聽過的曲目/歌手 → 知名度天花板 →
    新穎度重排 → 湊不滿時補生成一輪（詳見 `CLAUDE.md`「出圈演算法」）
-7. **顯示**：條列式或網格卡片（同列等高），含 Spotify 連結
-8. **分享**：純文字複製 + IG Story 分享圖卡（9 色系，單張/多張模式）
+7. **顯示**：條列式或網格卡片（同列等高），含播放連結與 👍/👎/🎧 回饋鈕
+8. **分享**：純文字複製（含所選平台的播放連結）
 
 推薦品質的核心問題是「使用者選 100% 新藝人，卻還是拿到聽過的歌」——
 解法與量測結果都寫在 `CLAUDE.md`。
@@ -266,8 +265,7 @@ UI 在 403 時會顯示解決方向，並建議使用「在 Spotify 開啟」手
 - **推薦歷史**：session 內 + 跨 session（Spotify 私人歌單持久化），自動去重
 
 ### 分享
-- **複製歌單**：純文字含 Spotify 連結
-- **IG Story 分享圖**：9 色系 × 2 模式（單張/4 張），1080×1920 PNG
+- **複製歌單**：純文字，含所選播放平台（Spotify / YouTube / Apple Music）的連結
 
 ---
 

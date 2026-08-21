@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（102）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 183 tests
+- **測試**：`test_recommend.py`（100）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 181 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 183 tests，改任何 .py 都要跑
+python -m pytest -q                     # 181 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -513,20 +513,24 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   未來要掛聯盟分潤（Apple Performance Partners 的 `&at=` token）就加在
   `apple_music_search_url()`。
 
-#### 播放中繼（點擊計數，2026-08）
-- `st.link_button` 直連外站的話**點擊完全觀測不到**（Streamlit 濾掉 onclick、
-  也沒有自訂 endpoint 可收 beacon）。所以曲目卡的播放按鈕一律經
-  `_tracked_play_url()` 包成 `本站?goto=<目的地>&pf=<平台>`；新分頁載入後
-  `_handle_play_relay()`（在 **OAuth callback 與登入閘門之前**執行）記一筆、
-  用 body 內的 `<meta http-equiv="refresh">` 轉出（**實測瀏覽器會理它**；
-  頁面同時給手動連結保底）。這份數字是「該不該做導流分潤」的判斷依據。
-- ⚠️ **`?goto=` 是攻擊者可控的網址參數**，一定要過 `recommend.is_allowed_play_url()`
-  白名單（https + `ALLOWED_PLAY_HOSTS`），否則本站就是 open redirect。
-  擋下時不要把網址回顯到頁面（實測 DOM 裡完全不出現）。網域字尾偽裝
-  （`open.spotify.com.evil.com`）有測試釘住。
-- 計數存**行程記憶體**（`_PLAY_STATS`，重啟歸零）＋每筆印 `[PLAY]` 到 stderr
-  （Manage app 日誌可撈歷史）；「⚙️ 推薦歌曲數」區顯示全站合計。
-- **分享文字不走中繼**——分享出去的連結要能獨立存活，不依賴本站在線。
+#### 播放點擊計數：做過中繼、雲端證實做不到、已撤除（2026-08-21）
+- 動機：「每次生成有幾人點播放、點哪個平台」是導流分潤的決策數據。純 Streamlit
+  唯一可行做法是中繼——link_button 指回本站 `?goto=…` 記一筆再 `<meta refresh>` 轉出。
+  **本機實測整條鏈可行；部署後三個平台一律「拒絕連線」，已回退成直連。**
+- **根因（在線上 DOM 實證）**：Streamlit Cloud 把 app 包在 iframe 裡跑
+  （`spotify-lml.streamlit.app/~/+/`），sandbox 是 `allow-forms allow-modals
+  allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts
+  allow-downloads`——**沒有 `allow-top-navigation`**。meta refresh 只會導航 iframe
+  自己，而 Spotify/YouTube/Apple 都拒絕被嵌入（X-Frame-Options/CSP）
+  → iframe 顯示「拒絕連線」，網址列還停在本站。本機沒有外層 iframe 所以測不出來。
+- **為什麼判定不可修**：sandbox 沒開 top navigation，連改成 `<a target="_top">`
+  讓使用者第二次點擊也會被擋；唯一放行的是 allow-popups（再開新分頁）＝
+  點兩次、還多留一個廢分頁。JS beacon 也不通（markdown 濾掉 script/onclick，
+  且沒有自訂 endpoint 可收）。要點擊數據只剩自架（不被 iframe 包）或自訂前端元件。
+- **對分潤沒有影響**：聯盟追蹤（如 Apple 的 `&at=`）掛在**直連連結**上就行，
+  轉換計數是平台端做的，不需要我們的中繼。死掉的只是自家 analytics。
+- ⚠️ 若未來重做，白名單防 open redirect 的教訓要帶上（`?goto=` 是攻擊者可控參數）；
+  當時的實作（含網域字尾偽裝測試）在 git 歷史 `5f2db78`。
 
 ### 使用者回饋（👍/👎/🎧，2026-08，兩種模式都有）
 - 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：👍 喜歡、👎 不合、🎧 早就聽過。
@@ -858,7 +862,6 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `test_recommend.py` | recommend.py 單元測試（pytest） | 改 recommend.py 時同步 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
-| `share_card.py` | IG Story 圖卡生成（Pillow） | 偶爾 |
 | `.streamlit/config.toml` | Streamlit 主題 + toolbarMode | 偶爾 |
 | `requirements.txt` | pip 依賴 | 偶爾 |
 | `.env` / `.env.example` | 本地 credentials（不加入 git） | 否 |
@@ -870,7 +873,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | feat: 曲目回饋 👍/👎/🎧（兩種模式，session 級，餵進 prompt＋程式端排除）、播放點擊中繼計數（`?goto=` 白名單防 open redirect、[PLAY] stderr）、Apple Music 第三播放平台（搜尋頁、tw storefront） |
+| （工作區，尚未 commit） | revert: 撤除播放點擊中繼——Streamlit Cloud 的 app iframe sandbox 沒有 allow-top-navigation，轉導必被平台 X-Frame-Options 擋成「拒絕連線」（見「播放點擊計數」段的驗屍報告），播放按鈕回退直連；feat: 移除 IG 分享圖卡功能（share_card.py 刪除，Pillow 因上傳路徑仍保留釘版） |
+| `5f2db78` | feat: 曲目回饋 👍/👎/🎧（兩種模式，session 級，餵進 prompt＋程式端排除）、播放點擊中繼計數（`?goto=` 白名單防 open redirect、[PLAY] stderr）、Apple Music 第三播放平台（搜尋頁、tw storefront） |
 | `2fcc1c5` | fix: 訪客模式對齊登入版設計原則——prompt 歷史截 40（原本塞整份最多 200 筆）、超額生成 1.25×、補生成＋湊不滿說明開放給訪客、搜不到的卡排最後且超額時最先被裁（原本會佔清單開頭） |
 | （工作區，尚未 commit） | fix(security): 依賴改精確釘版（Pillow 12.3.0 補 13 個 CVE、python-dotenv 1.2.3）、新增生成節流 `ratelimit.py`；順帶修好被擋下的點擊會清掉既有歌單 |
 | （工作區，尚未 commit） | fix(security): `X-Forwarded-For` 改用 `ipaddress` 驗證（只收 is_global）；BYOK 步驟卡的 URI 移出 onclick 改走 `data-` 屬性；`.claude/` 從 git 索引移除。BYOK 步驟卡拆成兩半、中間改夾原生 `st.code()`——那顆自製複製鈕一直是死的（Streamlit 會濾掉 onclick），順帶讓 redirect_uri 完全不經過 unsafe_allow_html |

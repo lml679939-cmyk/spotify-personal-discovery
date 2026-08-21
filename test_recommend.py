@@ -16,7 +16,6 @@ from recommend import (
     _feedback_block,
     _flatten_channels,
     apple_music_search_url,
-    is_allowed_play_url,
     POP_CEILING_DISCOVERY,
     POP_CEILING_MAX_RELAX,
     POP_CEILING_STRICT,
@@ -843,21 +842,6 @@ def test_play_link_apple_music_ignores_no_spotify_flag():
     # Apple Music 走搜尋頁，跟 Spotify 搜不搜得到無關——不必退回 YouTube
     label, _ = play_link({"name": "S", "artist": "X", "_no_spotify": True}, "Apple Music")
     assert label == "▶ Apple Music"
-
-
-# ── 播放中繼白名單（open redirect 防護）───────────────────
-def test_play_relay_whitelist_allows_known_hosts():
-    assert is_allowed_play_url("https://open.spotify.com/track/abc")
-    assert is_allowed_play_url("https://www.youtube.com/results?search_query=x")
-    assert is_allowed_play_url("https://music.apple.com/tw/search?term=x")
-
-
-def test_play_relay_whitelist_blocks_everything_else():
-    assert not is_allowed_play_url("https://evil.example.com/phish")
-    assert not is_allowed_play_url("https://open.spotify.com.evil.com/x")  # 網域字尾偽裝
-    assert not is_allowed_play_url("http://open.spotify.com/track/abc")    # 必須 https
-    assert not is_allowed_play_url("javascript:alert(1)")
-    assert not is_allowed_play_url("")
 
 
 # ── 使用者回饋 → prompt 區塊 ──────────────────────────────
