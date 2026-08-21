@@ -2,14 +2,16 @@
 Spotify Personal Discovery - Web UI
 """
 
+import html
 import io
 import ipaddress
 import random
 import secrets
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
 import streamlit as st
@@ -29,6 +31,7 @@ from recommend import (
     analyze_image,
     curate_tracks,
     get_recommendations,
+    is_allowed_play_url,
     play_link,
 )
 from spotify_api import (
@@ -568,6 +571,75 @@ st.set_page_config(page_title="Spotify Personal Discovery", page_icon="🎵", la
 styles.inject_global_css()
 
 
+# ── 播放中繼：記一筆點擊再轉導 ─────────────────────────────
+# st.link_button 直連外站的話點擊完全觀測不到（Streamlit 會濾掉 onclick，也沒有
+# 自訂 endpoint 可以收 beacon），所以播放按鈕一律指回本站 `?goto=…&pf=…`：
+# 新分頁載入後記一筆、立刻轉出。這份數字是「該不該做導流分潤」的判斷依據，
+# 也是之後掛聯盟參數的位置。
+# ⚠️ goto 是網址參數＝攻擊者可控，一定要過 is_allowed_play_url 白名單，
+#    否則本站就是 open redirect；擋下時也不要把網址回顯到頁面上。
+# 計數存行程記憶體（重啟歸零）＋印 [PLAY] 到 stderr——Manage app 日誌可以撈到歷史。
+_PLAY_STATS_LOCK = threading.Lock()
+_PLAY_STATS: dict[str, int] = {}
+
+
+def _record_play(platform: str) -> None:
+    with _PLAY_STATS_LOCK:
+        _PLAY_STATS[platform] = _PLAY_STATS.get(platform, 0) + 1
+        snapshot = dict(_PLAY_STATS)
+    print(f"[PLAY] platform={platform} totals={snapshot}", file=sys.stderr, flush=True)
+
+
+def play_stats() -> dict[str, int]:
+    with _PLAY_STATS_LOCK:
+        return dict(_PLAY_STATS)
+
+
+def _own_base_url() -> str:
+    """本站自己的網址（scheme://host/），組不出來就回空字串（退回直連）。"""
+    try:
+        u = urlparse(st.context.url or "")
+        if u.scheme and u.netloc:
+            return f"{u.scheme}://{u.netloc}/"
+    except Exception:
+        pass
+    return ""
+
+
+def _tracked_play_url(url: str, platform: str) -> str:
+    """把播放連結包成中繼網址。分享文字不走這裡——分享出去的連結要能獨立存活。"""
+    if not url or not is_allowed_play_url(url):
+        return url
+    base = _own_base_url()
+    if not base:
+        return url
+    return f"{base}?goto={quote(url, safe='')}&pf={quote(platform, safe='')}"
+
+
+def _handle_play_relay() -> None:
+    goto = st.query_params.get("goto")
+    if not goto:
+        return
+    platform = st.query_params.get("pf", "unknown")
+    if not is_allowed_play_url(goto):
+        st.warning("這個轉導連結不在允許清單內，已擋下。", icon="🛑")
+        st.stop()
+    _record_play(platform)
+    _safe = html.escape(goto, quote=True)
+    # meta refresh 不吃 JS（Streamlit 會濾掉 script/onclick）；萬一瀏覽器不理 body 裡的
+    # meta，下面那行的手動連結是保底
+    st.markdown(f'<meta http-equiv="refresh" content="0;url={_safe}">', unsafe_allow_html=True)
+    st.markdown(
+        f'🎵 正在前往 {html.escape(platform)}…沒有自動跳轉的話請點'
+        f'<a href="{_safe}">這裡</a>。',
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
+
+_handle_play_relay()
+
+
 
 # ── OAuth callback 處理 + 登入閘門 ─────────────────────
 consume_oauth_callback()
@@ -734,16 +806,33 @@ with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False
     else:
         st.caption("🧠 想跨 session 記住推薦歷史？請從側邊欄登出後重新登入授權。")
 
-    if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0):
-        st.session_state["recommend_history"] = []
-        if not is_guest_mode():
-            try:
-                n = clear_persistent_history()
-                if n > 0:
-                    st.toast(f"已清除 {n} 首過往推薦歷史")
-            except Exception:
-                st.toast("⚠️ 清除 Spotify 歷史歌單失敗，過往推薦歷史可能仍保留")
-        st.rerun()
+    _clr_hist_col, _clr_fb_col = st.columns(2)
+    with _clr_hist_col:
+        if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0, use_container_width=True):
+            st.session_state["recommend_history"] = []
+            if not is_guest_mode():
+                try:
+                    n = clear_persistent_history()
+                    if n > 0:
+                        st.toast(f"已清除 {n} 首過往推薦歷史")
+                except Exception:
+                    st.toast("⚠️ 清除 Spotify 歷史歌單失敗，過往推薦歷史可能仍保留")
+            st.rerun()
+    with _clr_fb_col:
+        _fb_n = len(st.session_state.get("track_feedback", {}))
+        if st.button(f"🗑 清除歌曲回饋（{_fb_n}）", disabled=_fb_n == 0, use_container_width=True):
+            st.session_state["track_feedback"] = {}
+            # widget state 也要一起清：留著的話下次渲染 pills 會把舊選取重新寫回 dict
+            for _k in [k for k in st.session_state if isinstance(k, str) and k.startswith("w_fb::")]:
+                del st.session_state[_k]
+            st.rerun()
+
+    _play_totals = play_stats()
+    if _play_totals:
+        st.caption(
+            "▶ 播放點擊（伺服器啟動以來、全站合計）："
+            + "、".join(f"{k} {v} 次" for k, v in sorted(_play_totals.items()))
+        )
 
 
 # ══ 第二層：摺疊的偏好設定 ═══════════════════════════════
@@ -969,6 +1058,22 @@ if _clicked:
                 else:
                     persistent_history = load_persistent_history()
                     history = session_history + persistent_history
+
+                # 歌曲回饋（👍/👎/🎧）：曲目一律併進排除清單（就算清了推薦歷史，
+                # 回饋過的歌也不再推薦；放在清單尾端＝一定落在 prompt 的最近 40 筆窗內），
+                # 同時整理成 prompt 的品味引導區塊
+                _fb_all = list(st.session_state.get("track_feedback", {}).values())
+                if _fb_all:
+                    history = history + [
+                        {"title": f["title"], "artist": f["artist"]} for f in _fb_all
+                    ]
+                feedback = {
+                    "liked": [f for f in _fb_all if f["state"] == "like"],
+                    "disliked": [f for f in _fb_all if f["state"] == "dislike"],
+                    "heard": [f for f in _fb_all if f["state"] == "heard"],
+                }
+                if not any(feedback.values()):
+                    feedback = None
                 lang_msg = "、".join(languages) if languages else "不限"
                 genre_msg = "、".join(genres) if genres else "不限"
                 _ratio_msg = "" if is_guest_mode() else f"新藝人 {new_artist_ratio}%・"
@@ -993,6 +1098,7 @@ if _clicked:
                         genres=genres or None,
                         history=history or None,
                         fav_artists=fav_artists,
+                        feedback=feedback,
                     )
                 except Exception as e:
                     st.error(f"推薦生成失敗：{e}")
@@ -1096,6 +1202,7 @@ if _clicked:
                                 refill_exclude=[
                                     (r.get("title", ""), r.get("artist", "")) for r in unique_recs
                                 ],
+                                feedback=feedback,
                             )
                         except Exception as e:
                             st.write(f"⚠️ 補生成失敗，沿用現有結果（{e}）")
@@ -1325,6 +1432,47 @@ if "found" in st.session_state and st.session_state.found:
         if view_mode == "網格":
             cols_per_row = st.slider("每列幾首", min_value=3, max_value=10, value=5, step=1)
 
+    # ── 曲目回饋（👍/👎/🎧）─────────────────────────────
+    # 單選 pills（再點一次取消）。真相來源是 st.session_state["track_feedback"]——
+    # 它撐得過重新生成與檢視切換；widget state 只是 UI 快照，Streamlit 對
+    # 「這一輪沒渲染的 widget」會回收 state（生成中結果區整段不渲染就會發生），
+    # 所以每次渲染前先從 dict 把選取值 seed 回 widget key。
+    _FB_STATE_BY_EMOJI = {"👍": "like", "👎": "dislike", "🎧": "heard"}
+    _FB_EMOJI_BY_STATE = {v: k for k, v in _FB_STATE_BY_EMOJI.items()}
+
+    def _feedback_key(track: dict) -> str:
+        return "fb::" + "||".join(
+            _track_key(track.get("name") or track.get("title", ""), track.get("artist", ""))
+        )
+
+    def _render_feedback(track: dict) -> None:
+        fb = st.session_state.setdefault("track_feedback", {})
+        k = _feedback_key(track)
+        wkey = "w_" + k
+        if wkey not in st.session_state and k in fb:
+            st.session_state[wkey] = _FB_EMOJI_BY_STATE.get(fb[k]["state"])
+        sel = st.pills(
+            "回饋", options=list(_FB_STATE_BY_EMOJI), selection_mode="single",
+            key=wkey, label_visibility="collapsed",
+        )
+        state = _FB_STATE_BY_EMOJI.get(sel or "")
+        if state:
+            fb[k] = {
+                "title": track.get("name") or track.get("title", ""),
+                "artist": track.get("artist", ""),
+                "state": state,
+            }
+        else:
+            fb.pop(k, None)
+
+    # view_mode != 網格 時 cols_per_row 沒定義，靠 or 短路避開
+    _fb_visible = view_mode != "網格" or cols_per_row <= 5
+    if _fb_visible:
+        st.caption(
+            "每首歌都可以回饋：👍 喜歡（下次多推相鄰的）・👎 不合胃口（避開類似方向）・"
+            "🎧 早就聽過（下次推更新的）——下次生成會帶給 AI 參考"
+        )
+
     if view_mode == "網格":
         # key="track_grid" 讓 styles.py 把同一列的卡片拉成等高（見 .st-key-track_grid），
         # 否則歌名長短、有無專輯／理由會讓每張卡不一樣高，Spotify 按鈕就參差不齊
@@ -1344,7 +1492,14 @@ if "found" in st.session_state and st.session_state.found:
                                 unsafe_allow_html=True,
                             )
                             _label, _url = play_link(track, play_platform)
-                            st.link_button(_label, _url, use_container_width=True)
+                            st.link_button(
+                                _label, _tracked_play_url(_url, play_platform),
+                                use_container_width=True,
+                            )
+                            if show_album:
+                                # 密集網格（>5/列）欄寬塞不下三顆 pills，回饋鈕跟
+                                # 專輯名/理由走同一條「密集就省略」的界線
+                                _render_feedback(track)
     else:
         for i, track in enumerate(found):
             st.markdown(
@@ -1352,7 +1507,10 @@ if "found" in st.session_state and st.session_state.found:
                 unsafe_allow_html=True,
             )
             _label, _url = play_link(track, play_platform)
-            st.link_button(_label, _url, use_container_width=True)
+            st.link_button(
+                _label, _tracked_play_url(_url, play_platform), use_container_width=True
+            )
+            _render_feedback(track)
 
     # ── 複製 / 分享到 LINE ──────────────────────────────────
     st.divider()

@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（93）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 174 tests
+- **測試**：`test_recommend.py`（102）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 183 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 174 tests，改任何 .py 都要跑
+python -m pytest -q                     # 183 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -208,6 +208,7 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 | `history` | 已推薦歌曲清單（避免重複） |
 | `fav_artists` | **使用者指定歌手**（None = 不限；填入時 AI 優先從這些歌手推薦） |
 | `refill_exclude` | 補生成那一輪才有：把第一輪已經產出的 (曲名, 歌手) 傳回去，避免重複提名（兩個函式都支援，2026-08 起） |
+| `feedback` | 使用者回饋 `{"liked": [...], "disliked": [...], "heard": [...]}`——讚＝相鄰探索錨點、倒讚＝避開方向、聽過＝出圈校準（`_feedback_block()`，每類最多 20 筆；排除保證在程式端，見「使用者回饋」段） |
 
 ### 出圈演算法（novelty，2026-08 Phase 1）
 
@@ -504,9 +505,48 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - **還能用的**：`search`、`artist_albums`、`album_tracks`、`current_user_*`、歌單讀寫
 - 歌單寫入需申請 Quota Extension（`POST /playlists/{id}/items` 會 403）
 
-### 播放平台選擇（Spotify / YouTube）
+### 播放平台選擇（Spotify / YouTube / Apple Music）
 - 結果區有「用什麼聽」的 radio（`key="play_platform"`），影響曲目卡的按鈕與分享文字。
   `recommend.play_link(track, platform)` 回傳 `(按鈕文字, 連結)`。
+- **Apple Music 走搜尋頁**（`music.apple.com/tw/search?term=…`，storefront 固定 tw）——
+  同 YouTube 模式：不需要 API、不吃配額，跟 Spotify 搜不搜得到無關（不必 fallback）。
+  未來要掛聯盟分潤（Apple Performance Partners 的 `&at=` token）就加在
+  `apple_music_search_url()`。
+
+#### 播放中繼（點擊計數，2026-08）
+- `st.link_button` 直連外站的話**點擊完全觀測不到**（Streamlit 濾掉 onclick、
+  也沒有自訂 endpoint 可收 beacon）。所以曲目卡的播放按鈕一律經
+  `_tracked_play_url()` 包成 `本站?goto=<目的地>&pf=<平台>`；新分頁載入後
+  `_handle_play_relay()`（在 **OAuth callback 與登入閘門之前**執行）記一筆、
+  用 body 內的 `<meta http-equiv="refresh">` 轉出（**實測瀏覽器會理它**；
+  頁面同時給手動連結保底）。這份數字是「該不該做導流分潤」的判斷依據。
+- ⚠️ **`?goto=` 是攻擊者可控的網址參數**，一定要過 `recommend.is_allowed_play_url()`
+  白名單（https + `ALLOWED_PLAY_HOSTS`），否則本站就是 open redirect。
+  擋下時不要把網址回顯到頁面（實測 DOM 裡完全不出現）。網域字尾偽裝
+  （`open.spotify.com.evil.com`）有測試釘住。
+- 計數存**行程記憶體**（`_PLAY_STATS`，重啟歸零）＋每筆印 `[PLAY]` 到 stderr
+  （Manage app 日誌可撈歷史）；「⚙️ 推薦歌曲數」區顯示全站合計。
+- **分享文字不走中繼**——分享出去的連結要能獨立存活，不依賴本站在線。
+
+### 使用者回饋（👍/👎/🎧，2026-08，兩種模式都有）
+- 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：👍 喜歡、👎 不合、🎧 早就聽過。
+  **真相來源是 `st.session_state["track_feedback"]`**（dict，key=`fb::`+`_track_key`）——
+  它撐得過重新生成與檢視切換；widget state 只是 UI 快照，**Streamlit 會回收
+  「這一輪沒渲染的 widget」的 state**（生成中結果區整段不渲染就會發生），
+  所以 `_render_feedback()` 每次渲染前先從 dict seed 回 widget key（`w_fb::…`）。
+  清除回饋時兩邊都要清，只清 dict 的話下次渲染 pills 會把舊選取寫回來。
+- **回饋如何影響演算法**：① 回饋過的曲目一律併進 `history` 尾端＝程式端保證不再推薦
+  （清除推薦歷史也不影響），且必落在 prompt 的最近 40 筆窗內；
+  ② `recommend._feedback_block()` 進兩個 prompt builder（`feedback` 參數）——
+  讚＝往相鄰方向探索的正向錨點（**訪客模式第一個真正的品味訊號**）、
+  倒讚＝避開方向、聽過＝出圈校準；每類最多 `FEEDBACK_PROMPT_MAX=20` 筆（短清單原則）。
+- **密集網格（>5/列）不顯示 pills**——欄寬塞不下，跟專輯名/理由走同一條
+  「密集就省略」界線（`show_album`）。條列式一律顯示。
+- 版面量測（probe 頁，2026-08）：桌機 5/列與 3/列兩列——卡片等高（580/561）、
+  按鈕齊（604）、pills 齊、列距 16px、pills 收在 column 盒內（bottom 對齊）；
+  手機 375px 欄堆疊 343px、pills 單列 134×32 不換行；兩種尺寸皆零水平溢出。
+  pills 是單一 widget 所以手機不會像巢狀 columns 那樣直向堆疊——這是選它不選
+  三顆 `st.button` 的主因。
 - **YouTube 走純搜尋網址**（`youtube.com/results?search_query=…`），不需要任何 API、
   不吃配額、不用 OAuth。⚠️ **不要改用 YouTube Data API**：`search.list` 一次 100 units、
   每天總共才 10,000 units，等於全站一天約 100 次搜尋——解析一份歌單就要 24 次。
@@ -830,7 +870,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | fix: 訪客模式對齊登入版設計原則——prompt 歷史截 40（原本塞整份最多 200 筆）、超額生成 1.25×、補生成＋湊不滿說明開放給訪客、搜不到的卡排最後且超額時最先被裁（原本會佔清單開頭） |
+| （工作區，尚未 commit） | feat: 曲目回饋 👍/👎/🎧（兩種模式，session 級，餵進 prompt＋程式端排除）、播放點擊中繼計數（`?goto=` 白名單防 open redirect、[PLAY] stderr）、Apple Music 第三播放平台（搜尋頁、tw storefront） |
+| `2fcc1c5` | fix: 訪客模式對齊登入版設計原則——prompt 歷史截 40（原本塞整份最多 200 筆）、超額生成 1.25×、補生成＋湊不滿說明開放給訪客、搜不到的卡排最後且超額時最先被裁（原本會佔清單開頭） |
 | （工作區，尚未 commit） | fix(security): 依賴改精確釘版（Pillow 12.3.0 補 13 個 CVE、python-dotenv 1.2.3）、新增生成節流 `ratelimit.py`；順帶修好被擋下的點擊會清掉既有歌單 |
 | （工作區，尚未 commit） | fix(security): `X-Forwarded-For` 改用 `ipaddress` 驗證（只收 is_global）；BYOK 步驟卡的 URI 移出 onclick 改走 `data-` 屬性；`.claude/` 從 git 索引移除。BYOK 步驟卡拆成兩半、中間改夾原生 `st.code()`——那顆自製複製鈕一直是死的（Streamlit 會濾掉 onclick），順帶讓 redirect_uri 完全不經過 unsafe_allow_html |
 | （工作區，尚未 commit） | fix(security): OAuth 補上綁定瀏覽器的 `state`（防授權碼注入／login CSRF）；`?error=` 改走白名單（原本可在登入頁警告框注入釣魚連結與追蹤圖片，已實測確認） |

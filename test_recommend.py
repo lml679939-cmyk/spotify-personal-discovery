@@ -8,10 +8,15 @@ import json
 import pytest
 
 from recommend import (
+    FEEDBACK_PROMPT_MAX,
     HISTORY_KEEP,
     MAX_TRACKS_PER_ARTIST,
+    PLAY_PLATFORMS,
     PROMPT_HISTORY_MAX,
+    _feedback_block,
     _flatten_channels,
+    apple_music_search_url,
+    is_allowed_play_url,
     POP_CEILING_DISCOVERY,
     POP_CEILING_MAX_RELAX,
     POP_CEILING_STRICT,
@@ -819,3 +824,70 @@ def test_guest_prompt_refill_block_only_when_excluding():
     assert "補充生成" in p
     assert "- Song A - X" in p
     assert "補充生成" not in build_guest_prompt("ctx")
+
+
+# ── Apple Music 播放平台 ──────────────────────────────────
+def test_play_platforms_include_apple_music():
+    assert PLAY_PLATFORMS == ("Spotify", "YouTube", "Apple Music")
+
+
+def test_play_link_apple_music_uses_search_url():
+    t = {"name": "花火", "artist": "宇多田ヒカル", "url": "https://open.spotify.com/track/x"}
+    label, url = play_link(t, "Apple Music")
+    assert label == "▶ Apple Music"
+    assert url.startswith("https://music.apple.com/tw/search?term=")
+    assert "%E8%8A%B1%E7%81%AB" in url  # 「花火」要有 URL encode
+
+
+def test_play_link_apple_music_ignores_no_spotify_flag():
+    # Apple Music 走搜尋頁，跟 Spotify 搜不搜得到無關——不必退回 YouTube
+    label, _ = play_link({"name": "S", "artist": "X", "_no_spotify": True}, "Apple Music")
+    assert label == "▶ Apple Music"
+
+
+# ── 播放中繼白名單（open redirect 防護）───────────────────
+def test_play_relay_whitelist_allows_known_hosts():
+    assert is_allowed_play_url("https://open.spotify.com/track/abc")
+    assert is_allowed_play_url("https://www.youtube.com/results?search_query=x")
+    assert is_allowed_play_url("https://music.apple.com/tw/search?term=x")
+
+
+def test_play_relay_whitelist_blocks_everything_else():
+    assert not is_allowed_play_url("https://evil.example.com/phish")
+    assert not is_allowed_play_url("https://open.spotify.com.evil.com/x")  # 網域字尾偽裝
+    assert not is_allowed_play_url("http://open.spotify.com/track/abc")    # 必須 https
+    assert not is_allowed_play_url("javascript:alert(1)")
+    assert not is_allowed_play_url("")
+
+
+# ── 使用者回饋 → prompt 區塊 ──────────────────────────────
+def test_feedback_block_empty_cases():
+    assert _feedback_block(None) == ""
+    assert _feedback_block({"liked": [], "disliked": [], "heard": []}) == ""
+
+
+def test_feedback_block_lists_three_sections():
+    fb = {
+        "liked": [{"title": "L", "artist": "A"}],
+        "disliked": [{"title": "D", "artist": "B"}],
+        "heard": [{"title": "H", "artist": "C"}],
+    }
+    block = _feedback_block(fb)
+    assert "- L - A" in block and "- D - B" in block and "- H - C" in block
+    assert "相鄰" in block      # 喜歡＝往相鄰方向探索
+    assert "避開" in block      # 不喜歡＝避開方向
+    assert "更大膽" in block    # 聽過了＝出圈校準
+
+
+def test_feedback_block_caps_each_list():
+    liked = [{"title": f"L{i}", "artist": "A"} for i in range(FEEDBACK_PROMPT_MAX + 5)]
+    block = _feedback_block({"liked": liked})
+    assert f"- L{FEEDBACK_PROMPT_MAX + 4} - A" in block  # 最新的要在
+    assert "- L4 - A" not in block                       # 超出上限的最舊筆要被裁掉
+
+
+def test_both_prompts_include_feedback_block():
+    fb = {"liked": [{"title": "Fav", "artist": "Z"}]}
+    assert "Fav - Z" in build_guest_prompt("ctx", feedback=fb)
+    assert "Fav - Z" in build_prompt(PROFILE, "ctx", feedback=fb)
+    assert "對過往推薦的回饋" not in build_guest_prompt("ctx")

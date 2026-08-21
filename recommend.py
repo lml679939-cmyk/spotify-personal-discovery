@@ -8,7 +8,7 @@ import re
 import time
 import unicodedata
 from functools import lru_cache
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from google import genai
 from google.genai import types
@@ -24,6 +24,7 @@ _NO_THINKING = types.ThinkingConfig(thinking_budget=0)
 MAX_TRACKS_PER_ARTIST = 2  # 同一次推薦中，同藝人最多出現幾首
 HISTORY_KEEP = 200          # session 內保留的歷史推薦上限
 PROMPT_HISTORY_MAX = 40     # 其中真正寫進 prompt 的筆數（完整排除靠程式端，見下）
+FEEDBACK_PROMPT_MAX = 20    # 每類回饋（讚/倒讚/聽過）最多寫進 prompt 的筆數，同短清單原則
 REFILL_MAX = 1              # 湊不滿時最多補生成幾次（共用 Gemini Key 的配額很珍貴）
 # 搜不到的候選只能當補位。實測把 LLM 推向冷門後，幻覺曲目（歌手真的存在、歌名是編的）
 # 大增——不設上限的話清單會被「只有搜尋連結」的卡片塞滿，看起來滿了其實不能播。
@@ -203,8 +204,10 @@ def build_prompt(
     history: list[dict] | None = None,
     fav_artists: list[str] | None = None,
     refill_exclude: list[tuple[str, str]] | None = None,
+    feedback: dict | None = None,
 ) -> str:
     traits_block = f"\n## 使用者個人特質與當下狀態\n{user_traits}\n" if user_traits else ""
+    feedback_block = _feedback_block(feedback)
 
     disc_n = round(num_songs * new_ratio / 100)
     fam_n = num_songs - disc_n
@@ -310,7 +313,7 @@ def build_prompt(
 ## 使用者口味
 喜愛藝人：{", ".join(profile["top_artists"])}
 風格：{", ".join(profile["top_genres"][:8]) if profile["top_genres"] else "pop, indie pop"}
-{traits_block}
+{traits_block}{feedback_block}
 {fav_block}## 當下情境（最高優先）
 {context}
 
@@ -341,6 +344,39 @@ def build_prompt(
 {schema}"""
 
 
+def _feedback_block(feedback: dict | None) -> str:
+    """使用者對過往推薦的回饋 → prompt 區塊（兩種模式共用）。
+
+    喜歡＝正向錨點（往相鄰方向探索）、不喜歡＝避開方向、聽過了＝出圈校準。
+    「不要重複推薦這些歌」的**保證**不在這裡——app.py 會把回饋曲目併進 history
+    走程式端排除；這個區塊只做品味引導（prompt 只做機率優化的同一條原則）。
+    """
+    if not feedback:
+        return ""
+
+    def _lines(items: list[dict]) -> str:
+        return "\n".join(f"- {i['title']} - {i['artist']}" for i in items[-FEEDBACK_PROMPT_MAX:])
+
+    parts = []
+    if feedback.get("liked"):
+        parts.append(
+            "按過讚的歌（重要品味訊號——請往這些歌的相鄰方向探索：同氛圍、同場景、"
+            "相似製作質感的其他音樂人，但不要重複推薦這些歌本身）：\n" + _lines(feedback["liked"])
+        )
+    if feedback.get("disliked"):
+        parts.append(
+            "明確不喜歡的歌（避開與這些相似的方向）：\n" + _lines(feedback["disliked"])
+        )
+    if feedback.get("heard"):
+        parts.append(
+            "回報「早就聽過」的歌（代表那次推得不夠新，請更大膽探索）：\n"
+            + _lines(feedback["heard"])
+        )
+    if not parts:
+        return ""
+    return "\n## 使用者對過往推薦的回饋\n" + "\n\n".join(parts) + "\n"
+
+
 def build_guest_prompt(
     context: str,
     num_songs: int = 15,
@@ -350,8 +386,10 @@ def build_guest_prompt(
     history: list[dict] | None = None,
     fav_artists: list[str] | None = None,
     refill_exclude: list[tuple[str, str]] | None = None,
+    feedback: dict | None = None,
 ) -> str:
     """訪客模式 prompt：沒有個人聆聽資料，純靠情境推薦。"""
+    feedback_block = _feedback_block(feedback)
     if languages:
         lang_block = (
             "## 語言偏好（必須遵守）\n"
@@ -411,7 +449,7 @@ def build_guest_prompt(
     return f"""你是專業音樂推薦 AI。根據使用者描述的情境與偏好，推薦 {num_songs} 首歌。
 
 注意：這位使用者沒有提供個人聆聽紀錄，所以請完全根據情境推薦。
-{traits_block}
+{traits_block}{feedback_block}
 {fav_block}## 當下情境（最高優先）
 {context}
 
@@ -441,6 +479,7 @@ def get_recommendations(
     history: list[dict] | None = None,
     fav_artists: list[str] | None = None,
     refill_exclude: list[tuple[str, str]] | None = None,
+    feedback: dict | None = None,
 ) -> dict:
     client = _client(api_key)
     if profile is None:
@@ -448,12 +487,14 @@ def get_recommendations(
             context, num_songs, user_traits,
             languages=languages, genres=genres, history=history,
             fav_artists=fav_artists, refill_exclude=refill_exclude,
+            feedback=feedback,
         )
     else:
         prompt = build_prompt(
             profile, context, num_songs, new_ratio, user_traits,
             languages=languages, genres=genres, history=history,
             fav_artists=fav_artists, refill_exclude=refill_exclude,
+            feedback=feedback,
         )
 
     def _call_gemini(with_mime: bool) -> str:
@@ -490,11 +531,19 @@ def get_recommendations(
 # YouTube 走純搜尋網址：不需要任何 API、不吃配額、不用 OAuth。
 # （YouTube Data API 的 search.list 一次要 100 units，每天總共才 10000 units，
 #  等於全站一天只有約 100 次搜尋——拿來解析歌單完全不可行。）
-PLAY_PLATFORMS = ("Spotify", "YouTube")
+# Apple Music 同一招（搜尋頁）：storefront 固定 tw（使用者以台灣為主）。
+# 未來要掛聯盟分潤（Apple Performance Partners 的 &at= token）也是在這裡加。
+PLAY_PLATFORMS = ("Spotify", "YouTube", "Apple Music")
 
 
 def youtube_search_url(title: str, artist: str) -> str:
     return "https://www.youtube.com/results?search_query=" + quote(
+        f"{title} {artist}".strip(), safe=""
+    )
+
+
+def apple_music_search_url(title: str, artist: str) -> str:
+    return "https://music.apple.com/tw/search?term=" + quote(
         f"{title} {artist}".strip(), safe=""
     )
 
@@ -506,10 +555,30 @@ def play_link(track: dict, platform: str = "Spotify") -> tuple[str, str]:
     以前是給一個 Spotify 站內搜尋網址，但那首歌本來就不在 Spotify 上，點過去必然落空；
     YouTube 幾乎都找得到（涵蓋更廣，也收得到 LLM 把曲名與歌手配錯時的正確版本）。
     按鈕文字會跟著變成「▶ YouTube」，順便讓使用者一眼看出哪幾首不在 Spotify。
+    Apple Music 走搜尋頁，跟有沒有 Spotify 結果無關，不需要 fallback。
     """
+    if platform == "Apple Music":
+        return "▶ Apple Music", apple_music_search_url(
+            track.get("name", ""), track.get("artist", "")
+        )
     if platform == "YouTube" or track.get("_no_spotify"):
         return "▶ YouTube", youtube_search_url(track.get("name", ""), track.get("artist", ""))
     return "▶ Spotify", track.get("url", "")
+
+
+# 播放中繼（點擊計數）只允許轉導到這些網域。?goto= 是網址參數＝完全由攻擊者控制，
+# 沒有白名單的話本站就是一個 open redirect（釣魚連結掛著我們的網域騙人點）。
+ALLOWED_PLAY_HOSTS = frozenset({
+    "open.spotify.com", "www.youtube.com", "music.youtube.com", "music.apple.com",
+})
+
+
+def is_allowed_play_url(url: str) -> bool:
+    try:
+        u = urlparse(url or "")
+    except ValueError:
+        return False
+    return u.scheme == "https" and (u.hostname or "").lower() in ALLOWED_PLAY_HOSTS
 
 
 # ── 名稱正規化（判斷「這首聽過沒」用） ─────────────────────
