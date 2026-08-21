@@ -512,6 +512,16 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   同 YouTube 模式：不需要 API、不吃配額，跟 Spotify 搜不搜得到無關（不必 fallback）。
   未來要掛聯盟分潤（Apple Performance Partners 的 `&at=` token）就加在
   `apple_music_search_url()`。
+- ⚠️ **曲目直連（`/song/{id}`）已調查、定案先不做（2026-08-21）**：免費的
+  iTunes Search API 對中文內容召回率極差——實測「史詩／蛋堡」在 TW 目錄裡
+  確實存在（`lookup?id=` 查得到、`/song/1448339528` 回 200），但組合詞、
+  `songTerm`、`artistTerm`（中英文藝名各取 200 筆）**四種搜法全部找不到**；
+  對照組英文歌（Motion Sickness / Phoebe Bridgers）第一筆完美命中。
+  另兩個致命點：① 限制約 20 req/min/IP，而 Streamlit Cloud 全站共用出口 IP，
+  一次生成 15 首就逼近上限；② 第一筆常是「別人 feat. 該歌手」的錯歌，
+  真要做必須套 `resolution_matches()` 驗證、驗不過退回搜尋頁。
+  正規解是 MusicKit（要 Apple Developer Program，99 美元/年）——
+  哪天為了分潤辦了開發者帳號再回來做。
 
 #### 播放點擊計數：做過中繼、雲端證實做不到、已撤除（2026-08-21）
 - 動機：「每次生成有幾人點播放、點哪個平台」是導流分潤的決策數據。純 Streamlit
@@ -878,7 +888,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | feat: 投射問題題庫 15 → 30、「換一題」改洗牌輪替（整輪出完才重洗、跨輪不連續同題）——舊版 random.choice 換題會回鍋、15 題池子開 5 次頁面約五成機率撞題 |
+| （工作區，尚未 commit） | copy: 結果區「複製或分享歌單」→「複製歌單」；docs: Apple Music 曲目直連調查定案不做（iTunes Search API 中文召回率極差，見「播放平台選擇」段） |
+| `5b88680` | feat: 投射問題題庫 15 → 30、「換一題」改洗牌輪替（整輪出完才重洗、跨輪不連續同題）——舊版 random.choice 換題會回鍋、15 題池子開 5 次頁面約五成機率撞題 |
 | `72bf444` | revert: 撤除播放點擊中繼——Streamlit Cloud 的 app iframe sandbox 沒有 allow-top-navigation，轉導必被平台 X-Frame-Options 擋成「拒絕連線」（見「播放點擊計數」段的驗屍報告），播放按鈕回退直連；feat: 移除 IG 分享圖卡功能（share_card.py 刪除，Pillow 因上傳路徑仍保留釘版） |
 | `5f2db78` | feat: 曲目回饋 👍/👎/🎧（兩種模式，session 級，餵進 prompt＋程式端排除）、播放點擊中繼計數（`?goto=` 白名單防 open redirect、[PLAY] stderr）、Apple Music 第三播放平台（搜尋頁、tw storefront） |
 | `2fcc1c5` | fix: 訪客模式對齊登入版設計原則——prompt 歷史截 40（原本塞整份最多 200 筆）、超額生成 1.25×、補生成＋湊不滿說明開放給訪客、搜不到的卡排最後且超額時最先被裁（原本會佔清單開頭） |

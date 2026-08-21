@@ -1477,6 +1477,6 @@ if "found" in st.session_state and st.session_state.found:
 
     # ── 複製歌單 ─────────────────────────────────────────
     st.divider()
-    st.subheader("📋 複製或分享歌單")
+    st.subheader("📋 複製歌單")
     st.caption(f"點擊右上角複製圖示即可一鍵複製（含 {play_platform} 連結）")
     st.code(_share_text, language=None)
