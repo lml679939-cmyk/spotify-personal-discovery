@@ -36,6 +36,7 @@ SPARE_MAX_RATIO = 0.2
 # 對策是把流行度（popularity 0-100）當成「大概聽過」的代理指標——推薦系統文獻的標準
 # 新穎性度量 EPC 本質就是 1 - popularity——在探索額度上加一道天花板，並用它參與重排。
 OVERGEN_FACTOR = 1.6         # 超額生成倍率：驗證鏈會刷掉一部分，先多要一些候選
+GUEST_OVERGEN_FACTOR = 1.25  # 訪客版超額倍率：過濾只有去重＋同藝人上限，餘裕不用像登入版那麼大
 POP_CEILING_DISCOVERY = 65   # 探索額度的流行度上限（超過視為「不可能沒聽過」）
 POP_CEILING_STRICT = 55      # new_ratio == 100（硬核探索）時收緊
 POP_CEILING_RELAX_STEP = 10  # 候選不足時每輪放寬多少（不回退熱門，只逐步放寬）
@@ -348,6 +349,7 @@ def build_guest_prompt(
     genres: list[str] | None = None,
     history: list[dict] | None = None,
     fav_artists: list[str] | None = None,
+    refill_exclude: list[tuple[str, str]] | None = None,
 ) -> str:
     """訪客模式 prompt：沒有個人聆聽資料，純靠情境推薦。"""
     if languages:
@@ -369,7 +371,9 @@ def build_guest_prompt(
         genre_block = "## 曲風偏好\n- 不限曲風，依情境自由選擇\n"
 
     if history:
-        recent = history[-HISTORY_KEEP:]
+        # 與登入版同一條原則：prompt 只放最近 PROMPT_HISTORY_MAX 筆做機率優化
+        # （清單愈長遵守率愈差），完整排除靠程式端 _basic_dedupe 拿整份歷史比對
+        recent = history[-PROMPT_HISTORY_MAX:]
         history_str = "\n".join(f"- {h['title']} - {h['artist']}" for h in recent)
         history_block = (
             "## 本次已推薦過的歌曲（絕對禁止再次推薦）\n"
@@ -391,6 +395,19 @@ def build_guest_prompt(
     else:
         fav_block = ""
 
+    # 補生成（第一輪湊不滿時）。訪客版湊不滿的原因幾乎都是與過往推薦撞歌，
+    # 所以指令是「換別的」，不是登入版的「往更冷門挑」
+    if refill_exclude:
+        pairs = "\n".join(f"- {t} - {a}" for t, a in refill_exclude[-60:])
+        refill_block = (
+            "\n## 這是補充生成（重要）\n"
+            "上一輪的推薦有幾首與過往推薦重複，被系統過濾掉了。\n"
+            "這一輪請換不同的曲目與音樂人，並避開下列已經出現過的：\n"
+            f"{pairs}\n"
+        )
+    else:
+        refill_block = ""
+
     return f"""你是專業音樂推薦 AI。根據使用者描述的情境與偏好，推薦 {num_songs} 首歌。
 
 注意：這位使用者沒有提供個人聆聽紀錄，所以請完全根據情境推薦。
@@ -406,7 +423,7 @@ def build_guest_prompt(
 - 每首歌的 title + artist 組合必須唯一
 - 年代多樣化
 - 推薦的歌必須是在 Spotify 上找得到的真實歌曲
-
+{refill_block}
 只輸出 JSON：
 {{"context_interpretation":"情境理解（一句話）","recommendations":[{{"title":"歌名","artist":"藝人","reason":"理由20字內"}}]}}"""
 
@@ -430,7 +447,7 @@ def get_recommendations(
         prompt = build_guest_prompt(
             context, num_songs, user_traits,
             languages=languages, genres=genres, history=history,
-            fav_artists=fav_artists,
+            fav_artists=fav_artists, refill_exclude=refill_exclude,
         )
     else:
         prompt = build_prompt(
@@ -630,25 +647,42 @@ def resolution_matches(
 
 # ── 後處理：驗證鏈 ────────────────────────────────────────
 def _basic_dedupe(
-    tracks: list[dict], history: list[dict] | None = None, num_songs: int | None = None
+    tracks: list[dict],
+    history: list[dict] | None = None,
+    num_songs: int | None = None,
+    stats: dict | None = None,
 ) -> list[dict]:
-    """同批去重 + 排除歷史 + 同藝人最多 MAX_TRACKS_PER_ARTIST 首。訪客模式走這條。"""
-    seen = _history_keys(history)
+    """同批去重 + 排除歷史 + 同藝人最多 MAX_TRACKS_PER_ARTIST 首。訪客模式走這條。
+
+    傳入 stats 時順手計數刷掉的首數（dup_history / dup_batch / artist_capped），
+    app.py 拿它組「為什麼湊不滿」的說明——少列任何一個原因都可能出現自相矛盾的訊息。
+    搜不到的（_no_spotify）穩定排序到最後，而且排序在截斷**之前**：
+    超額生成的餘裕優先留給可播放的曲目（與登入模式 spare「湊不滿才用」同一個語意），
+    留下來的也不會佔清單開頭——沒封面又不能播，排最前面看起來像整個功能壞掉。"""
+    history_keys = _history_keys(history)
+    seen = set(history_keys)
     counts: dict[str, int] = {}
     out: list[dict] = []
     for t in tracks:
         title = t.get("name") or t.get("title") or ""
         key = _track_key_from(title, _track_primary(t))
         if key in seen:
+            if stats is not None:
+                bucket = "dup_history" if key in history_keys else "dup_batch"
+                stats[bucket] = stats.get(bucket, 0) + 1
+                stats["dup"] = stats.get("dup", 0) + 1
             continue
         primary = _norm_artist(_track_primary(t))
         if counts.get(primary, 0) >= MAX_TRACKS_PER_ARTIST:
+            if stats is not None:
+                stats["artist_capped"] = stats.get("artist_capped", 0) + 1
             continue
         seen.add(key)
         counts[primary] = counts.get(primary, 0) + 1
         out.append(t)
-        if num_songs and len(out) >= num_songs:
-            break
+    out.sort(key=lambda t: bool(t.get("_no_spotify")))  # 穩定排序：兩組內部維持 LLM 順位
+    if num_songs:
+        out = out[:num_songs]
     return out
 
 
@@ -674,18 +708,19 @@ def curate_tracks(
       - 曲目排除改用 (正規化歌名, 藝人) 配對，不再只比歌名——變體不再漏掉、同名不再誤殺
       - 探索額度多一道流行度天花板，擋掉「沒紀錄但幾乎一定聽過」的大熱門
 
-    訪客模式（profile is None）不走這條，行為與改版前相同。
+    訪客模式（profile is None）改走 _basic_dedupe：歷史/同批去重＋同藝人上限、
+    搜不到的排最後、刷掉的首數計進 stats（dup_history / dup_batch / artist_capped）。
     """
     stats = {
         "candidates": len(tracks), "dup": 0, "dup_history": 0, "dup_batch": 0,
-        "known_track": 0, "pop_blocked": 0,
+        "known_track": 0, "pop_blocked": 0, "artist_capped": 0,
         "discovery_pool": 0, "familiar_pool": 0, "picked_new": 0,
         "picked_familiar": 0, "spare_used": 0, "ceiling": None, "avg_pop_new": None,
         # 天花板到底是靠哪個訊號在跑——三個都 0 代表整條過濾其實沒作用
         "pop_from_spotify": 0, "pop_from_fame": 0, "pop_unknown": 0,
     }
     if profile is None:
-        picked_guest = _basic_dedupe(tracks, history, num_songs)
+        picked_guest = _basic_dedupe(tracks, history, num_songs, stats=stats)
         stats["picked_familiar"] = len(picked_guest)
         return picked_guest, stats
 

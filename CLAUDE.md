@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（87）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 168 tests
+- **測試**：`test_recommend.py`（93）+ `test_spotify_api.py`（22）+ `test_styles.py`（9）+ `test_app.py`（37）+ `test_ratelimit.py`（13），共 174 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 168 tests，改任何 .py 都要跑
+python -m pytest -q                     # 174 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -207,7 +207,7 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 | `genres` | 曲風過濾清單（None = 不限） |
 | `history` | 已推薦歌曲清單（避免重複） |
 | `fav_artists` | **使用者指定歌手**（None = 不限；填入時 AI 優先從這些歌手推薦） |
-| `refill_exclude` | 補生成那一輪才有：把第一輪已經產出的 (曲名, 歌手) 傳回去，避免重複提名（僅 `build_prompt()`） |
+| `refill_exclude` | 補生成那一輪才有：把第一輪已經產出的 (曲名, 歌手) 傳回去，避免重複提名（兩個函式都支援，2026-08 起） |
 
 ### 出圈演算法（novelty，2026-08 Phase 1）
 
@@ -325,9 +325,18 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
   這行同時是給使用者的透明度與開發者的驗收儀表板。
 - discovery 的 `reason` 在 prompt 裡要求寫成「橋接句」（點出與使用者已聽音樂的關聯）。
 
-**訪客模式**（`profile is None` → `_basic_dedupe()`）不走驗證鏈，但有兩個行為差異：
-`_basic_dedupe` 會截斷到 `num_songs`，且去重鍵改用 `_track_key`（括號內容一律剝除），
-所以同藝人的 `Interlude (I)` / `Interlude (II)` 會被視為同一首。都偏保守，不會出錯。
+**訪客模式**（`profile is None` → `_basic_dedupe()`）不走登入版驗證鏈，
+但 2026-08 已把四件事對齊到同一套設計原則：
+① prompt 歷史同樣只放最近 `PROMPT_HISTORY_MAX=40` 筆（原本塞到 200，違反自家
+「清單超過 ~50 條遵守率衰退」原則；完整排除照舊靠程式端拿**整份**歷史比對）；
+② 超額生成 `GUEST_OVERGEN_FACTOR=1.25`（下限 num_songs+2、上限 40）；
+③ `_basic_dedupe` 把搜不到的（`_no_spotify`）穩定排序到最後，且排序在截斷**之前**
+——超額餘裕優先留給可播放的曲目；刷掉的首數計進 stats
+（`dup_history` / `dup_batch` / `artist_capped`），湊不滿時 app.py 拿它組說明訊息
+（訪客分支，建議固定指向「清除推薦歷史」）；
+④ 補生成對訪客也生效（`build_guest_prompt` 支援 `refill_exclude`，指令是「換別的」
+而非登入版的「往更冷門挑」）。
+去重鍵沿用括號剝除的正規化，同藝人的 `Interlude (I)` / `Interlude (II)` 視為同一首。
 
 ### 歷史去重
 - 三個上限別搞混：`HISTORY_KEEP=200`（session 內保留幾筆）、
@@ -821,6 +830,7 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
+| （工作區，尚未 commit） | fix: 訪客模式對齊登入版設計原則——prompt 歷史截 40（原本塞整份最多 200 筆）、超額生成 1.25×、補生成＋湊不滿說明開放給訪客、搜不到的卡排最後且超額時最先被裁（原本會佔清單開頭） |
 | （工作區，尚未 commit） | fix(security): 依賴改精確釘版（Pillow 12.3.0 補 13 個 CVE、python-dotenv 1.2.3）、新增生成節流 `ratelimit.py`；順帶修好被擋下的點擊會清掉既有歌單 |
 | （工作區，尚未 commit） | fix(security): `X-Forwarded-For` 改用 `ipaddress` 驗證（只收 is_global）；BYOK 步驟卡的 URI 移出 onclick 改走 `data-` 屬性；`.claude/` 從 git 索引移除。BYOK 步驟卡拆成兩半、中間改夾原生 `st.code()`——那顆自製複製鈕一直是死的（Streamlit 會濾掉 onclick），順帶讓 redirect_uri 完全不經過 unsafe_allow_html |
 | （工作區，尚未 commit） | fix(security): OAuth 補上綁定瀏覽器的 `state`（防授權碼注入／login CSRF）；`?error=` 改走白名單（原本可在登入頁警告框注入釣魚連結與追蹤圖片，已實測確認） |

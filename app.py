@@ -20,6 +20,7 @@ import styles
 
 import share_card
 from recommend import (
+    GUEST_OVERGEN_FACTOR,
     HISTORY_KEEP,
     OVERGEN_FACTOR,
     PLAY_PLATFORMS,
@@ -976,9 +977,14 @@ if _clicked:
                     f"（{_ratio_msg}語言：{lang_msg}・曲風：{genre_msg}"
                     f"・避開過往 {len(history)} 首）..."
                 )
-                # 登入模式多要一些候選：驗證鏈會刷掉「其實聽過」的那些，
-                # 沒有這層餘裕，過濾完就湊不滿使用者要的首數。訪客模式不過濾，維持原樣。
-                _gen_n = num_songs if is_guest_mode() else min(int(num_songs * OVERGEN_FACTOR), 40)
+                # 兩種模式都多要一些候選：刷掉一部分後才不會湊不滿使用者要的首數。
+                # 訪客的過濾較輕（去重＋同藝人上限），倍率不用登入版那麼大；
+                # +2 的下限讓 5 首這種小額也有實質餘裕
+                _gen_n = (
+                    min(max(num_songs + 2, int(num_songs * GUEST_OVERGEN_FACTOR)), 40)
+                    if is_guest_mode()
+                    else min(int(num_songs * OVERGEN_FACTOR), 40)
+                )
                 try:
                     result = get_recommendations(
                         _gemini_key(),
@@ -1010,10 +1016,8 @@ if _clicked:
                     and _get_credential("SPOTIFY_CLIENT_SECRET")
                 )
                 if _has_spotify:
-                    _cand_msg = (
-                        f"{len(unique_recs)} 首候選 → 篩出 {num_songs} 首"
-                        if not is_guest_mode() else f"{len(unique_recs)}/{pre_dedupe_n} 首去重後"
-                    )
+                    # 兩種模式現在都超額生成，訊息統一成「候選 → 篩出」
+                    _cand_msg = f"{len(unique_recs)} 首候選 → 篩出 {num_songs} 首"
                     st.write(f"🔍 Spotify 搜尋歌曲...（{_cand_msg}，並行搜尋）")
                     _search_token = _get_search_token()
                 else:
@@ -1074,11 +1078,12 @@ if _clicked:
                     return len(cards) - st_["spare_used"]
 
                 # 撞到速率限制時不要補生成——再打只會罰更久，而且問題不在候選不夠
-                if (not _rate_limited and profile is not None
-                        and _playable(found, _novelty) < num_songs):
+                # （訪客模式也補：歷史累積多了以後，去重會讓清單默默縮水）
+                if not _rate_limited and _playable(found, _novelty) < num_songs:
                     for _ in range(REFILL_MAX):
                         _short = num_songs - _playable(found, _novelty)
-                        st.write(f"🔁 過濾後少了 {_short} 首，補生成一輪更冷門的...")
+                        _refill_hint = "更冷門的" if profile is not None else "不同的"
+                        st.write(f"🔁 過濾後少了 {_short} 首，補生成一輪{_refill_hint}...")
                         try:
                             _extra = get_recommendations(
                                 _gemini_key(),
@@ -1166,6 +1171,22 @@ if _clicked:
                             + (f"扣掉了{'、'.join(_why)}。" if _why else "可用的候選不足。")
                             + _advice
                         )
+                elif not _rate_limited and _playable(found, _novelty) < num_songs:
+                    # 訪客版的湊不滿說明：原因照實列全（少列任何一個都可能自相矛盾），
+                    # 主因幾乎都是歷史撞歌，建議固定指向「清除推薦歷史」
+                    _why = []
+                    if _novelty["dup_history"]:
+                        _why.append(f"{_novelty['dup_history']} 首之前已經推薦過的歌")
+                    if _novelty["dup_batch"]:
+                        _why.append(f"{_novelty['dup_batch']} 首同批重複的提名")
+                    if _novelty["artist_capped"]:
+                        _why.append(f"{_novelty['artist_capped']} 首超過同一歌手上限的歌")
+                    _notices.append(
+                        f"過濾後這次只湊到 {_playable(found, _novelty)} 首"
+                        f"（原本要 {num_songs} 首）："
+                        + (f"扣掉了{'、'.join(_why)}。" if _why else "AI 給的可用候選不足。")
+                        + "想要更多首可以到「⚙️ 推薦歌曲數」裡清除推薦歷史，或換個情境再生成一次。"
+                    )
 
                 st.session_state["novelty_notice"] = _notices
                 # 結果頁要顯示「這批有幾首真的出圈」，得撐過結尾的 st.rerun()

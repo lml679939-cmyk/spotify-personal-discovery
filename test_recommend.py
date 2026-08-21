@@ -289,6 +289,52 @@ def test_guest_accepts_title_key():
     assert len(result) == 1
 
 
+def test_guest_no_spotify_cards_sort_to_the_end():
+    # 搜尋連結卡沒封面又不能播，排在開頭看起來像整個功能壞掉（登入版早有此排序）
+    tracks = [
+        {"name": "Dead", "artist": "A", "_no_spotify": True},
+        _t("Live 1", "B"),
+        _t("Live 2", "C"),
+    ]
+    result, _ = curate_tracks(tracks)
+    assert [t["name"] for t in result] == ["Live 1", "Live 2", "Dead"]
+
+
+def test_guest_truncation_drops_no_spotify_cards_first():
+    # 排序在截斷之前：超額生成的餘裕要優先留給可播放的曲目
+    tracks = [
+        {"name": "Dead", "artist": "A", "_no_spotify": True},
+        _t("Live 1", "B"),
+        _t("Live 2", "C"),
+    ]
+    result, _ = curate_tracks(tracks, num_songs=2)
+    assert [t["name"] for t in result] == ["Live 1", "Live 2"]
+
+
+def test_guest_trims_overgenerated_candidates_to_target():
+    tracks = [_t(f"S{i}", f"Artist {i}") for i in range(10)]
+    result, _ = curate_tracks(tracks, num_songs=4)
+    assert [t["name"] for t in result] == ["S0", "S1", "S2", "S3"]
+
+
+def test_guest_stats_count_each_drop_reason():
+    # app.py 拿這些計數組「為什麼湊不滿」的說明，少列任何一個原因訊息就會自相矛盾
+    history = [{"title": "Old", "artist": "X"}]
+    tracks = [
+        _t("Old", "X"),           # dup_history
+        _t("New", "Y"),
+        _t("new", "y"),           # dup_batch
+        _t("S1", "Z"),
+        _t("S2", "Z"),
+        _t("S3", "Z"),            # 同藝人第 3 首 → artist_capped
+    ]
+    result, stats = curate_tracks(tracks, history=history)
+    assert stats["dup_history"] == 1
+    assert stats["dup_batch"] == 1
+    assert stats["artist_capped"] == 1
+    assert stats["picked_familiar"] == len(result) == 3
+
+
 # ── curate_tracks：登入模式驗證鏈 ──────────────────────────
 def _st(name, artist, pop=20, **kw):
     """Spotify 搜尋回來的曲目（帶 popularity 與歌手 ID）。"""
@@ -755,3 +801,21 @@ def test_guest_prompt_history_and_fav():
     )
     assert "Old - X" in p
     assert "陳奕迅" in p
+
+
+def test_guest_prompt_history_trimmed_to_prompt_limit():
+    # 與登入版同一條原則：prompt 只放最近 PROMPT_HISTORY_MAX 筆做機率優化，
+    # 完整排除靠程式端 _basic_dedupe 拿整份歷史比對
+    n = HISTORY_KEEP + 50
+    history = [{"title": f"H{i}", "artist": f"A{i}"} for i in range(n)]
+    p = build_guest_prompt("ctx", history=history)
+    assert f"- H{n - 1} - A{n - 1}" in p                   # 最新的要在
+    assert f"- H{n - PROMPT_HISTORY_MAX} - " in p          # 剛好在上限內的也要在
+    assert f"- H{n - PROMPT_HISTORY_MAX - 1} - " not in p  # 超出上限的要被裁掉
+
+
+def test_guest_prompt_refill_block_only_when_excluding():
+    p = build_guest_prompt("ctx", refill_exclude=[("Song A", "X")])
+    assert "補充生成" in p
+    assert "- Song A - X" in p
+    assert "補充生成" not in build_guest_prompt("ctx")
