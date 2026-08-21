@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（105）+ `test_spotify_api.py`（27）+ `test_styles.py`（12）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 197 tests
+- **測試**：`test_recommend.py`（105）+ `test_spotify_api.py`（27）+ `test_styles.py`（13）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 198 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 197 tests，改任何 .py 都要跑
+python -m pytest -q                     # 198 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -431,9 +431,21 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
   回饋 pills（thumb_up／thumb_down／headphones，對照表在 app.py 的
   `_FB_STATE_BY_LABEL`）、生成按鈕（auto_awesome；額度用完 hourglass_top）、
   四個 expander（tune／music_note／mood／psychology，`icon=` 參數）、換一題（refresh）。
-- ⚠️ **兩種 testid**：pills／按鈕的圖示是 `stIconMaterial`，expander 的是
-  `stExpanderIcon`。全域 span 的 Nunito `!important` 規則靠 `:not()` 清單排除它們——
-  **排除清單漏掉哪種，那種圖示就會連字失效、顯示成文字「music_note」**（實測踩過）。
+- ⚠️ **Material 圖示 span 有三種變體，排除清單缺一不可**（三種都實測踩過，
+  有測試釘住）：① pills／按鈕＝`stIconMaterial` ② expander＝`stExpanderIcon`
+  ③ **markdown 行內**（caption／widget 標籤／`###` 標題裡的 `:material/xxx:`）＝
+  無 class、無 testid，只有 `translate="no"` 屬性可以認。全域 span 的 Nunito
+  `!important` 規則靠 `:not()` 清單排除它們——漏掉哪種，那種圖示就連字失效、
+  顯示成文字「music_note」。圖示另設 `line-height:1`（繼承 1.6 會把字圖抬離盒中心）。
+- **2026-08-21 全站清掃**：登入頁（直接開始 play_arrow／Spotify 登入 headphones／
+  🔒→lock／🔧→build×2／✅→check_circle）、sidebar（music_note／account_circle／
+  swap_horiz／logout）、歷史提示 🧠→history、額度 🚦→traffic、清除×2 delete、
+  指定歌手 🎤→mic、加入 Spotify playlist_add、📖→menu_book、提示框 icon 🔭→explore、
+  🫥→search_off。styles 端：💭→紫色火花、封面佔位 🎵→`SVG_NOTES`、💿→迷你黑膠
+  `_mini_vinyl()`、理由標籤的 💡 移除、BYOK 步驟去 emoji（數字圈就是視覺錨）、
+  隱私徽章 🔒→新資產 `SVG_LOCK`（鎖環用線條版聯集畫法）。
+  **刻意保留的 emoji**：🧭 出圈標籤（語意標記，見「呈現層」）、生成過程的
+  st.status 敘事行（暫態文字）、警示訊息的 ⚠️ 前綴與 toast——這些不算 UI chrome。
 - expander 圖示的染色 CSS 綁 key（`.st-key-exp_music …`），改 key 名要同步改。
 - 量測：Material 版 pills 寬 133px（emoji 版 134）、等高網格、手機 375px 皆不受影響。
 
@@ -472,6 +484,7 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 | 拖滑桿面板自己關起來 | expander 沒有 `key`，標題文字一變就被當新元件重建 | 改值後看 `details.open` |
 | 兩欄輸入框沒對齊 | 上傳區有自己的 `padding` + 邊框把右欄推低 | 比對兩個 box 的 `top`/`bottom` |
 | 黃底標籤看不到字 | 白字壓 `#FFD700` 對比只有 1.4:1 | 用 WCAG 公式算 relative luminance |
+| 投射列題目與按鈕差 8px | 題目從 `<p>` 改成 `<div>` 後，沒有 p 的 16px 下邊距去抵銷 `stMarkdownContainer` 的 -16px 負邊界 | 量氣泡/文字/按鈕三者 centerY（修後 149/149/149） |
 
 **做法**：`streamlit run app.py --server.headless true --server.port 8599`
 起服務後用瀏覽器工具跑 `getBoundingClientRect()` / `getComputedStyle()` 量，
@@ -946,7 +959,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | feat: Y2K 圖示系統兩層制取代全站 emoji——A 層自繪貼紙 SVG（剪貼板＋題目氣泡；投射問題 30 題去 emoji 統一用氣泡）、B 層 Material Rounded 染色（pills/生成鈕/四個 expander/換一題）；⚠️ expander 圖示 testid 是 stExpanderIcon 且會被全域 Nunito 蓋掉連字（:not() 排除清單要含它）。設計稿 artifact d2fc1112 |
+| （工作區，尚未 commit） | feat: 圖示系統第二波全站清掃（登入頁/sidebar/清除鈕/提示框全轉 Material 或貼紙 SVG，新增 SVG_LOCK；刻意保留 🧭 與暫態敘事行）；fix: 投射列置中（div 沒有 p 邊距抵銷 -16px 負邊界）、markdown 行內圖示的第三種字型地雷（translate="no"）、圖示 line-height:1；copy: 「關於你」說明去「選填。」 |
+| `a2bafef` | feat: Y2K 圖示系統兩層制取代全站 emoji——A 層自繪貼紙 SVG（剪貼板＋題目氣泡；投射問題 30 題去 emoji 統一用氣泡）、B 層 Material Rounded 染色（pills/生成鈕/四個 expander/換一題）；⚠️ expander 圖示 testid 是 stExpanderIcon 且會被全域 Nunito 蓋掉連字（:not() 排除清單要含它）。設計稿 artifact d2fc1112 |
 | `5c70d25` | feat: 幻覺補救 repair-on-miss（搜不到→同歌手真實深軌替換，含跨使用者目錄快取；artist_albums limit 上限實測只剩 10）、訪客 fame 天花板（兩段式、只壓國民金曲層級、數量永不縮水）、驗收流程（eval_bench.py＋EVAL.md＋[FEEDBACK] log）；chore: use_container_width → width="stretch"（11 處，import 零棄用警告） |
 | `081d791` | copy: 結果區「複製或分享歌單」→「複製歌單」；docs: Apple Music 曲目直連調查定案不做（iTunes Search API 中文召回率極差，見「播放平台選擇」段） |
 | `5b88680` | feat: 投射問題題庫 15 → 30、「換一題」改洗牌輪替（整輪出完才重洗、跨輪不連續同題）——舊版 random.choice 換題會回鍋、15 題池子開 5 次頁面約五成機率撞題 |

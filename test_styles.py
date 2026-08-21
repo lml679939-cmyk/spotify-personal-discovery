@@ -70,6 +70,17 @@ def test_projective_question_html_no_codeblock_trigger():
     assert "" not in out.splitlines()
 
 
+def test_material_icon_spans_are_excluded_from_font_override():
+    # Material 圖示靠字型連字渲染，全域 span 的 Nunito !important 蓋掉字型就會
+    # 顯示成文字（「music_note」）。三種變體都要在 :not() 排除清單裡（都踩過）：
+    # stIconMaterial（pills/按鈕）、stExpanderIcon（expander）、translate="no"（markdown 行內）
+    css = styles._build_global_css()
+    for marker in ('[data-testid="stIconMaterial"]',
+                   '[data-testid="stExpanderIcon"]',
+                   '[translate="no"]'):
+        assert f":not({marker})" in css, f"排除清單漏了 {marker}"
+
+
 def test_section_header_supports_clipboard_icon():
     out = styles.section_header_html("複製歌單", icon="clipboard")
     assert "複製歌單" in out

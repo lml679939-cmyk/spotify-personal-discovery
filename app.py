@@ -174,7 +174,7 @@ def _rotate_projective(order: list[str], current: str | None) -> tuple[str, list
 # 在本站登入頁的官方警告框內插入釣魚連結或追蹤圖片（見 spotify_api._set_auth_error）。
 # 查不到的 key 一律落到 unknown_error。
 _AUTH_ERR_ALLOWLIST_HINT = (
-    "先用上面的「🎶 直接開始推薦」即可，或展開下方進階設定用自己的 Spotify 登入。"
+    "先用上面的「直接開始推薦」即可，或展開下方進階設定用自己的 Spotify 登入。"
 )
 AUTH_ERROR_MESSAGES = {
     "access_denied":
@@ -184,7 +184,7 @@ AUTH_ERROR_MESSAGES = {
     # 但也不要寫得太嚇人：最常見的原因只是停留超過 10 分鐘（state 過期），
     # 講成疑似攻擊反而讓正常使用者困惑。一句話 + 一個動作就夠。
     "state_mismatch":
-        "登入連結已過期（超過 10 分鐘），請再點一次「🎧 用 Spotify 登入」。",
+        "登入連結已過期（超過 10 分鐘），請再點一次「用 Spotify 登入」。",
     "invalid_client":
         "⚠️ Spotify 授權失敗：這個 App 的設定有誤（invalid_client）。"
         + _AUTH_ERR_ALLOWLIST_HINT,
@@ -262,7 +262,8 @@ def show_login_required() -> None:
     st.markdown(styles.login_guest_card(), unsafe_allow_html=True)
 
     if st.button(
-        "🎶 直接開始推薦",
+        "直接開始推薦",
+        icon=":material/play_arrow:",
         type="primary",
         width="stretch",
         disabled=not has_gemini,
@@ -281,12 +282,13 @@ def show_login_required() -> None:
 
     if has_spotify_creds:
         st.link_button(
-            "🎧 用 Spotify 登入",
+            "用 Spotify 登入",
             get_login_url(),   # 已帶上綁定本瀏覽器的 state，見 spotify_api._make_oauth_state()
+            icon=":material/headphones:",
             type="secondary",
             width="stretch",
         )
-        st.caption("🔒 Token 只存在瀏覽器分頁記憶體，關掉就消失。")
+        st.caption(":material/lock: Token 只存在瀏覽器分頁記憶體，關掉就消失。")
 
         # 授權名單的說明只在真的登入失敗時才出現，平常不佔首頁版面
         auth_err = st.session_state.get("spotify_auth_error")
@@ -305,7 +307,8 @@ def _render_api_key_settings(expanded: bool = False) -> None:
     Gemini 由本站自備，使用者不需要也不能填。"""
     default_redirect = _get_env("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8501/"
 
-    with st.expander("🔧 進階（選填）：用自己的 Spotify 登入", expanded=expanded):
+    with st.expander("進階（選填）：用自己的 Spotify 登入", expanded=expanded,
+                     icon=":material/build:"):
 
         # ── 說明標語 ──
         st.markdown(
@@ -352,8 +355,9 @@ def _render_api_key_settings(expanded: bool = False) -> None:
             st.session_state["custom_SPOTIFY_REDIRECT_URI"] = default_redirect
 
         # 網址本身已經在上面步驟 3 的 st.code 裡（附複製圖示），這裡不再重複一次
-        st.caption("✅ Redirect URI 已自動帶入上方步驟 3 的網址　（如需修改請展開進階設定）")
-        with st.expander("🔧 進階：手動修改 Redirect URI", expanded=False):
+        st.caption(":material/check_circle: Redirect URI 已自動帶入上方步驟 3 的網址　（如需修改請展開進階設定）")
+        with st.expander("進階：手動修改 Redirect URI", expanded=False,
+                         icon=":material/build:"):
             st.text_input(
                 "Redirect URI（需與 Spotify Dashboard 設定一致）",
                 key="custom_SPOTIFY_REDIRECT_URI",
@@ -614,9 +618,9 @@ if not is_authenticated() and not is_guest_mode():
 # 登入後 / 訪客模式：sidebar 顯示用戶資訊 + 登出按鈕
 if is_guest_mode():
     with st.sidebar:
-        st.markdown("### 🎶 訪客模式")
+        st.markdown("### :material/music_note: 訪客模式")
         st.caption("未連結 Spotify・推薦不會個人化")
-        if st.button("🔄 切換為 Spotify 登入", width="stretch"):
+        if st.button("切換為 Spotify 登入", icon=":material/swap_horiz:", width="stretch"):
             logout()
         st.markdown("---")
         _render_api_key_settings()
@@ -627,9 +631,9 @@ else:
             _u = _sp_check.current_user()
             st.session_state["user_display_name"] = _u.get("display_name") or _u.get("id", "Spotify User")
         with st.sidebar:
-            st.markdown(f"### 👤 {st.session_state['user_display_name']}")
+            st.markdown(f"### :material/account_circle: {st.session_state['user_display_name']}")
             st.caption("已連結 Spotify")
-            if st.button("🚪 登出", width="stretch"):
+            if st.button("登出", icon=":material/logout:", width="stretch"):
                 logout()
             st.markdown("---")
             _render_api_key_settings()
@@ -765,19 +769,20 @@ with st.expander(f"推薦歌曲數　·　{_setting_sum}", expanded=False,
     st.markdown("---")
     if _total_hist_n > 0 and not is_guest_mode():
         st.caption(
-            f"🧠 已記住推薦過的 **{_total_hist_n}** 首歌"
+            f":material/history: 已記住推薦過的 **{_total_hist_n}** 首歌"
             f"（本次 {_session_hist_n}・過往 {_persistent_hist_n}），生成時會自動避開。"
         )
     elif is_guest_mode():
-        st.caption("🧠 訪客模式：推薦歷史僅在本次瀏覽期間有效，關掉分頁就重置。")
+        st.caption(":material/history: 訪客模式：推薦歷史僅在本次瀏覽期間有效，關掉分頁就重置。")
     elif _has_scope("playlist-read-private"):
-        st.caption("🧠 尚未有推薦歷史。每次生成後會記住，跨 session 都不重複推薦。")
+        st.caption(":material/history: 尚未有推薦歷史。每次生成後會記住，跨 session 都不重複推薦。")
     else:
-        st.caption("🧠 想跨 session 記住推薦歷史？請從側邊欄登出後重新登入授權。")
+        st.caption(":material/history: 想跨 session 記住推薦歷史？請從側邊欄登出後重新登入授權。")
 
     _clr_hist_col, _clr_fb_col = st.columns(2)
     with _clr_hist_col:
-        if st.button("🗑 清除推薦歷史", disabled=_total_hist_n == 0, width="stretch"):
+        if st.button("清除推薦歷史", icon=":material/delete:",
+                     disabled=_total_hist_n == 0, width="stretch"):
             st.session_state["recommend_history"] = []
             if not is_guest_mode():
                 try:
@@ -789,7 +794,8 @@ with st.expander(f"推薦歌曲數　·　{_setting_sum}", expanded=False,
             st.rerun()
     with _clr_fb_col:
         _fb_n = len(st.session_state.get("track_feedback", {}))
-        if st.button(f"🗑 清除歌曲回饋（{_fb_n}）", disabled=_fb_n == 0, width="stretch"):
+        if st.button(f"清除歌曲回饋（{_fb_n}）", icon=":material/delete:",
+                     disabled=_fb_n == 0, width="stretch"):
             st.session_state["track_feedback"] = {}
             # widget state 也要一起清：留著的話下次渲染 pills 會把舊選取重新寫回 dict
             for _k in [k for k in st.session_state if isinstance(k, str) and k.startswith("w_fb::")]:
@@ -842,7 +848,7 @@ with st.expander(f"音樂偏好　·　{_music_sum}", expanded=False,
         key="genre_pills",
     )
     fav_artists_raw = st.text_input(
-        "🎤 想聽哪些歌手的歌？（用逗號分隔）",
+        ":material/mic: 想聽哪些歌手的歌？（用逗號分隔）",
         key="fav_artists_input",
         placeholder="例：周杰倫, Taylor Swift, NewJeans, 陳奕迅",
         help="填入後 AI 會優先從這些歌手中推薦，同時兼顧你的情境偏好。",
@@ -886,7 +892,7 @@ _traits_sum = _summary(
 
 with st.expander(f"關於你　·　{_traits_sum}", expanded=False,
                  key="exp_traits", icon=":material/psychology:"):
-    st.caption("選填。不同性格／星座的音樂偏好取向不太一樣，AI 會納入考量。")
+    st.caption("不同性格／星座的音樂偏好取向不太一樣，AI 會納入考量。")
     mbti = st.selectbox("MBTI 性格類型", MBTI_TYPES, key="mbti")
     col_bt, col_zd = st.columns(2)
     with col_bt:
@@ -914,15 +920,15 @@ _clicked = generate_slot.button(
 )
 if _rl_exhausted:
     generate_slot.caption(
-        "🚦 本站的 AI 由站方自備、所有人共用同一份免費配額，因此設有每日上限。"
+        ":material/traffic: 本站的 AI 由站方自備、所有人共用同一份免費配額，因此設有每日上限。"
         "額度會在 24 小時內逐步恢復。"
     )
 elif _rl_wait:
     generate_slot.caption(f"⏳ 剛生成過，約 {_rl_wait} 秒後可以再按一次。")
 elif _rl_left <= 5:
-    generate_slot.caption(f"🚦 今日還可以生成 {_rl_left} 次。")
+    generate_slot.caption(f":material/traffic: 今日還可以生成 {_rl_left} 次。")
 if _total_hist_n > 0:
-    generate_slot.caption(f"🧠 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
+    generate_slot.caption(f":material/history: 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
 
 if _clicked:
     # ⚠️ 先驗輸入、後扣額度：順序反過來的話，使用者什麼都沒填就按下去也會被扣一次，
@@ -934,8 +940,8 @@ if _clicked:
     elif not (_rl := ratelimit.consume(_rate_key(), time.time()))[0]:
         st.warning(
             f"⏳ 生成太頻繁了，請等 {_rl[1]} 秒再試。" if _rl[1]
-            else "🚦 今日的生成次數已用完，額度會在 24 小時內逐步恢復。",
-            icon="🚦",
+            else "今日的生成次數已用完，額度會在 24 小時內逐步恢復。",
+            icon=":material/traffic:",
         )
     else:
         # ⚠️ 清空舊結果一定要放在這裡（確定要生成之後），不能放在 if _clicked 的開頭：
@@ -1342,13 +1348,13 @@ _notice_state = st.session_state.get("novelty_notice") or []
 if isinstance(_notice_state, str):      # 舊版存字串，直接迭代會逐字元印出來
     _notice_state = [_notice_state]
 for _notice in _notice_state:
-    st.info(_notice, icon="🔭")
+    st.info(_notice, icon=":material/explore:")
 
 if "found" in st.session_state and not st.session_state.found:
     st.warning(
         "這次過濾後一首都沒剩下。可以把「新藝人佔比」調低、清除推薦歷史，"
         "或換個情境描述再試一次。",
-        icon="🫥",
+        icon=":material/search_off:",
     )
 
 # ── 顯示結果（從 session_state 讀取，這樣即使重跑也不會消失）─────────
@@ -1384,19 +1390,21 @@ if "found" in st.session_state and st.session_state.found:
                 label_visibility="collapsed",
             )
         with save_col2:
-            save_clicked = st.button("💾 加入 Spotify", type="primary", width="stretch")
+            save_clicked = st.button("加入 Spotify", icon=":material/playlist_add:",
+                                     type="primary", width="stretch")
 
     if save_clicked:
         with st.spinner("建立歌單並寫入 Spotify..."):
             try:
                 uris = [t["uri"] for t in found if t.get("uri")]
                 pl = create_playlist_with_tracks(playlist_name, uris)
-                st.success(f"✅ 歌單建立成功！[在 Spotify 開啟]({pl['external_urls']['spotify']})")
+                st.success(f"歌單建立成功！[在 Spotify 開啟]({pl['external_urls']['spotify']})")
             except Exception as e:
                 err_msg = str(e)
                 if "403" in err_msg or "Forbidden" in err_msg:
-                    st.error("❌ Spotify 寫入被拒絕（403 Forbidden）")
-                    with st.expander("📖 為什麼會這樣？怎麼解決？", expanded=True):
+                    st.error("Spotify 寫入被拒絕（403 Forbidden）")
+                    with st.expander("為什麼會這樣？怎麼解決？", expanded=True,
+                                     icon=":material/menu_book:"):
                         st.markdown("""
 **原因**：Spotify 對 Development Mode App 的歌單寫入有限制，你的帳號可能不在這個 App 的授權用戶清單，或 App 沒有寫入權限。
 

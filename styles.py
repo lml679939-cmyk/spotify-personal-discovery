@@ -82,6 +82,16 @@ SVG_CLIPBOARD = '''<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
 
 # 題目氣泡：投射問題的統一圖示（原本 30 題每題一顆 emoji，定案改一致性優先）。
 # 問號用 <path> 不用 <text>——SVG text 依賴頁面字型載入時序，位置也會隨字型抖動
+# 鎖頭：隱私徽章用。鎖環用「深紫粗線墊底＋黃色細線疊上」畫出帶描邊的管子
+# （聯集畫法的線條版）；鎖環兩端收在鎖身上緣之下，被鎖身蓋住＝無接縫
+SVG_LOCK = '''<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <path d="M15 22 L15 16 C15 10.5 19 7 24 7 C29 7 33 10.5 33 16 L33 22" fill="none" stroke="#2D1B4E" stroke-width="5.4" stroke-linecap="round"/>
+  <path d="M15 22 L15 16 C15 10.5 19 7 24 7 C29 7 33 10.5 33 16 L33 22" fill="none" stroke="#FFD700" stroke-width="2.4" stroke-linecap="round"/>
+  <rect x="9" y="20" width="30" height="22" rx="7" fill="#FFD700" stroke="#2D1B4E" stroke-width="2.5"/>
+  <circle cx="24" cy="29.5" r="3.2" fill="#2D1B4E"/>
+  <rect x="22.6" y="31" width="2.8" height="6.5" rx="1.4" fill="#2D1B4E"/>
+</svg>'''
+
 SVG_QUESTION = '''<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
   <path d="M24 6 C13.5 6 6 12.8 6 21.5 C6 27 9 31.5 13.5 34.2 L11.5 41.5 L20 37 C21.3 37.2 22.6 37.3 24 37.3 C34.5 37.3 42 30.4 42 21.6 C42 12.8 34.5 6 24 6 Z" fill="#00D4AA" stroke="#2D1B4E" stroke-width="2.5" stroke-linejoin="round"/>
   <path d="M18.5 18.5 C18.5 15 21 13 24.2 13 C27.4 13 29.8 15 29.8 18 C29.8 20.3 28.5 21.5 26.9 22.6 C25.5 23.6 25 24.3 25 26 L22.3 26 C22.3 23.4 23.2 22.2 24.9 21 C26.3 20 26.9 19.2 26.9 18 C26.9 16.5 25.8 15.6 24.2 15.6 C22.5 15.6 21.4 16.6 21.3 18.5 Z" fill="#2D1B4E"/>
@@ -95,6 +105,12 @@ def _sparkle(color="#FFD700", size=20):
 
 def _svg_inline(svg_str, width=60):
     return f'<span style="display:inline-block;width:{width}px;vertical-align:middle">{svg_str}</span>'
+
+
+def _mini_vinyl(size=12):
+    """行內迷你黑膠（取代 💿）：縮到文字行高內、微降 2px 對齊 x-height。"""
+    return (f'<span style="display:inline-block;width:{size}px;height:{size}px;'
+            f'vertical-align:-2px">{SVG_VINYL}</span>')
 
 
 
@@ -171,9 +187,11 @@ p, li, label, [data-testid="stText"],
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
 }}
 /* ⚠️ 排除清單漏掉任何一種 Material 圖示 span，那種圖示就會被 Nunito 蓋掉字型、
-   連字失效顯示成文字（例如「music_note」）。expander 的圖示 testid 是
-   stExpanderIcon，跟 pills/按鈕的 stIconMaterial 不同，2026-08 實測踩過 */
-span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*="material"]):not([data-testid="stIconMaterial"]):not([data-testid="stExpanderIcon"]) {{
+   連字失效顯示成文字（例如「music_note」）。目前已知三種變體（都實測踩過）：
+   ① pills/按鈕的 stIconMaterial ② expander 的 stExpanderIcon
+   ③ markdown 行內（caption/標籤/標題內的 :material/xxx:）＝無 class 無 testid，
+     只有 translate="no" 屬性可以認 */
+span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*="material"]):not([data-testid="stIconMaterial"]):not([data-testid="stExpanderIcon"]):not([translate="no"]) {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
 }}
 
@@ -346,6 +364,11 @@ br.y2k-mbr {{ display: none; }}
     width: auto !important;
     min-width: 0 !important;
 }}
+/* 題目改成氣泡＋文字的 <div> 後沒有 <p> 的 16px 下邊距可以抵銷 stMarkdownContainer
+   的 -16px 負邊界，內容盒矮了 16px、欄位置中因此歪 8px——把負邊界歸零 */
+.st-key-proj_row [data-testid="stMarkdownContainer"] {{
+    margin-bottom: 0 !important;
+}}
 
 /* ── 垂直間距三級制（8 / 16 / 32）──────────────────
    原本混用了三套機制：Streamlit 垂直區塊的 flex gap(16px)、自己插的 .y2k-gap 空 div、
@@ -459,6 +482,8 @@ h2.y2k-form-title {{ font-size: 2.4rem !important; }}
    四個摺疊區各配一個糖果色。selector 綁 key，改 key 名要一起改這裡。
    ⚠️ expander 圖示的 testid 是 stExpanderIcon（不是 stIconMaterial）——
    它的字型由上方 span 全域規則的 :not() 排除清單保護，見那條規則的註解 */
+/* 圖示行高固定 1：行高繼承 1.6 會把連字字圖抬離盒中心，按鈕裡看起來偏上 */
+[data-testid="stIconMaterial"], [data-testid="stExpanderIcon"] {{ line-height: 1 !important; }}
 .st-key-exp_songs [data-testid="stExpanderIcon"] {{ color: var(--y2k-pink) !important; }}
 .st-key-exp_music [data-testid="stExpanderIcon"] {{ color: #00A88A !important; }}
 .st-key-exp_mood [data-testid="stExpanderIcon"] {{ color: #E0A800 !important; }}
@@ -711,7 +736,7 @@ def context_interpretation_html(text):
   box-shadow:4px 4px 0px rgba(155,89,182,0.2);
   background:linear-gradient(135deg,#FFF0F5,#FFFDF7)">
   <div style="display:flex;align-items:center;gap:10px">
-    <span style="font-size:1.6rem;line-height:1;display:flex;align-items:center">💭</span>
+    <span style="display:flex;align-items:center">{_sparkle('#9B59B6', 24)}</span>
     <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:700;font-size:0.8rem;
       color:#9B59B6;text-transform:uppercase;letter-spacing:1px;line-height:1">AI 情境解讀</span>
   </div>
@@ -745,13 +770,14 @@ def track_card_html(track, index, compact_badge=False):
         f'border:3px solid #2D1B4E;display:block" />'
         if cover_url
         else '<div style="width:100%;aspect-ratio:1;background:#FFF0F5;border-radius:12px;'
-        'border:3px solid #2D1B4E;display:flex;align-items:center;justify-content:center;'
-        'font-size:2rem">🎵</div>'
+        'border:3px solid #2D1B4E;display:flex;align-items:center;justify-content:center">'
+        f'<span style="display:inline-block;width:55%">{SVG_NOTES}</span></div>'
     )
 
     album_html = (
         f'<div style="font-size:0.75rem;color:#9B59B6;margin-top:2px;'
-        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">💿 {album}</div>'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        f'{_mini_vinyl()} {album}</div>'
         if album
         else ""
     )
@@ -763,7 +789,7 @@ def track_card_html(track, index, compact_badge=False):
         f"font-weight:700;color:{accent_text};background:{accent};"
         f"font-family:'Nunito','Noto Sans TC',sans-serif;"
         f'border:1.5px solid #2D1B4E;max-width:100%;overflow:hidden;'
-        f'text-overflow:ellipsis;white-space:nowrap">💡 {reason}</span></div>'
+        f'text-overflow:ellipsis;white-space:nowrap">{reason}</span></div>'
         if reason
         else ""
     )
@@ -806,11 +832,11 @@ def track_list_html(track, index):
         f'border:3px solid #2D1B4E;display:block" />'
         if cover_url
         else '<div style="width:60px;height:60px;background:#FFF0F5;border-radius:10px;'
-        'border:3px solid #2D1B4E;display:flex;align-items:center;justify-content:center;'
-        'font-size:1.4rem">🎵</div>'
+        'border:3px solid #2D1B4E;display:flex;align-items:center;justify-content:center">'
+        f'<span style="display:inline-block;width:34px">{SVG_NOTES}</span></div>'
     )
 
-    album_part = f"💿 {album}　·　" if album else ""
+    album_part = f"{_mini_vinyl()} {album}　·　" if album else ""
     disc_part = _discovery_badge_html(track, floating=False)
 
     return f"""<div style="display:flex;align-items:center;gap:14px;padding:10px 14px;
@@ -826,7 +852,7 @@ def track_list_html(track, index):
       <span style="font-weight:400;color:#666"> — {artist}</span>
     </div>
     <div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.78rem;color:#888;margin-top:2px">
-      {disc_part}{album_part}💡 {reason}
+      {disc_part}{album_part}{reason}
     </div>
   </div>
 </div>"""
@@ -901,7 +927,7 @@ def _byok_step_rows(steps, *, last_has_border: bool = True) -> str:
     box-shadow:2px 2px 0 #2D1B4E">{num}</div>
   <div style="flex:1;min-width:0">
     <div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;
-      font-size:0.95rem;color:#2D1B4E;margin-bottom:4px">{icon} {title}</div>
+      font-size:0.95rem;color:#2D1B4E;margin-bottom:4px">{title}</div>
     <div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.87rem;
       color:#444;line-height:1.6">{desc}</div>
   </div>
@@ -942,10 +968,10 @@ def byok_spotify_steps_tail_html() -> str:
 
 
 def byok_privacy_badge_html() -> str:
-    return """
+    return f"""
 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;
   border-radius:12px;background:#F0FFF8;margin:8px 0 4px 0">
-  <span style="font-size:1.2rem">🔒</span>
+  <span style="display:inline-block;width:22px;flex:0 0 auto">{SVG_LOCK}</span>
   <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-size:0.83rem;
     color:#2D1B4E;line-height:1.5">
     你填的 Keys 僅存在<strong>瀏覽器分頁記憶體</strong>中，關閉分頁即消失，不會被儲存下來。
