@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（105）+ `test_spotify_api.py`（27）+ `test_styles.py`（9）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 194 tests
+- **測試**：`test_recommend.py`（105）+ `test_spotify_api.py`（27）+ `test_styles.py`（12）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 197 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 194 tests，改任何 .py 都要跑
+python -m pytest -q                     # 197 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -419,6 +419,24 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 --y2k-lavender: #FFF0F5
 ```
 
+### 圖示系統：兩層制（2026-08-21，取代全站 emoji）
+設計稿（Claude Design 畫布）：https://claude.ai/code/artifact/d2fc1112-59da-4c0b-8fd7-e63461e53725
+- **A 層＝自繪貼紙 SVG**（我們自己輸出 HTML 的區塊）：糖果填色＋深紫描邊，與卡帶／
+  黑膠同一家。`SVG_CLIPBOARD`（複製歌單標題，走 `section_header_html(icon="clipboard")`）、
+  `SVG_QUESTION`（投射問題統一圖示，`projective_question_html()`；**30 題的題目
+  文字已不帶 emoji**）。新增 SVG 照「SVG 常數」那節的連通分量品管；
+  **描邊要用「輪廓層＋填色層」的聯集畫法**——兩個形狀各自描邊，銜接處會露出
+  互相穿過的接縫（音符的符頭×符桿實測踩過，修法見設計稿）。
+- **B 層＝Material Symbols Rounded**（原生元件塞不進 SVG，只吃 `:material/xxx:`）：
+  回饋 pills（thumb_up／thumb_down／headphones，對照表在 app.py 的
+  `_FB_STATE_BY_LABEL`）、生成按鈕（auto_awesome；額度用完 hourglass_top）、
+  四個 expander（tune／music_note／mood／psychology，`icon=` 參數）、換一題（refresh）。
+- ⚠️ **兩種 testid**：pills／按鈕的圖示是 `stIconMaterial`，expander 的是
+  `stExpanderIcon`。全域 span 的 Nunito `!important` 規則靠 `:not()` 清單排除它們——
+  **排除清單漏掉哪種，那種圖示就會連字失效、顯示成文字「music_note」**（實測踩過）。
+- expander 圖示的染色 CSS 綁 key（`.st-key-exp_music …`），改 key 名要同步改。
+- 量測：Material 版 pills 寬 133px（emoji 版 134）、等高網格、手機 375px 皆不受影響。
+
 ### .streamlit/config.toml
 ```toml
 [theme]
@@ -577,7 +595,8 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   當時的實作（含網域字尾偽裝測試）在 git 歷史 `5f2db78`。
 
 ### 使用者回饋（👍/👎/🎧，2026-08，兩種模式都有）
-- 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：👍 喜歡、👎 不合、🎧 早就聽過。
+- 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：喜歡／不合／早就聽過
+  （標籤是 `:material/thumb_up:` 等，對照表 `_FB_STATE_BY_LABEL`，見「圖示系統」）。
   **真相來源是 `st.session_state["track_feedback"]`**（dict，key=`fb::`+`_track_key`）——
   它撐得過重新生成與檢視切換；widget state 只是 UI 快照，**Streamlit 會回收
   「這一輪沒渲染的 widget」的 state**（生成中結果區整段不渲染就會發生），
@@ -773,11 +792,11 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 
 ```
 第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → ✨ 生成按鈕
-第二層（摺疊 expander） ⚙️ 推薦歌曲數 · 🎵 音樂偏好 · 😊 現在的心情 · 🧠 關於你
+第二層（摺疊 expander） 推薦歌曲數 · 音樂偏好 · 現在的心情 · 關於你（圖示走 Material，見「圖示系統」）
 （活動情境 pills 已於 2026-08 移除——與「分享一下你的日常吧」文字欄重複）
 ```
 
-- **摺疊標題帶即時摘要**（`🎵 音樂偏好　·　日語 · Jazz`）。摘要必須在 expander 建立**之前**算好，
+- **摺疊標題帶即時摘要**（`音樂偏好　·　日語 · Jazz`）。摘要必須在 expander 建立**之前**算好，
   所以一律從 `st.session_state` 讀值——因此**每個 widget 都必須有 `key=`**，新增欄位時別忘了。
 - ⚠️ **每個 expander 也必須有自己的 `key=`**（`exp_songs` / `exp_music` / `exp_mood` / `exp_traits`）。
   沒有 key 時 Streamlit 用標題文字認元件，摘要一變就被當成新元件重建、摺疊狀態歸零——
@@ -816,7 +835,7 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
   `consume_oauth_callback()` 把 `?error=` 或 token 交換例外寫進 `st.session_state["spotify_auth_error"]`，
   登入頁只在有值時 `st.warning()`。首頁平常只留一行「🔒 Token 只存在瀏覽器分頁記憶體」。
 - expander 內距 `[data-testid="stExpanderDetails"]` 上下各 1.35rem（21.6px），0.75rem 太擠。
-- 「⚙️ 推薦歌曲數」緊接在生成按鈕下方（程式碼也放在 `generate_slot` 之後、其他 expander 之前）。
+- 「推薦歌曲數」緊接在生成按鈕下方（程式碼也放在 `generate_slot` 之後、其他 expander 之前）。
   清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
 - ⚠️ 別再用 `st.session_state["mbti"] = ...` 手動寫入——widget 有 `key` 時 Streamlit 會報錯。
 
@@ -927,7 +946,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | feat: 幻覺補救 repair-on-miss（搜不到→同歌手真實深軌替換，含跨使用者目錄快取；artist_albums limit 上限實測只剩 10）、訪客 fame 天花板（兩段式、只壓國民金曲層級、數量永不縮水）、驗收流程（eval_bench.py＋EVAL.md＋[FEEDBACK] log）；chore: use_container_width → width="stretch"（11 處，import 零棄用警告） |
+| （工作區，尚未 commit） | feat: Y2K 圖示系統兩層制取代全站 emoji——A 層自繪貼紙 SVG（剪貼板＋題目氣泡；投射問題 30 題去 emoji 統一用氣泡）、B 層 Material Rounded 染色（pills/生成鈕/四個 expander/換一題）；⚠️ expander 圖示 testid 是 stExpanderIcon 且會被全域 Nunito 蓋掉連字（:not() 排除清單要含它）。設計稿 artifact d2fc1112 |
+| `5c70d25` | feat: 幻覺補救 repair-on-miss（搜不到→同歌手真實深軌替換，含跨使用者目錄快取；artist_albums limit 上限實測只剩 10）、訪客 fame 天花板（兩段式、只壓國民金曲層級、數量永不縮水）、驗收流程（eval_bench.py＋EVAL.md＋[FEEDBACK] log）；chore: use_container_width → width="stretch"（11 處，import 零棄用警告） |
 | `081d791` | copy: 結果區「複製或分享歌單」→「複製歌單」；docs: Apple Music 曲目直連調查定案不做（iTunes Search API 中文召回率極差，見「播放平台選擇」段） |
 | `5b88680` | feat: 投射問題題庫 15 → 30、「換一題」改洗牌輪替（整輪出完才重洗、跨輪不連續同題）——舊版 random.choice 換題會回鍋、15 題池子開 5 次頁面約五成機率撞題 |
 | `72bf444` | revert: 撤除播放點擊中繼——Streamlit Cloud 的 app iframe sandbox 沒有 allow-top-navigation，轉導必被平台 X-Frame-Options 擋成「拒絕連線」（見「播放點擊計數」段的驗屍報告），播放按鈕回退直連；feat: 移除 IG 分享圖卡功能（share_card.py 刪除，Pillow 因上傳路徑仍保留釘版） |

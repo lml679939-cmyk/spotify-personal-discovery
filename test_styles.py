@@ -54,6 +54,28 @@ def test_step_card_html_takes_no_user_data_at_all():
         assert not inspect.signature(fn).parameters, f"{fn.__name__} 不該接受任何參數"
 
 
+# ── Y2K 圖示系統（2026-08-21）─────────────────────────────
+def test_projective_question_html_uses_bubble_and_escapes():
+    out = styles.projective_question_html("你窗外現在看到什麼？")
+    assert "svg" in out and "你窗外現在看到什麼？" in out
+    # 題目雖然是自家常數，仍要 escape——哪天改成可自訂就不會變成注入面
+    evil = styles.projective_question_html('<img src=x onerror="alert(1)">')
+    assert "<img" not in evil and "&lt;img" in evil
+
+
+def test_projective_question_html_no_codeblock_trigger():
+    # Streamlit 會把縮排 4 空白的行當程式碼區塊、空行會斷開 HTML
+    out = styles.projective_question_html("題目")
+    assert not any(line.startswith(("    ", "\t")) for line in out.splitlines())
+    assert "" not in out.splitlines()
+
+
+def test_section_header_supports_clipboard_icon():
+    out = styles.section_header_html("複製歌單", icon="clipboard")
+    assert "複製歌單" in out
+    assert 'viewBox="0 0 48 48"' in out   # 用的是新剪貼板，不是 fallback 的音符
+
+
 def test_redirect_uri_appears_nowhere_in_the_injected_html():
     combined = styles.byok_spotify_steps_head_html() + styles.byok_spotify_steps_tail_html()
     for marker in ("127.0.0.1", "streamlit.app", "redirect_uri", "data-copy-uri"):

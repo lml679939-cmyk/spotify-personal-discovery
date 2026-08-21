@@ -117,39 +117,40 @@ GENRE_OPTIONS = [
 # MAX_TRACKS_PER_ARTIST / HISTORY_KEEP 在 recommend.py；PERSISTENT_HISTORY_MAX 在 spotify_api.py
 AUTO_CONTEXT_TTL = 600      # 位置/天氣快取秒數（10 分鐘）
 
+# 題目不再帶 emoji——圖示統一用 styles.SVG_QUESTION 題目氣泡（2026-08-21 圖示系統定案）
 PROJECTIVE_QUESTIONS = [
-    "📱 你手機現在的桌布是什麼？",
-    "🖼️ 你相簿中最新一張照片裡有什麼？",
-    "💬 你剛剛 LINE / 訊息最後傳了什麼？",
-    "🔍 最近一次 Google 搜尋了什麼？",
-    "🎬 最近讓你印象最深的一個畫面（電影/影集/現實）是？",
-    "☕ 你現在桌上有什麼東西？",
-    "😂 上次讓你笑出聲的東西是？",
-    "💭 最近腦中一直循環的一句話或歌詞？",
-    "🌙 昨晚的夢（如果記得）是什麼？",
-    "📚 最近在看的書/影集/YouTube 是？",
-    "👕 你今天穿什麼顏色的衣服？",
-    "🪟 你窗外現在看到什麼？",
-    "🍴 你今天最想吃什麼？",
-    "🧍 你最近一次發呆是在想什麼？",
-    "🎒 如果現在出門你會帶什麼？",
+    "你手機現在的桌布是什麼？",
+    "你相簿中最新一張照片裡有什麼？",
+    "你剛剛 LINE / 訊息最後傳了什麼？",
+    "最近一次 Google 搜尋了什麼？",
+    "最近讓你印象最深的一個畫面（電影/影集/現實）是？",
+    "你現在桌上有什麼東西？",
+    "上次讓你笑出聲的東西是？",
+    "最近腦中一直循環的一句話或歌詞？",
+    "昨晚的夢（如果記得）是什麼？",
+    "最近在看的書/影集/YouTube 是？",
+    "你今天穿什麼顏色的衣服？",
+    "你窗外現在看到什麼？",
+    "你今天最想吃什麼？",
+    "你最近一次發呆是在想什麼？",
+    "如果現在出門你會帶什麼？",
     # ── 2026-08 擴充 15 → 30：跨 session 的第一題是隨機抽的，15 題的池子
     #    生日效應很兇（開 5 次頁面約五成機率撞題），加倍直接砍半 ──
-    "🚌 通勤或移動時你通常在做什麼？",
-    "🛒 最近買的一樣東西是什麼？",
-    "⏰ 你今天是被什麼叫醒的？",
-    "🚶 上一次散步是在哪裡？",
-    "📺 睡前最後滑的是什麼？",
-    "🌦️ 用一種天氣形容今天的自己？",
-    "🧺 你房間最亂的角落現在堆著什麼？",
-    "🍜 最近一次吃到「就是這個！」的東西是？",
-    "📅 這週你最期待的一件事是？",
-    "🎁 如果現在收到一個禮物，你希望是什麼？",
-    "🔁 你最近重看／重玩／重聽了什麼？",
-    "🕯️ 你最喜歡的氣味是什麼？（雨後/咖啡/香水…）",
-    "🛋️ 理想的週末下午你會怎麼過？",
-    "📸 如果現在拍一張照，你會拍什麼？",
-    "🗺️ 現在最想逃去哪裡？",
+    "通勤或移動時你通常在做什麼？",
+    "最近買的一樣東西是什麼？",
+    "你今天是被什麼叫醒的？",
+    "上一次散步是在哪裡？",
+    "睡前最後滑的是什麼？",
+    "用一種天氣形容今天的自己？",
+    "你房間最亂的角落現在堆著什麼？",
+    "最近一次吃到「就是這個！」的東西是？",
+    "這週你最期待的一件事是？",
+    "如果現在收到一個禮物，你希望是什麼？",
+    "你最近重看／重玩／重聽了什麼？",
+    "你最喜歡的氣味是什麼？（雨後/咖啡/香水…）",
+    "理想的週末下午你會怎麼過？",
+    "如果現在拍一張照，你會拍什麼？",
+    "現在最想逃去哪裡？",
 ]
 
 
@@ -703,9 +704,12 @@ if "projective_q" not in st.session_state:
 with st.container(key="proj_row"):
     proj_col1, proj_col2 = st.columns([3, 2], vertical_alignment="center")
     with proj_col1:
-        st.markdown(f"**{st.session_state['projective_q']}**")
+        st.markdown(
+            styles.projective_question_html(st.session_state["projective_q"]),
+            unsafe_allow_html=True,
+        )
     with proj_col2:
-        if st.button("🔄 換一題"):
+        if st.button("換一題", icon=":material/refresh:"):
             _q, _rest = _rotate_projective(
                 st.session_state.get("proj_order") or [],
                 st.session_state["projective_q"],
@@ -734,7 +738,8 @@ _setting_sum = f"{st.session_state.get('num_songs', 15)} 首"
 if not is_guest_mode():
     _setting_sum += f" · 新藝人 {st.session_state.get('new_artist_ratio', 70)}%"
 
-with st.expander(f"⚙️ 推薦歌曲數　·　{_setting_sum}", expanded=False, key="exp_songs"):
+with st.expander(f"推薦歌曲數　·　{_setting_sum}", expanded=False,
+                 key="exp_songs", icon=":material/tune:"):
     if is_guest_mode():
         num_songs = st.slider(
             "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
@@ -822,7 +827,8 @@ _music_sum = _summary(
     "不限語言與曲風",
 )
 
-with st.expander(f"🎵 音樂偏好　·　{_music_sum}", expanded=False, key="exp_music"):
+with st.expander(f"音樂偏好　·　{_music_sum}", expanded=False,
+                 key="exp_music", icon=":material/music_note:"):
     languages = st.pills(
         "想聽哪些語言的歌？（可複選；不選代表不限）",
         options=LANGUAGE_OPTIONS,
@@ -851,7 +857,8 @@ _mood_sum = _summary(
     "",
 )
 
-with st.expander(f"😊 現在的心情　·　{_mood_sum}", expanded=False, key="exp_mood"):
+with st.expander(f"現在的心情　·　{_mood_sum}", expanded=False,
+                 key="exp_mood", icon=":material/mood:"):
     mood_col1, mood_col2 = st.columns(2)
     with mood_col1:
         mood_energy = st.slider(
@@ -877,7 +884,8 @@ _traits_sum = _summary(
     "未填",
 )
 
-with st.expander(f"🧠 關於你　·　{_traits_sum}", expanded=False, key="exp_traits"):
+with st.expander(f"關於你　·　{_traits_sum}", expanded=False,
+                 key="exp_traits", icon=":material/psychology:"):
     st.caption("選填。不同性格／星座的音樂偏好取向不太一樣，AI 會納入考量。")
     mbti = st.selectbox("MBTI 性格類型", MBTI_TYPES, key="mbti")
     col_bt, col_zd = st.columns(2)
@@ -897,7 +905,8 @@ _rl_exhausted = not _rl_ok and not _rl_wait
 # 回一個準確的秒數；點擊本身就會觸發重跑，狀態永遠是新的。
 # 每日上限則相反：它持續 24 小時，disable 不會有卡住的問題，而且明確擋住比較清楚。
 _clicked = generate_slot.button(
-    "🚦 今日次數已用完" if _rl_exhausted else "✨ 生成推薦歌單",
+    "今日次數已用完" if _rl_exhausted else "生成推薦歌單",
+    icon=":material/hourglass_top:" if _rl_exhausted else ":material/auto_awesome:",
     type="primary",
     width="stretch",
     key="btn_generate",
@@ -1272,7 +1281,7 @@ if _clicked:
                             _why.append(f"{_novelty['spare_used']} 首在 Spotify 找不到（只附搜尋連結）")
                         # 建議要對得上真正的主因，不然會出現「歷史太滿」卻叫人調新藝人佔比
                         if _hist_dup >= max(1, _novelty["candidates"] // 3):
-                            _advice = "想要更多首可以到「⚙️ 推薦歌曲數」裡清除推薦歷史。"
+                            _advice = "想要更多首可以到「推薦歌曲數」裡清除推薦歷史。"
                         elif new_artist_ratio > 0:
                             _advice = "想要更多首可以把「新藝人佔比」調低一點。"
                         else:
@@ -1297,7 +1306,7 @@ if _clicked:
                         f"過濾後這次只湊到 {_playable(found, _novelty)} 首"
                         f"（原本要 {num_songs} 首）："
                         + (f"扣掉了{'、'.join(_why)}。" if _why else "AI 給的可用候選不足。")
-                        + "想要更多首可以到「⚙️ 推薦歌曲數」裡清除推薦歷史，或換個情境再生成一次。"
+                        + "想要更多首可以到「推薦歌曲數」裡清除推薦歷史，或換個情境再生成一次。"
                     )
 
                 st.session_state["novelty_notice"] = _notices
@@ -1442,8 +1451,13 @@ if "found" in st.session_state and st.session_state.found:
     # 它撐得過重新生成與檢視切換；widget state 只是 UI 快照，Streamlit 對
     # 「這一輪沒渲染的 widget」會回收 state（生成中結果區整段不渲染就會發生），
     # 所以每次渲染前先從 dict 把選取值 seed 回 widget key。
-    _FB_STATE_BY_EMOJI = {"👍": "like", "👎": "dislike", "🎧": "heard"}
-    _FB_EMOJI_BY_STATE = {v: k for k, v in _FB_STATE_BY_EMOJI.items()}
+    # pills 是原生元件，圖示只能走 :material/xxx:（B 層圖示系統，2026-08-21）
+    _FB_STATE_BY_LABEL = {
+        ":material/thumb_up:": "like",
+        ":material/thumb_down:": "dislike",
+        ":material/headphones:": "heard",
+    }
+    _FB_LABEL_BY_STATE = {v: k for k, v in _FB_STATE_BY_LABEL.items()}
 
     def _feedback_key(track: dict) -> str:
         return "fb::" + "||".join(
@@ -1455,12 +1469,12 @@ if "found" in st.session_state and st.session_state.found:
         k = _feedback_key(track)
         wkey = "w_" + k
         if wkey not in st.session_state and k in fb:
-            st.session_state[wkey] = _FB_EMOJI_BY_STATE.get(fb[k]["state"])
+            st.session_state[wkey] = _FB_LABEL_BY_STATE.get(fb[k]["state"])
         sel = st.pills(
-            "回饋", options=list(_FB_STATE_BY_EMOJI), selection_mode="single",
+            "回饋", options=list(_FB_STATE_BY_LABEL), selection_mode="single",
             key=wkey, label_visibility="collapsed",
         )
-        state = _FB_STATE_BY_EMOJI.get(sel or "")
+        state = _FB_STATE_BY_LABEL.get(sel or "")
         if state:
             fb[k] = {
                 "title": track.get("name") or track.get("title", ""),
@@ -1474,8 +1488,9 @@ if "found" in st.session_state and st.session_state.found:
     _fb_visible = view_mode != "網格" or cols_per_row <= 5
     if _fb_visible:
         st.caption(
-            "每首歌都可以回饋：👍 喜歡（下次多推相鄰的）・👎 不合胃口（避開類似方向）・"
-            "🎧 早就聽過（下次推更新的）——下次生成會帶給 AI 參考"
+            "每首歌都可以回饋：:material/thumb_up: 喜歡（下次多推相鄰的）・"
+            ":material/thumb_down: 不合胃口（避開類似方向）・"
+            ":material/headphones: 早就聽過（下次推更新的）——下次生成會帶給 AI 參考"
         )
 
     if view_mode == "網格":
@@ -1531,6 +1546,6 @@ if "found" in st.session_state and st.session_state.found:
 
     # ── 複製歌單 ─────────────────────────────────────────
     st.divider()
-    st.subheader("📋 複製歌單")
+    st.markdown(styles.section_header_html("複製歌單", icon="clipboard"), unsafe_allow_html=True)
     st.caption(f"點擊右上角複製圖示即可一鍵複製（含 {play_platform} 連結）")
     st.code(_share_text, language=None)

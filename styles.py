@@ -68,6 +68,26 @@ SVG_SPARKLE = '''<svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
   <path d="M15 2 L17.5 12 L28 15 L17.5 18 L15 28 L12.5 18 L2 15 L12.5 12Z" fill="{color}"/>
 </svg>'''
 
+# ── Y2K 圖示系統（2026-08-21 提案定案）────────────────────
+# 造型文法：糖果色填色＋深紫描邊、一主色至多一輔色（與卡帶／黑膠同一家）。
+# 設計稿：https://claude.ai/code/artifact/d2fc1112-59da-4c0b-8fd7-e63461e53725
+SVG_CLIPBOARD = '''<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="7" width="32" height="36" rx="6" fill="#FFD700" stroke="#2D1B4E" stroke-width="2.5"/>
+  <rect x="13" y="13" width="22" height="26" rx="3" fill="#FFFDF7" stroke="#2D1B4E" stroke-width="2"/>
+  <rect x="17" y="3.5" width="14" height="9" rx="4" fill="#FF69B4" stroke="#2D1B4E" stroke-width="2.5"/>
+  <line x1="17.5" y1="21" x2="30.5" y2="21" stroke="#9B59B6" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="17.5" y1="27" x2="30.5" y2="27" stroke="#9B59B6" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="17.5" y1="33" x2="25.5" y2="33" stroke="#00D4AA" stroke-width="2.5" stroke-linecap="round"/>
+</svg>'''
+
+# 題目氣泡：投射問題的統一圖示（原本 30 題每題一顆 emoji，定案改一致性優先）。
+# 問號用 <path> 不用 <text>——SVG text 依賴頁面字型載入時序，位置也會隨字型抖動
+SVG_QUESTION = '''<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <path d="M24 6 C13.5 6 6 12.8 6 21.5 C6 27 9 31.5 13.5 34.2 L11.5 41.5 L20 37 C21.3 37.2 22.6 37.3 24 37.3 C34.5 37.3 42 30.4 42 21.6 C42 12.8 34.5 6 24 6 Z" fill="#00D4AA" stroke="#2D1B4E" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M18.5 18.5 C18.5 15 21 13 24.2 13 C27.4 13 29.8 15 29.8 18 C29.8 20.3 28.5 21.5 26.9 22.6 C25.5 23.6 25 24.3 25 26 L22.3 26 C22.3 23.4 23.2 22.2 24.9 21 C26.3 20 26.9 19.2 26.9 18 C26.9 16.5 25.8 15.6 24.2 15.6 C22.5 15.6 21.4 16.6 21.3 18.5 Z" fill="#2D1B4E"/>
+  <circle cx="23.7" cy="30" r="1.9" fill="#2D1B4E"/>
+</svg>'''
+
 def _sparkle(color="#FFD700", size=20):
     svg = SVG_SPARKLE.replace("{color}", color)
     return f'<span style="display:inline-block;width:{size}px;height:{size}px;vertical-align:middle">{svg}</span>'
@@ -150,7 +170,10 @@ p, li, label, [data-testid="stText"],
 [data-testid="stCaptionContainer"] {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
 }}
-span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*="material"]):not([data-testid="stIconMaterial"]) {{
+/* ⚠️ 排除清單漏掉任何一種 Material 圖示 span，那種圖示就會被 Nunito 蓋掉字型、
+   連字失效顯示成文字（例如「music_note」）。expander 的圖示 testid 是
+   stExpanderIcon，跟 pills/按鈕的 stIconMaterial 不同，2026-08 實測踩過 */
+span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*="material"]):not([data-testid="stIconMaterial"]):not([data-testid="stExpanderIcon"]) {{
     font-family: 'Nunito', 'Noto Sans TC', sans-serif !important;
 }}
 
@@ -430,6 +453,17 @@ h2.y2k-form-title {{ font-size: 2.4rem !important; }}
     height: 100%;
 }}
 
+/* ── Material 圖示染色（B 層圖示系統）─────────
+   原生元件（pills/按鈕/expander）塞不進自繪 SVG，只吃 :material/xxx:，
+   用 CSS 統一染色讓它們跟 A 層貼紙同一家。預設繼承文字色（深紫／主 CTA 白），
+   四個摺疊區各配一個糖果色。selector 綁 key，改 key 名要一起改這裡。
+   ⚠️ expander 圖示的 testid 是 stExpanderIcon（不是 stIconMaterial）——
+   它的字型由上方 span 全域規則的 :not() 排除清單保護，見那條規則的註解 */
+.st-key-exp_songs [data-testid="stExpanderIcon"] {{ color: var(--y2k-pink) !important; }}
+.st-key-exp_music [data-testid="stExpanderIcon"] {{ color: #00A88A !important; }}
+.st-key-exp_mood [data-testid="stExpanderIcon"] {{ color: #E0A800 !important; }}
+.st-key-exp_traits [data-testid="stExpanderIcon"] {{ color: var(--y2k-purple) !important; }}
+
 /* ── Text inputs ────────────── */
 .stTextInput input, .stTextArea textarea,
 [data-testid="stTextInput"] input,
@@ -558,8 +592,24 @@ def _discovery_badge_html(track, *, floating: bool, compact: bool = False) -> st
     )
 
 
+def projective_question_html(question):
+    """投射問題那一行：統一的題目氣泡 + 粗體題目文字。
+
+    題目來自我們自己的常數，但照樣 escape——哪天題目改成可自訂就不會變成注入面。
+    輸出保持單行、無縮排（Streamlit 會把縮排行當程式碼區塊）。
+    """
+    q = html_mod.escape(question)
+    return (
+        '<div style="display:flex;align-items:center;gap:10px">'
+        f'<span style="display:inline-block;width:26px;height:26px;flex:0 0 auto">{SVG_QUESTION}</span>'
+        f'<span style="font-family:\'Nunito\',\'Noto Sans TC\',sans-serif;font-weight:900;font-size:1rem;color:#2D1B4E">{q}</span>'
+        "</div>"
+    )
+
+
 def section_header_html(text, icon="notes"):
-    svg_map = {"notes": SVG_NOTES, "vinyl": SVG_VINYL, "cassette": SVG_CASSETTE, "boombox": SVG_BOOMBOX}
+    svg_map = {"notes": SVG_NOTES, "vinyl": SVG_VINYL, "cassette": SVG_CASSETTE,
+               "boombox": SVG_BOOMBOX, "clipboard": SVG_CLIPBOARD}
     svg = svg_map.get(icon, SVG_NOTES)
     return f"""<div style="display:flex;align-items:center;gap:12px;margin:1.2rem 0 0.6rem 0">
   <span style="display:inline-block;width:50px">{svg}</span>
