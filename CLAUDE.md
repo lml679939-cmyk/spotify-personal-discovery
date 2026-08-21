@@ -9,7 +9,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（105）+ `test_spotify_api.py`（27）+ `test_styles.py`（13）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 198 tests
+- **測試**：`test_recommend.py`（105）+ `test_spotify_api.py`（27）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 199 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -23,7 +23,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 198 tests，改任何 .py 都要跑
+python -m pytest -q                     # 199 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -500,8 +500,14 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - 曲目卡的理由標籤文字色走 `_ACCENT_TEXT_COLORS`（亮底配深紫、深底配白）——
   白字壓黃底只有 1.4:1，改後最差 4.67:1，四色全數通過 WCAG AA。
 - 登入卡片 `_method_card_html()`：`display:flex;flex-direction:column;justify-content:center`
-  讓內容在 `min-height:130px` 內垂直置中；標題在全形冒號後插 `<br class="y2k-mbr">`，
-  該 `<br>` 桌機 `display:none`、手機 `display:inline`，避免「方式一：直接開始（推薦，免」硬斷。
+  讓內容在 `min-height:130px` 內垂直置中。標題單行——舊的 `y2k-mbr` 手機強制斷行
+  機制已移除（2026-08-22）：那是標題還帶「（推薦，免登入）」時防硬斷用的，
+  縮短後手機 375px 實測單行 29px 放得下。
+- **登入 hero 與表單 hero 的「圖示→標題」間距一致**（使用者指定以表單版為準）：
+  對齊的是「圖示墨水底 → 文字頂」的視覺間距（兩邊皆 13px），不是 CSS 數字——
+  兩組 SVG 在 viewBox 裡的留白不同，登入版 margin-bottom=17px 是量測校準值。
+  ⚠️ 自繪 HTML 的標題**一定要寫 `padding:0`**：Streamlit 的 `.stMarkdown h1/h2`
+  預設帶 padding，不歸零標題上方會多墊一截。
 - **垂直間距走三級制（8 / 16 / 32）**，`.y2k-gap` 空 div 已移除。
   過去混用三套機制（Streamlit 垂直區塊的 flex `gap:1rem`、`.y2k-gap` 空 div、
   `stMarkdownContainer` 的 -16px 負邊界），相加後手機上量到 16/20/26/32/41/49 六種間距。
@@ -827,6 +833,10 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
   新增題目時維持「投射」性質——問具體小事（桌布/窗外/最後一則訊息），
   讓 AI 從回答反推狀態與生活風格，不要出直白的「你現在心情如何」。
 - 兩欄情境輸入的高度要手動對齊：`text_area(height=106)` 對上 file_uploader 的實際高度（量出來 104±2）。
+  標題由 `styles.context_label_html()` 統一產出（2026-08-22 起帶對話氣泡圖示 `SVG_CHAT`，
+  版式同投射問題；左欄與右欄佔位**必須同一個 helper**，內容一致換行才一致）；
+  它是 `<div>` 不是 `<p>`，`stMarkdownContainer` 的 -16px 負邊界要用
+  `:has(.y2k-ctx-label)` 歸零，否則 textarea 會上移 16px 蓋到標題（量測後間距 9px）。
   右欄的標題已併進左欄那句「分享一下你的日常吧（也可以上傳圖片給 AI 分析）」，
   括號補充包在 `<span class="y2k-keep">`（`display:inline-block`）裡——窄螢幕換行時整段一起下去，
   不會斷成「…給 AI／分析）」；桌機（欄寬 547px）仍是一行，手機 375px 剛好斷在「（」之前。
@@ -959,7 +969,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| （工作區，尚未 commit） | feat: 圖示系統第二波全站清掃（登入頁/sidebar/清除鈕/提示框全轉 Material 或貼紙 SVG，新增 SVG_LOCK；刻意保留 🧭 與暫態敘事行）；fix: 投射列置中（div 沒有 p 邊距抵銷 -16px 負邊界）、markdown 行內圖示的第三種字型地雷（translate="no"）、圖示 line-height:1；copy: 「關於你」說明去「選填。」 |
+| （工作區，尚未 commit） | fix: 登入 hero「圖示→標題」間距對齊表單版（墨水間距 13px==13px，margin 17px 為量測校準值；h1 要 padding:0）；feat: 情境標題加對話氣泡 SVG_CHAT（context_label_html 統一產出，左右欄同 helper）；移除登入卡片 y2k-mbr 手機強制斷行（標題已短，實測單行） |
+| `a16c525` | feat: 圖示系統第二波全站清掃（登入頁/sidebar/清除鈕/提示框全轉 Material 或貼紙 SVG，新增 SVG_LOCK；刻意保留 🧭 與暫態敘事行）；fix: 投射列置中（div 沒有 p 邊距抵銷 -16px 負邊界）、markdown 行內圖示的第三種字型地雷（translate="no"）、圖示 line-height:1；copy: 「關於你」說明去「選填。」 |
 | `a2bafef` | feat: Y2K 圖示系統兩層制取代全站 emoji——A 層自繪貼紙 SVG（剪貼板＋題目氣泡；投射問題 30 題去 emoji 統一用氣泡）、B 層 Material Rounded 染色（pills/生成鈕/四個 expander/換一題）；⚠️ expander 圖示 testid 是 stExpanderIcon 且會被全域 Nunito 蓋掉連字（:not() 排除清單要含它）。設計稿 artifact d2fc1112 |
 | `5c70d25` | feat: 幻覺補救 repair-on-miss（搜不到→同歌手真實深軌替換，含跨使用者目錄快取；artist_albums limit 上限實測只剩 10）、訪客 fame 天花板（兩段式、只壓國民金曲層級、數量永不縮水）、驗收流程（eval_bench.py＋EVAL.md＋[FEEDBACK] log）；chore: use_container_width → width="stretch"（11 處，import 零棄用警告） |
 | `081d791` | copy: 結果區「複製或分享歌單」→「複製歌單」；docs: Apple Music 曲目直連調查定案不做（iTunes Search API 中文召回率極差，見「播放平台選擇」段） |

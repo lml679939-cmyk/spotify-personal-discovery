@@ -668,14 +668,11 @@ auto_ctx = st.toggle(
 # 並把原本的 label 收起來，讓左右兩個輸入框的頂端對齊。
 # 括號補充包在 .y2k-keep（inline-block）裡：窄螢幕換行時整段一起下去，
 # 不會斷成「…給 AI / 分析）」；桌機放得下時仍是一行
-CTX_LABEL = (
-    '分享一下你的日常吧'
-    '<span class="y2k-keep">（也可以上傳圖片給 AI 分析）</span>'
-)
-
+# 標題（含對話氣泡圖示）由 styles.context_label_html() 統一產出——
+# 左欄與右欄的隱藏佔位必須是同一份內容，換行行為才一致（見該 helper 的 docstring）
 col1, col2 = st.columns(2)
 with col1:
-    st.markdown(f"**{CTX_LABEL}**", unsafe_allow_html=True)
+    st.markdown(styles.context_label_html(), unsafe_allow_html=True)
     text_ctx = st.text_area(
         "分享一下你的日常吧",
         placeholder="例如：在咖啡廳讀書、深夜想一個人散步、運動前暖身…",
@@ -687,7 +684,7 @@ with col2:
     # 標題已併進左欄那句。這裡放同一句、同一種元件，再用 CSS 藏起來當佔位——
     # 視窗窄到標題換行時左右兩邊會一起換行，兩個輸入框的頂端才會永遠齊
     with st.container(key="ctx_label_spacer"):
-        st.markdown(f"**{CTX_LABEL}**", unsafe_allow_html=True)
+        st.markdown(styles.context_label_html(), unsafe_allow_html=True)
     uploaded = st.file_uploader(
         "上傳情境圖片",
         type=["jpg", "jpeg", "png", "webp"],

@@ -81,6 +81,16 @@ def test_material_icon_spans_are_excluded_from_font_override():
         assert f":not({marker})" in css, f"排除清單漏了 {marker}"
 
 
+def test_context_label_html_is_parameterless_with_bubble():
+    # 不收參數＝沒有注入面；左右兩欄都用它，內容一致換行才一致（輸入框頂端對齊機制）
+    import inspect
+    assert not inspect.signature(styles.context_label_html).parameters
+    out = styles.context_label_html()
+    assert "分享一下你的日常吧" in out
+    assert "y2k-keep" in out      # 括號補充整段一起換行的機制要還在
+    assert "<svg" in out          # 對話氣泡圖示
+
+
 def test_section_header_supports_clipboard_icon():
     out = styles.section_header_html("複製歌單", icon="clipboard")
     assert "複製歌單" in out

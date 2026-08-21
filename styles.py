@@ -80,6 +80,13 @@ SVG_CLIPBOARD = '''<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
   <line x1="17.5" y1="33" x2="25.5" y2="33" stroke="#00D4AA" stroke-width="2.5" stroke-linecap="round"/>
 </svg>'''
 
+# 對話氣泡：情境輸入標題用（與下面的題目氣泡同一個外形、換色換內容＝姊妹圖示）
+SVG_CHAT = '''<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <path d="M24 6 C13.5 6 6 12.8 6 21.5 C6 27 9 31.5 13.5 34.2 L11.5 41.5 L20 37 C21.3 37.2 22.6 37.3 24 37.3 C34.5 37.3 42 30.4 42 21.6 C42 12.8 34.5 6 24 6 Z" fill="#FF69B4" stroke="#2D1B4E" stroke-width="2.5" stroke-linejoin="round"/>
+  <line x1="15" y1="18.5" x2="33" y2="18.5" stroke="#FFFDF7" stroke-width="3.2" stroke-linecap="round"/>
+  <line x1="15" y1="25.5" x2="27" y2="25.5" stroke="#FFFDF7" stroke-width="3.2" stroke-linecap="round"/>
+</svg>'''
+
 # 題目氣泡：投射問題的統一圖示（原本 30 題每題一顆 emoji，定案改一致性優先）。
 # 問號用 <path> 不用 <text>——SVG text 依賴頁面字型載入時序，位置也會隨字型抖動
 # 鎖頭：隱私徽章用。鎖環用「深紫粗線墊底＋黃色細線疊上」畫出帶描邊的管子
@@ -196,8 +203,6 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 }}
 
 /* 區塊之間的呼吸空間：桌機小、手機大（見檔案最後的 media query）*/
-/* 只在手機生效的換行點，桌機停用 */
-br.y2k-mbr {{ display: none; }}
 
 /* ── Sidebar ────────────────── */
 [data-testid="stSidebar"] {{
@@ -365,8 +370,10 @@ br.y2k-mbr {{ display: none; }}
     min-width: 0 !important;
 }}
 /* 題目改成氣泡＋文字的 <div> 後沒有 <p> 的 16px 下邊距可以抵銷 stMarkdownContainer
-   的 -16px 負邊界，內容盒矮了 16px、欄位置中因此歪 8px——把負邊界歸零 */
-.st-key-proj_row [data-testid="stMarkdownContainer"] {{
+   的 -16px 負邊界，內容盒矮了 16px、欄位置中因此歪 8px——把負邊界歸零。
+   情境標題（y2k-ctx-label）同一個機制：不歸零的話 textarea 會上移 16px 蓋到標題 */
+.st-key-proj_row [data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"]:has(.y2k-ctx-label) {{
     margin-bottom: 0 !important;
 }}
 
@@ -575,8 +582,6 @@ h2.y2k-form-title {{ font-size: 2.4rem !important; }}
     .st-key-ctx_label_spacer {{ display: none !important; }}
     /* 換一題換行掉到下一行時，貼著題目而不是浮在中間 */
     .st-key-proj_row [data-testid="stHorizontalBlock"] {{ row-gap: 8px !important; }}
-    /* 登入卡片標題在手機上於「方式一：」後換行，避免硬斷在詞中間 */
-    br.y2k-mbr {{ display: inline !important; }}
     /* 上傳區的說明文字在手機上佔一整行，收掉只留 Upload 按鈕 */
     [data-testid="stFileUploaderDropzoneInstructions"] {{ display: none !important; }}
     [data-testid="stFileUploaderDropzone"] {{ justify-content: center !important; }}
@@ -617,6 +622,22 @@ def _discovery_badge_html(track, *, floating: bool, compact: bool = False) -> st
     )
 
 
+def context_label_html():
+    """情境輸入的標題列：對話氣泡＋粗體文案（與投射問題同一套版式）。
+
+    不收參數＝沒有注入面。右欄的隱藏對齊佔位（ctx_label_spacer）**必須用同一個
+    helper**——兩邊內容完全相同，換行行為才一致、兩個輸入框頂端才會永遠對齊。
+    括號補充照舊包在 .y2k-keep 裡（窄螢幕整段一起換行）。
+    """
+    return (
+        '<div class="y2k-ctx-label" style="display:flex;align-items:center;gap:10px">'
+        f'<span style="display:inline-block;width:26px;height:26px;flex:0 0 auto">{SVG_CHAT}</span>'
+        '<span style="font-family:\'Nunito\',\'Noto Sans TC\',sans-serif;font-weight:900;font-size:1rem;color:#2D1B4E">'
+        '分享一下你的日常吧<span class="y2k-keep">（也可以上傳圖片給 AI 分析）</span></span>'
+        "</div>"
+    )
+
+
 def projective_question_html(question):
     """投射問題那一行：統一的題目氣泡 + 粗體題目文字。
 
@@ -644,8 +665,13 @@ def section_header_html(text, icon="notes"):
 
 
 def login_hero_html():
+    # 圖示列與標題的間距以 form_hero_html 為準（使用者指定）：
+    # ① h1 一定要寫 padding:0——Streamlit 的 .stMarkdown h1 預設帶 padding-top，
+    #   不歸零的話標題上方會多墊一截（表單版 h2 早已歸零）
+    # ② margin-bottom 17px 是量測校準值：兩邊的 SVG 在 viewBox 裡的留白不同，
+    #   對齊的是「圖示墨水底 → 文字頂」的視覺間距（兩邊皆 13px），不是 CSS 數字
     return f"""<div style="text-align:center;padding:0 1rem 1rem 1rem">
-  <div style="display:flex;justify-content:center;align-items:center;gap:16px;margin-bottom:0.8rem">
+  <div style="display:flex;justify-content:center;align-items:center;gap:16px;margin-bottom:17px">
     <span style="display:inline-block;width:70px">{SVG_CASSETTE}</span>
     <span style="display:inline-block;width:80px">{SVG_BOOMBOX}</span>
     <span style="display:inline-block;width:60px">{SVG_VINYL}</span>
@@ -653,7 +679,7 @@ def login_hero_html():
   <h1 style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:2.4rem;
     background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-    margin:0 0 0.3rem 0;line-height:1.2;text-align:center">Spotify Personal Discovery</h1>
+    margin:0 0 0.3rem 0;padding:0;line-height:1.2;text-align:center">Spotify Personal Discovery</h1>
 </div>"""
 
 
@@ -681,15 +707,10 @@ def form_hero_html():
 
 
 def _method_card_html(title, description, border_color, icon_svg):
-    # 手機上標題會從「方式一：直接開始（推薦，免」硬斷成兩行很難看。
-    # 在全形冒號後插一個只在手機生效的 <br>（見 CSS 的 br.y2k-mbr），桌機仍維持單行。
-    if "：" in title:
-        _prefix, _rest = title.split("：", 1)
-        title_html = (
-            f"{html_mod.escape(_prefix)}：<br class=\"y2k-mbr\">{html_mod.escape(_rest)}"
-        )
-    else:
-        title_html = html_mod.escape(title)
+    # 標題單行呈現。舊版有「手機在全形冒號後強制換行」的 y2k-mbr 機制——那是
+    # 標題還叫「方式一：直接開始（推薦，免登入）」時防止斷在詞中間用的；
+    # 標題縮短後手機也放得下單行，2026-08-22 依使用者指示移除
+    title_html = html_mod.escape(title)
     return f"""<div style="border:3px solid #2D1B4E;
   border-radius:18px;padding:1rem 1.4rem;margin:0.8rem 0;
   min-height:130px;box-sizing:border-box;
