@@ -556,6 +556,8 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 | 黃底標籤看不到字 | 白字壓 `#FFD700` 對比只有 1.4:1 | 用 WCAG 公式算 relative luminance |
 | 投射列題目與按鈕差 8px | 題目從 `<p>` 改成 `<div>` 後，沒有 p 的 16px 下邊距去抵銷 `stMarkdownContainer` 的 -16px 負邊界 | 量氣泡/文字/按鈕三者 centerY（修後 149/149/149） |
 | 氣泡圖示浮在兩行中間 | 文字折行後 flex 的 `align-items:center` 對齊的是整個兩行文字塊，不是第一行 | 改 `flex-start`（26px 圖示天然對齊 25.6px 行框），量 icon vs 第一行墨水 centerY（13px → 1.1px） |
+| 「AI 情境解讀」火花圖示浮在文字上方 ~1.5px | flex `align-items:center` 對齊的是盒子；SVG 在 24px 盒內置中，但文字 `line-height:1` 的墨水中心與盒中心不同，淨值火花中心低 1.53px | 探針量 SVG `path` vs 文字 `range` 的 centerY；wrapper 加 `transform:translateY(-1.5px)`，殘差 0.03px |
+| 「AI 情境解讀」框下方（→🧭 caption）間距比別處小 | 框內 `margin:0.8rem 0`(12.8px) 少於 `stMarkdownContainer` -16px 要抵銷的段落 16px，淨間距被壓成 12.8 而非全站的 16 | 量主區塊各相鄰元素 gap 全是 16px（連 caption 兩側）；框下邊距補成 `1rem` 即回 16 |
 
 **做法**：`streamlit run app.py --server.headless true --server.port 8599`
 起服務後用瀏覽器工具跑 `getBoundingClientRect()` / `getComputedStyle()` 量，
@@ -1058,6 +1060,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
+| `210827a` | feat: 歌單命名有溫度化——Gemini 回應多生 `playlist_title`（短雙語 vibe 標籤，few-shot 你給的 Pre-Workout Warmth // 暖機午後 那類）＋ `playlist_blurb`（雜誌編輯口吻導言）；存歌單時 name 用 title、description 用 blurb（退 `context_interp`→自動生成時間戳），`create_playlist_with_tracks` 收 `description` 參數＋300 字上限；生成敘事行 emoji→Material 行內圖示（🔗→sync 等 11 個，⚠️ 警示保留）＋行內圖示補 `margin-right:0.4em`；結果控制列 `st.columns(vertical_alignment="center")`; docs: 驗收第 1 輪補完 S6（登入探索出圈率 100%、pop_blocked=10 證實登入天花板有效） |
+| `63088e6` | docs: 驗收第 1 輪基準（訪客 S1–S5，全 15/15 可播、死卡 0；疑點——訪客 fame≤2 幾乎全靠補救、S4 指定歌手 fav_share 僅 0.27）; fix: eval_bench.py 修 Windows cp950 主控台印 🛠/✗ 的 UnicodeEncodeError（stdout/stderr 強制 UTF-8） |
 | `861984d` | fix: 氣泡圖示的置中改對齊第一行（flex-start）——文字折行時 center 會讓氣泡浮在兩行中間差 13px，修後 1.1px；情境標題與投射問題兩處同步 |
 | `99fe0fa` | fix: 登入 hero「圖示→標題」間距對齊表單版（墨水間距 13px==13px，margin 17px 為量測校準值；h1 要 padding:0）；feat: 情境標題加對話氣泡 SVG_CHAT（context_label_html 統一產出，左右欄同 helper）；移除登入卡片 y2k-mbr 手機強制斷行（標題已短，實測單行） |
 | `a16c525` | feat: 圖示系統第二波全站清掃（登入頁/sidebar/清除鈕/提示框全轉 Material 或貼紙 SVG，新增 SVG_LOCK；刻意保留 🧭 與暫態敘事行）；fix: 投射列置中（div 沒有 p 邊距抵銷 -16px 負邊界）、markdown 行內圖示的第三種字型地雷（translate="no"）、圖示 line-height:1；copy: 「關於你」說明去「選填。」 |

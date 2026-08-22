@@ -766,11 +766,11 @@ def divider_html():
 def context_interpretation_html(text):
     escaped = html_mod.escape(text)
     return f"""<div style="border:3px solid #2D1B4E;
-  border-radius:18px;padding:1.2rem 1.4rem;margin:0.8rem 0;
+  border-radius:18px;padding:1.2rem 1.4rem;margin:0.8rem 0 1rem 0;
   box-shadow:4px 4px 0px rgba(155,89,182,0.2);
   background:linear-gradient(135deg,#FFF0F5,#FFFDF7)">
   <div style="display:flex;align-items:center;gap:10px">
-    <span style="display:flex;align-items:center">{_sparkle('#9B59B6', 24)}</span>
+    <span style="display:flex;align-items:center;transform:translateY(-1.5px)">{_sparkle('#9B59B6', 24)}</span>
     <span style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:700;font-size:0.8rem;
       color:#9B59B6;text-transform:uppercase;letter-spacing:1px;line-height:1">AI 情境解讀</span>
   </div>
