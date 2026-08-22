@@ -396,9 +396,12 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 .st-key-projective_a {{ margin-top: -8px; }}
 /* hero 的 markdown container 帶 -16px 負邊界，會把下面的第一個元件吸上來 */
 [data-testid="stMarkdownContainer"]:has(.y2k-form-title) {{ margin-bottom: 0 !important; }}
+/* 登入 hero（Option C）：min-height 117 對齊表單 hero，但 stMarkdownContainer 的 -16px
+   會把 block 縮成 101、下方登入卡片被吸上來、看起來比表單 hero 矮——同樣歸零 */
+[data-testid="stMarkdownContainer"]:has(.y2k-login-hero) {{ margin-bottom: 0 !important; }}
 /* ⚠️ Streamlit 自己的 .stMarkdown h2 是 2.25rem，單一 class 選擇器蓋不過去——
    一定要寫成 h2.y2k-form-title 並加 !important */
-h2.y2k-form-title {{ font-size: 2.4rem !important; }}
+h2.y2k-form-title {{ font-size: 2.6rem !important; }}
 
 /* 標題裡不想被拆散的補充片語（例如括號說明）：整段當一個字，
    要換行就整段換到下一行，不會斷成「…給 AI / 分析）」 */
@@ -678,21 +681,29 @@ def section_header_html(text, icon="notes"):
 
 
 def login_hero_html():
-    # 圖示列與標題的間距以 form_hero_html 為準（使用者指定）：
-    # ① h1 一定要寫 padding:0——Streamlit 的 .stMarkdown h1 預設帶 padding-top，
-    #   不歸零的話標題上方會多墊一截（表單版 h2 早已歸零）
-    # ② margin-bottom 17px 是量測校準值：兩邊的 SVG 在 viewBox 裡的留白不同，
-    #   對齊的是「圖示墨水底 → 文字頂」的視覺間距（兩邊皆 13px），不是 CSS 數字
-    return f"""<div style="text-align:center;padding:0 1rem 1rem 1rem">
-  <div style="display:flex;justify-content:center;align-items:center;gap:16px;margin-bottom:17px">
-    <span style="display:inline-block;width:70px">{SVG_CASSETTE}</span>
-    <span style="display:inline-block;width:80px">{SVG_BOOMBOX}</span>
-    <span style="display:inline-block;width:60px">{SVG_VINYL}</span>
-  </div>
-  <h1 style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:2.4rem;
-    background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
-    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-    margin:0 0 0.3rem 0;padding:0;line-height:1.2;text-align:center">SoundCurator</h1>
+    # Option C（Vinyl-O Logomark，2026-08-22，取代舊的「三貼紙圖示＋漸層字」）：
+    # 黑膠當成 Sound 的「o」，Sound 深紫、Curator 紫，下方一句 tagline。
+    # ⚠️ h1 一定要 margin:0;padding:0——Streamlit 的 .stMarkdown h1 預設帶 padding-top。
+    # ⚠️ 黑膠中心用奶油色當「o 的洞」，不能用深紫（會跟字連成一塊、看不出是 o）。
+    # ⚠️ 黑膠靠行內 vertical-align:baseline + translateY 對齊，不是 flex——Streamlit 會把
+    #    h1 內容包進一個 <span id=":r0:">，h1 的 display:flex 只作用到那層包裝、碰不到內層 span。
+    # ⚠️ translateY(0.075em) 是量測校準值：baseline 對齊時黑膠中心比「und」墨水中心高 1.88px
+    #    （@2.6rem），往下推到殘差 ~0。改字級要重量（用瀏覽器量 svg vs und range 的 centerY）。
+    # ⚠️ 注入 HTML 內部各行不要縮排——Streamlit markdown 會把縮排行當程式碼區塊。
+    vinyl_o = ('<svg viewBox="0 0 100 100" style="width:100%;height:auto;display:block" '
+               'xmlns="http://www.w3.org/2000/svg">'
+               '<circle cx="50" cy="50" r="48" fill="#2D1B4E"/>'
+               '<circle cx="50" cy="50" r="40" fill="none" stroke="#9B59B6" stroke-width="1.2" opacity="0.55"/>'
+               '<circle cx="50" cy="50" r="31" fill="none" stroke="#FF69B4" stroke-width="1" opacity="0.5"/>'
+               '<circle cx="50" cy="50" r="22" fill="none" stroke="#9B59B6" stroke-width="1.2" opacity="0.55"/>'
+               '<circle cx="50" cy="50" r="15" fill="#FF69B4"/>'
+               '<circle cx="50" cy="50" r="10" fill="#FFD700"/>'
+               '<circle cx="50" cy="50" r="4" fill="#FFFDF7"/></svg>')
+    return f"""<div class="y2k-login-hero" style="text-align:center;padding:0 1rem;min-height:117px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center">
+<h1 style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;font-size:2.6rem;line-height:1;letter-spacing:-1px;color:#2D1B4E;margin:0;padding:0;text-align:center">
+<span>S</span><span style="display:inline-block;width:0.8em;height:0.8em;margin:0 0.03em;transform:translateY(0.075em)">{vinyl_o}</span><span>und</span><span style="color:#9B59B6">Curator</span>
+</h1>
+<div style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:700;font-size:0.98rem;letter-spacing:2px;color:#2D1B4E;opacity:0.62;margin-top:0.55rem">不推弟，只推歌。還不快叫我乾歌</div>
 </div>"""
 
 

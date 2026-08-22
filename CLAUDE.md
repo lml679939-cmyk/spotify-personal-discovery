@@ -88,20 +88,21 @@ python -m pytest -q                     # 199 tests，改任何 .py 都要跑
 要在容器裡認真開發就先把 image 換成 3.12、拿掉那個 XSRF flag；只是隨手跑一下就
 知道上面兩件事即可。**別因為容器裡測試紅就去改測試或改 `_client_ip()` 的邏輯。**
 
-**接手後的第一件事**（2026-08-22 交接狀態）
+**接手後的第一件事**（2026-08-22 交接狀態，第 2 版）
 
-> 程式碼與線上版同步（HEAD = `861984d`，工作區乾淨、199 tests 全過）。
-> 最近三批改動是「演算法基建（幻覺補救＋訪客天花板＋驗收工具）」與「Y2K 圖示系統
-> 兩層制取代全站 emoji」。**唯一的未竟事項是驗收第 1 輪還沒跑。**
+> 已 push＋部署（工作區乾淨、199 tests 全過）。顯示名稱已改 **SoundCurator**、網址
+> `soundcurator.streamlit.app`（repo 仍 spotify-personal-discovery）。**驗收第 1 輪已完成**
+> （S1–S6 全進 `EVAL.md`，全 15/15 可播）。最近幾批：歌單命名有溫度化、結果頁版面校準、
+> 改名＋換網域、登入 hero 換成 Option C（黑膠當 Sound 的 o＋tagline，高度對齊表單 hero）。
 
-1. **跑驗收第 1 輪，建立基準**（最高優先，一小時內可完成）
-   `python eval_bench.py --tag round1` 跑訪客 S1–S5（需本機 `.env` 金鑰），
-   再照 `EVAL.md` 的固定輸入手動跑 S6，把機器指標與人工三題填進 `EVAL.md` 的表。
-   **在此之前不要改演算法**——沒有基準就沒有對照，改了也說不出好壞。
-   已知待查的訊號：冒煙測時訪客的 LLM 幾乎不給 fame ≤ 2（驚喜佔比 0），
-   代表訪客版的 fame 天花板可能形同虛設，這是第 1 輪該確認的第一個問題。
-2. **驗證幻覺補救真的在線上生效**：Manage app 日誌撈 `[NOVELTY]`，看 `repaired` 有沒有
-   上升、`spare_used`（死連結卡）有沒有下降。這是 `5c70d25` 的驗收指標。
+1. **開工第 2 輪演算法**（第 1 輪 eval 已是基準，可以動了）。依 `EVAL.md` 備註的證據排序：
+   ① **指定歌手保底佔比**（最該先做）——S4：使用者想點開的 100% 是指定歌手、實際只給 27%。
+      程式端保底 + 用還活著的 `artist_albums`/`album_tracks` 直接拉該歌手真實深軌（順便零幻覺）。
+   ② **訪客「熟悉/均衡/探索」fame 選項 + guest prompt fame 錨點**（疑點1：訪客 LLM 幾乎不自產
+      fame≤2，兩件要綁一起做）。**規矩不變**：改演算法前後各跑一輪 `eval_bench`，數字進 `EVAL.md`。
+2. **驗證幻覺補救真的在線上生效**（還沒做）：在 `soundcurator.streamlit.app` 生成一份，再到
+   Manage app 日誌撈 `[NOVELTY]`，看 `repaired` 有沒有上升、`spare_used`（死連結卡）有沒有下降。
+   這是 `5c70d25` 的驗收指標。（部署日誌已確認 `[GEO] 找不到 client IP`＝雲端拿不到位置，非 bug。）
 
 **還沒做的**（依價值排序，都不急）
 - **回饋持久化（登入版）**：回饋目前是 session 級，關分頁歸零；使用者已定案
@@ -562,6 +563,8 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 | 氣泡圖示浮在兩行中間 | 文字折行後 flex 的 `align-items:center` 對齊的是整個兩行文字塊，不是第一行 | 改 `flex-start`（26px 圖示天然對齊 25.6px 行框），量 icon vs 第一行墨水 centerY（13px → 1.1px） |
 | 「AI 情境解讀」火花圖示浮在文字上方 ~1.5px | flex `align-items:center` 對齊的是盒子；SVG 在 24px 盒內置中，但文字 `line-height:1` 的墨水中心與盒中心不同，淨值火花中心低 1.53px | 探針量 SVG `path` vs 文字 `range` 的 centerY；wrapper 加 `transform:translateY(-1.5px)`，殘差 0.03px |
 | 「AI 情境解讀」框下方（→🧭 caption）間距比別處小 | 框內 `margin:0.8rem 0`(12.8px) 少於 `stMarkdownContainer` -16px 要抵銷的段落 16px，淨間距被壓成 12.8 而非全站的 16 | 量主區塊各相鄰元素 gap 全是 16px（連 caption 兩側）；框下邊距補成 `1rem` 即回 16 |
+| 黑膠當「Sound 的 o」偏高 ~1.9px | inline-block 預設 baseline 對齊，黑膠盒中心比小寫 o 的墨水中心高 | 量 svg vs「und」range 的 centerY，`translateY(0.075em)` 後殘差 0.5px（改字級要重量） |
+| 登入 hero（Option C）比表單 hero 矮 41px | Option C 拿掉圖示列只剩 wordmark＋tagline；且登入 hero 的 `stMarkdownContainer` -16px 沒歸零，block 被縮成 101 | 量兩邊 stMarkdown block（登入 75.5 vs 表單 116.8）；`min-height:117`＋flex 置中＋`:has(.y2k-login-hero)` 歸零 -16 → block 117≈116.8 |
 
 **做法**：`streamlit run app.py --server.headless true --server.port 8599`
 起服務後用瀏覽器工具跑 `getBoundingClientRect()` / `getComputedStyle()` 量，
@@ -879,7 +882,9 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 **Hero 尺寸（2026-08 放大）**：與登入頁 hero **同級**，不要再做「小一階」——兩個 hero
 不會同時出現（一個在登入頁、一個在表單頁），各自都是該頁主標題，做小反而沒有標題感。
 - 圖示 `68 / 76 / 56` px（三個 SVG 長寬比不同，是逐個微調的，別統一成同一個數字）
-- 標題 `h2.y2k-form-title` 桌機 2.4rem、手機 2rem
+- 標題 `h2.y2k-form-title` 桌機 **2.6rem**（對齊登入 hero 的 SoundCurator wordmark，2026-08-22）、
+  手機 2rem（「想成為你專屬的歌單」9 個中文字在 2.6rem＝372px 會溢出 375 手機，所以手機不跟進；
+  登入 wordmark 是拉丁字較窄、手機仍 2.6rem，故手機兩者不同高是必要取捨）
   ⚠️ Streamlit 的 `.stMarkdown h2` 是 2.25rem，**單一 class 選擇器蓋不過去**，
   一定要寫成 `h2.y2k-form-title { … !important }`
 - 手機圖示用 `.y2k-form-icons > span { transform: scale(0.82) }` 縮一階
@@ -1064,6 +1069,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
+| `fe869fb`／`5de7d2b` | refactor: 顯示名稱 Spotify Personal Discovery → **SoundCurator**（hero／分頁／分享文字／歌單敘述／docstring／README；`HISTORY_PLAYLIST_NAME` 未動）；docs: 部署網址 spotify-lml → `soundcurator.streamlit.app`（`_is_local_dev()` 只認 localhost、不受影響）。⚠️ 換子網域要同步 Streamlit App URL＋Spotify Redirect URI＋Streamlit Secrets 三處，否則方式二 redirect mismatch |
+| `4efad24` | fix: 結果頁「AI 情境解讀」火花置中（translateY -1.5px）、框下邊距 0.8rem→1rem 使 →🧭 caption 間距回全站 16px 節奏（皆先量再改） |
 | `210827a` | feat: 歌單命名有溫度化——Gemini 回應多生 `playlist_title`（短雙語 vibe 標籤，few-shot 你給的 Pre-Workout Warmth // 暖機午後 那類）＋ `playlist_blurb`（雜誌編輯口吻導言）；存歌單時 name 用 title、description 用 blurb（退 `context_interp`→自動生成時間戳），`create_playlist_with_tracks` 收 `description` 參數＋300 字上限；生成敘事行 emoji→Material 行內圖示（🔗→sync 等 11 個，⚠️ 警示保留）＋行內圖示補 `margin-right:0.4em`；結果控制列 `st.columns(vertical_alignment="center")`; docs: 驗收第 1 輪補完 S6（登入探索出圈率 100%、pop_blocked=10 證實登入天花板有效） |
 | `63088e6` | docs: 驗收第 1 輪基準（訪客 S1–S5，全 15/15 可播、死卡 0；疑點——訪客 fame≤2 幾乎全靠補救、S4 指定歌手 fav_share 僅 0.27）; fix: eval_bench.py 修 Windows cp950 主控台印 🛠/✗ 的 UnicodeEncodeError（stdout/stderr 強制 UTF-8） |
 | `861984d` | fix: 氣泡圖示的置中改對齊第一行（flex-start）——文字折行時 center 會讓氣泡浮在兩行中間差 13px，修後 1.1px；情境標題與投射問題兩處同步 |
