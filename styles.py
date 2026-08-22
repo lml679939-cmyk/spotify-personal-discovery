@@ -401,7 +401,7 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 [data-testid="stMarkdownContainer"]:has(.y2k-login-hero) {{ margin-bottom: 0 !important; }}
 /* ⚠️ Streamlit 自己的 .stMarkdown h2 是 2.25rem，單一 class 選擇器蓋不過去——
    一定要寫成 h2.y2k-form-title 並加 !important */
-h2.y2k-form-title {{ font-size: 2.6rem !important; }}
+h2.y2k-form-title {{ font-size: 2.4rem !important; }}
 
 /* 標題裡不想被拆散的補充片語（例如括號說明）：整段當一個字，
    要換行就整段換到下一行，不會斷成「…給 AI / 分析）」 */

@@ -882,9 +882,10 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 **Hero 尺寸（2026-08 放大）**：與登入頁 hero **同級**，不要再做「小一階」——兩個 hero
 不會同時出現（一個在登入頁、一個在表單頁），各自都是該頁主標題，做小反而沒有標題感。
 - 圖示 `68 / 76 / 56` px（三個 SVG 長寬比不同，是逐個微調的，別統一成同一個數字）
-- 標題 `h2.y2k-form-title` 桌機 **2.6rem**（對齊登入 hero 的 SoundCurator wordmark，2026-08-22）、
-  手機 2rem（「想成為你專屬的歌單」9 個中文字在 2.6rem＝372px 會溢出 375 手機，所以手機不跟進；
-  登入 wordmark 是拉丁字較窄、手機仍 2.6rem，故手機兩者不同高是必要取捨）
+- 標題 `h2.y2k-form-title` 桌機 2.4rem、手機 2rem。⚠️ 2026-08-22 曾試 2.6rem 對齊登入 hero 的
+  SoundCurator wordmark，但**表單 hero 是「圖示＋標題」、登入 hero 只有字**，同字級會讓標題墨水高
+  ≈圖示高（量到 56.8 vs 56）又更寬（372 vs 圖示群 ~232），把圖示比成配角、看起來頭重——**已改回
+  2.4rem，兩個 hero 刻意不同字級**。別再為了「一致」把它改成 2.6rem。
   ⚠️ Streamlit 的 `.stMarkdown h2` 是 2.25rem，**單一 class 選擇器蓋不過去**，
   一定要寫成 `h2.y2k-form-title { … !important }`
 - 手機圖示用 `.y2k-form-icons > span { transform: scale(0.82) }` 縮一階
