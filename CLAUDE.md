@@ -6,8 +6,9 @@
 
 **SoundCurator** — 個人化音樂推薦 Streamlit Web App。
 > 2026-08-22 顯示名稱由「Spotify Personal Discovery」改為「SoundCurator」。
-> ⚠️ GitHub repo（`spotify-personal-discovery`）與部署網址（`spotify-lml.streamlit.app`）**仍是舊識別**，
-> 只有 UI 顯示名稱、分享文字、歌單敘述改了；`HISTORY_PLAYLIST_NAME`（靠名稱找回歷史）刻意未動。
+> ⚠️ GitHub repo 仍是 `spotify-personal-discovery`（未改）；部署網址已由 `spotify-lml` 改成 `soundcurator.streamlit.app`。
+> 換子網域要同步三處、否則方式二登入會 redirect mismatch：① Streamlit App URL ② Spotify Dashboard 的 Redirect URI ③ Streamlit Secrets 的 `SPOTIFY_REDIRECT_URI`。
+> UI 顯示名稱／分享文字／歌單敘述已改；`HISTORY_PLAYLIST_NAME`（靠名稱找回歷史）刻意未動。
 
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
@@ -17,7 +18,7 @@
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
 - **外部 API**：Spotify Web API（via Spotipy）、Google Gemini 2.5 Flash
-- **部署**：Streamlit Community Cloud — `https://spotify-lml.streamlit.app`
+- **部署**：Streamlit Community Cloud — `https://soundcurator.streamlit.app`
 - **GitHub**：`https://github.com/lml679939-cmyk/spotify-personal-discovery`
 - **使用者偏好語言**：繁體中文
 
@@ -675,7 +676,7 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
   唯一可行做法是中繼——link_button 指回本站 `?goto=…` 記一筆再 `<meta refresh>` 轉出。
   **本機實測整條鏈可行；部署後三個平台一律「拒絕連線」，已回退成直連。**
 - **根因（在線上 DOM 實證）**：Streamlit Cloud 把 app 包在 iframe 裡跑
-  （`spotify-lml.streamlit.app/~/+/`），sandbox 是 `allow-forms allow-modals
+  （`soundcurator.streamlit.app/~/+/`），sandbox 是 `allow-forms allow-modals
   allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts
   allow-downloads`——**沒有 `allow-top-navigation`**。meta refresh 只會導航 iframe
   自己，而 Spotify/YouTube/Apple 都拒絕被嵌入（X-Frame-Options/CSP）
@@ -829,7 +830,7 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
    ⚠️ **只印標頭名稱不印值**——標頭內容含 cookie / token，不能進 log。
 
 **本機開發是唯一例外**：`_is_local_dev()` 用 `Host` 標頭判斷（本機 `127.0.0.1:8501`、
-雲端 `spotify-lml.streamlit.app`）。本機直連時「伺服器」就是開發者自己的機器，
+雲端 `soundcurator.streamlit.app`）。本機直連時「伺服器」就是開發者自己的機器，
 定位自己反而是對的，所以 `allow_self_lookup=True` 放行不帶 IP 的查詢——否則本機開發會
 完全看不到位置與天氣。
 ⚠️ 去 port 不能無腦 `split(":")[0]`：IPv6 本身含冒號，`::1` 會被切成空字串（有測試釘住）。

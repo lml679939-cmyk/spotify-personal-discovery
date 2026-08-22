@@ -450,7 +450,7 @@ def _is_local_dev() -> bool:
 
     這種情況下「伺服器」就是開發者自己的機器，讓 ipwho.is 定位「自己」反而是對的；
     雲端則相反——那會定位到機房（The Dalles）。用 Host 區分：
-    本機是 `127.0.0.1:8501` 之類，雲端是 `spotify-lml.streamlit.app`。
+    本機是 `127.0.0.1:8501` 之類，雲端是 `soundcurator.streamlit.app`。
     """
     try:
         host = (st.context.headers.get("Host") or "").strip().lower()

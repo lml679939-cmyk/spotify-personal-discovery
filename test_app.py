@@ -163,7 +163,7 @@ def test_local_dev_may_still_geolocate_itself(monkeypatch):
     ("127.0.0.1:8501", True),
     ("localhost:8599", True),
     ("::1", True),
-    ("spotify-lml.streamlit.app", False),
+    ("soundcurator.streamlit.app", False),
     ("", False),
 ])
 def test_is_local_dev_reads_host_header(monkeypatch, host, expected):

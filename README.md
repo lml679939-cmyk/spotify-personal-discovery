@@ -10,7 +10,7 @@
 
 ## 使用方式
 
-**線上版**：<https://spotify-lml.streamlit.app>
+**線上版**：<https://soundcurator.streamlit.app>
 
 ### 方式一：直接開始
 不需要 Spotify 帳號、不用申請任何 API Key，描述當下情境就能拿到推薦歌單。
