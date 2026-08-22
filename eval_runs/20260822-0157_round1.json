@@ -1,0 +1,645 @@
+{
+ "when": "2026-08-22T01:57:11",
+ "tag": "round1",
+ "repair": true,
+ "num_songs": 15,
+ "runs": [
+  {
+   "scenario": "S1",
+   "name": "深夜放空（華語限定）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 5,
+   "repaired": 2,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 0,
+   "fame_low_share": 0.0,
+   "gemini_s": 8.7,
+   "search_s": 9.6,
+   "lang_conform": 1.0,
+   "tracks": [
+    {
+     "name": "Don't Make Me Cry",
+     "artist": "李心潔",
+     "fame": 3,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "空白格",
+     "artist": "Tanya Chua",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "你啊你啊 - 電視劇「用九柑仔店」插曲",
+     "artist": "Waa Wei",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "克卜勒",
+     "artist": "Stefanie Sun",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "太想愛你",
+     "artist": "Jeff Chang",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "寂寞的戀人啊",
+     "artist": "Karen Mok",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "如煙",
+     "artist": "Mayday",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "兜圈",
+     "artist": "Yoga Lin",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "路口",
+     "artist": "Tanya Chua",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "沾醬歌/南王系之歌 (Live)",
+     "artist": "A-Lin",
+     "fame": 4,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "修煉愛情",
+     "artist": "JJ Lin",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "安靜",
+     "artist": "Jay Chou",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "忽然之間",
+     "artist": "Karen Mok",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "想見你想見你想見你 - 電視劇《想見你》片尾曲",
+     "artist": "831",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "魚仔 - 電視劇<花甲男孩轉大人>主題曲",
+     "artist": "Crowd Lu",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  },
+  {
+   "scenario": "S2",
+   "name": "雨天通勤（曲風限定）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 3,
+   "repaired": 3,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 3,
+   "fame_low_share": 0.2,
+   "gemini_s": 6.0,
+   "search_s": 7.9,
+   "tracks": [
+    {
+     "name": "So What (feat. John Coltrane, Cannonball Adderley & Bill Evans)",
+     "artist": "Miles Davis, John Coltrane, Cannonball Adderley, Bill Evans",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Autumn In New York",
+     "artist": "Billie Holiday",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Misty",
+     "artist": "Erroll Garner",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Watermelon Man - Remastered 2007",
+     "artist": "Herbie Hancock",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Summertime",
+     "artist": "Ella Fitzgerald, Louis Armstrong",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Blue in Green (feat. John Coltrane & Bill Evans)",
+     "artist": "Miles Davis, John Coltrane, Bill Evans",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Comptine d'un autre été, l'après-midi",
+     "artist": "Yann Tiersen",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Afternoon in Paris",
+     "artist": "John Lewis",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Eye of the Storm",
+     "artist": "Purrple Cat",
+     "fame": 2,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "The Less I Know The Better",
+     "artist": "Lofi Fruits Music, Chill Fruits Music",
+     "fame": 2,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "Maple Leaf Rag",
+     "artist": "Scott Joplin, Lang Lang",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "A Night In Tunisia",
+     "artist": "Dizzy Gillespie",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Valley of Hope",
+     "artist": "Kupla",
+     "fame": 2,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "What A Wonderful World",
+     "artist": "Louis Armstrong",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Take Five",
+     "artist": "The Dave Brubeck Quartet",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  },
+  {
+   "scenario": "S3",
+   "name": "健身（全不限）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 0,
+   "repaired": 0,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 3,
+   "fame_low_share": 0.0,
+   "gemini_s": 6.4,
+   "search_s": 4.8,
+   "tracks": [
+    {
+     "name": "Till I Collapse",
+     "artist": "Eminem, Nate Dogg",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "POWER",
+     "artist": "Kanye West",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Can't Hold Us - Live From Spotify NYC feat. Ray Dalton",
+     "artist": "Macklemore & Ryan Lewis, Ray Dalton",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Remember the Name (feat. Styles of Beyond)",
+     "artist": "Fort Minor, Styles Of Beyond",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "X Gon' Give It To Ya - Int'l Bonus track",
+     "artist": "DMX",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Heads Will Roll",
+     "artist": "Yeah Yeah Yeahs",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Run Boy Run",
+     "artist": "Woodkid",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Centuries",
+     "artist": "Fall Out Boy",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Go",
+     "artist": "The Chemical Brothers, Q-Tip",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Bulls On Parade",
+     "artist": "Rage Against The Machine",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Sabotage",
+     "artist": "Beastie Boys",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Guerrilla Radio - Live, Mexico City, Mexico, October 28, 1999",
+     "artist": "Rage Against The Machine",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Rage Valley",
+     "artist": "Knife Party",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Stronger",
+     "artist": "Kanye West",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Numb / Encore",
+     "artist": "JAŸ-Z, Linkin Park",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  },
+  {
+   "scenario": "S4",
+   "name": "指定歌手",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 1,
+   "repaired": 1,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 3,
+   "fame_low_share": 0.07,
+   "gemini_s": 5.1,
+   "search_s": 4.8,
+   "fav_share": 0.27,
+   "tracks": [
+    {
+     "name": "小小校歌",
+     "artist": "Cheer Chen",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Teahouse",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": 4,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "Slow",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "City Of Stars - From \"La La Land\" Soundtrack",
+     "artist": "Ryan Gosling, Emma Stone",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Golden Hour",
+     "artist": "Kacey Musgraves",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Sunny",
+     "artist": "Bobby Hebb",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Tea For Two",
+     "artist": "Stéphane Grappelli, Joe Venuti",
+     "fame": 2,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "La Valse d'Amélie - Version piano",
+     "artist": "Yann Tiersen",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "三吋日光",
+     "artist": "Fish Leong",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Sunday Morning",
+     "artist": "Maroon 5",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Good Day Sunshine - Remastered 2009",
+     "artist": "The Beatles",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "風の谷のナウシカメドレー",
+     "artist": "非音楽著作物, Joe Hisaishi, ズーラシアンウッドウィンズ",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Vienna",
+     "artist": "Billy Joel",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "旅行的意義",
+     "artist": "Cheer Chen",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Here Comes The Sun - Remastered 2009",
+     "artist": "The Beatles",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  },
+  {
+   "scenario": "S5",
+   "name": "投射推論",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 2,
+   "repaired": 1,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 2,
+   "fame_low_share": 0.07,
+   "gemini_s": 5.8,
+   "search_s": 5.6,
+   "tracks": [
+    {
+     "name": "A-Punk",
+     "artist": "Vampire Weekend",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Coffee & TV",
+     "artist": "Blur",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Weightless",
+     "artist": "Marconi Union",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Rhiannon",
+     "artist": "Fleetwood Mac",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Teardrop",
+     "artist": "Massive Attack, Elizabeth Fraser",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Nantes",
+     "artist": "Beirut",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Heart It Races - Trizzy's Rusty Tin Can Mix",
+     "artist": "A-Trak, Architecture In Helsinki",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Lost In Japan",
+     "artist": "Shawn Mendes",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Paris",
+     "artist": "The 1975",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Le Sud",
+     "artist": "L'Indécis",
+     "fame": 2,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "Pink Moon",
+     "artist": "Nick Drake",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Electric Feel",
+     "artist": "MGMT",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Here Comes The Sun - Remastered 2009",
+     "artist": "The Beatles",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "The Less I Know The Better",
+     "artist": "Tame Impala",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Lovely Day",
+     "artist": "Bill Withers",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  }
+ ],
+ "search_cache": {
+  "size": 89,
+  "hits": 1,
+  "misses": 89
+ },
+ "repair_cache": {
+  "size": 11,
+  "hits": 0,
+  "misses": 11
+ }
+}

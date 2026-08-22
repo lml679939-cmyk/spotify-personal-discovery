@@ -44,6 +44,14 @@ from spotify_api import (
     search_track,
 )
 
+# Windows 主控台預設 cp950，印到 🛠/✗ 這類非 cp950 字元會 UnicodeEncodeError 整個中斷
+# （連結尾的 JSON 都來不及存）。驗收工具就是要在這台 Windows 機器上反覆跑，強制走 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 NUM_SONGS = 15
 
 # ⚠️ 情境輸入逐字固定——改了任何一個字，跨輪比較就失效。要換題就開新的情境 ID。
