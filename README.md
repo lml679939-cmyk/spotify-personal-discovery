@@ -1,4 +1,4 @@
-# Spotify Personal Discovery
+# SoundCurator
 
 個人化音樂發現 App，結合 Spotify 聆聽資料、Gemini 多模態 LLM 與環境情境（時間、天氣、地理位置、圖片、文字）生成推薦歌單。
 

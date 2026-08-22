@@ -1,5 +1,5 @@
 """
-Spotify Personal Discovery - Web UI
+SoundCurator - Web UI
 """
 
 import ipaddress
@@ -603,7 +603,7 @@ def fetch_auto_context() -> str:
 
 
 # ── UI ────────────────────────────────────────────────────
-st.set_page_config(page_title="Spotify Personal Discovery", page_icon="🎵", layout="wide")
+st.set_page_config(page_title="SoundCurator", page_icon="🎵", layout="wide")
 styles.inject_global_css()
 
 
@@ -1544,7 +1544,7 @@ if "found" in st.session_state and st.session_state.found:
 
     # 組合可分享的純文字（在欄位外先計算，不渲染任何元件）
     _ctx = st.session_state.get("context_interp", "")
-    _lines = ["🎵 Spotify Personal Discovery — AI 推薦歌單"]
+    _lines = ["🎵 SoundCurator — AI 推薦歌單"]
     if _ctx:
         _lines += [f"情境：{_ctx}", ""]
     for _i, _t in enumerate(found, 1):

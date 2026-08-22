@@ -39,7 +39,7 @@ def fetch_top_track_uris(sp: spotipy.Spotify, time_range: str = "medium_term", l
 def create_discovery_playlist(sp: spotipy.Spotify, user_id: str, track_uris: list[str]) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
     playlist_name = f"LML Discovery {today}"
-    playlist_desc = f"由 Spotify Personal Discovery App 自動生成・{today}"
+    playlist_desc = f"由 SoundCurator App 自動生成・{today}"
 
     playlist = sp.user_playlist_create(
         user=user_id,

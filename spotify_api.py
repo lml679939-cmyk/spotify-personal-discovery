@@ -510,7 +510,7 @@ def create_playlist_with_tracks(
     """
     sp = get_spotify_client()
     _desc = (description or "").strip() or \
-        f"由 Spotify Personal Discovery 自動生成・{_local_now().strftime('%Y-%m-%d %H:%M')}"
+        f"由 SoundCurator 自動生成・{_local_now().strftime('%Y-%m-%d %H:%M')}"
     _desc = _desc[:300]  # Spotify 歌單敘述上限約 300 字，超過會被拒/截斷
     # 新 endpoint：POST /me/playlists（舊的 /users/{id}/playlists 已被移除）
     playlist = sp._post(
@@ -806,7 +806,7 @@ def _get_history_playlist_id() -> str | None:
         payload={
             "name": HISTORY_PLAYLIST_NAME,
             "public": False,
-            "description": "Spotify Personal Discovery 自動管理：記錄推薦過的歌曲以避免重複。可以在 App 內按「清除歷史」清空。",
+            "description": "SoundCurator 自動管理：記錄推薦過的歌曲以避免重複。可以在 App 內按「清除歷史」清空。",
         },
     )
     st.session_state[cache_key] = new_pl["id"]

@@ -4,7 +4,10 @@
 
 ## 專案概覽
 
-**Spotify Personal Discovery** — 個人化音樂推薦 Streamlit Web App。
+**SoundCurator** — 個人化音樂推薦 Streamlit Web App。
+> 2026-08-22 顯示名稱由「Spotify Personal Discovery」改為「SoundCurator」。
+> ⚠️ GitHub repo（`spotify-personal-discovery`）與部署網址（`spotify-lml.streamlit.app`）**仍是舊識別**，
+> 只有 UI 顯示名稱、分享文字、歌單敘述改了；`HISTORY_PLAYLIST_NAME`（靠名稱找回歷史）刻意未動。
 
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
