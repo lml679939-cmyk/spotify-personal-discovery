@@ -220,7 +220,7 @@ def logout() -> None:
         "spotify_token",
         "user_profile",
         "user_display_name",
-        "found", "context_interp", "novelty_notice", "novelty_stats",
+        "found", "context_interp", "playlist_title", "playlist_blurb", "novelty_notice", "novelty_stats",
         "recommend_history",
         "user_profile_future",
         "guest_mode",
@@ -921,7 +921,7 @@ if _rl_exhausted:
         "額度會在 24 小時內逐步恢復。"
     )
 elif _rl_wait:
-    generate_slot.caption(f"⏳ 剛生成過，約 {_rl_wait} 秒後可以再按一次。")
+    generate_slot.caption(f":material/hourglass_top: 剛生成過，約 {_rl_wait} 秒後可以再按一次。")
 elif _rl_left <= 5:
     generate_slot.caption(f":material/traffic: 今日還可以生成 {_rl_left} 次。")
 if _total_hist_n > 0:
@@ -936,7 +936,7 @@ if _clicked:
     # 跟這裡之間使用者可能已經多點了幾下（按鈕的 disabled 只是前端狀態）
     elif not (_rl := ratelimit.consume(_rate_key(), time.time()))[0]:
         st.warning(
-            f"⏳ 生成太頻繁了，請等 {_rl[1]} 秒再試。" if _rl[1]
+            f"生成太頻繁了，請等 {_rl[1]} 秒再試。" if _rl[1]
             else "今日的生成次數已用完，額度會在 24 小時內逐步恢復。",
             icon=":material/traffic:",
         )
@@ -944,7 +944,7 @@ if _clicked:
         # ⚠️ 清空舊結果一定要放在這裡（確定要生成之後），不能放在 if _clicked 的開頭：
         # 那樣的話「輸入沒填」或「被冷卻擋下」也會把使用者上一份歌單清掉——
         # 手滑多點一下就白白失去剛生成好的結果。實測確認過這個症狀。
-        for k in ("found", "context_interp"):
+        for k in ("found", "context_interp", "playlist_title", "playlist_blurb"):
             st.session_state.pop(k, None)
 
         context_parts = []
@@ -955,14 +955,14 @@ if _clicked:
             with st.status("準備中...", expanded=True) as status:
                 profile = None
                 if is_guest_mode():
-                    st.write("🎶 訪客模式：不讀取個人資料")
+                    st.write(":material/person_off: 訪客模式：不讀取個人資料")
                 else:
-                    st.write("🔗 讀取 Spotify 聆聽資料...")
+                    st.write(":material/sync: 讀取 Spotify 聆聽資料...")
                     _sp_error = None
                     for _attempt in range(3):
                         try:
                             profile = fetch_user_profile()
-                            st.write(f"✅ 已讀取：{st.session_state.get('user_display_name', 'Spotify 用戶')}")
+                            st.write(f":material/check_circle: 已讀取：{st.session_state.get('user_display_name', 'Spotify 用戶')}")
                             _sp_error = None
                             break
                         except Exception as e:
@@ -975,16 +975,16 @@ if _clicked:
                         st.stop()
 
                 if auto_ctx:
-                    st.write("🌍 偵測位置與天氣...")
+                    st.write(":material/my_location: 偵測位置與天氣...")
                     try:
                         ctx = fetch_auto_context()
                         context_parts.append(f"環境情境：{ctx}")
-                        st.write(f"📍 {ctx}")
+                        st.write(f":material/location_on: {ctx}")
                     except Exception as e:
                         st.warning(f"自動偵測失敗：{e}")
 
                 if uploaded:
-                    st.write("🖼️ 分析圖片氛圍...")
+                    st.write(":material/image: 分析圖片氛圍...")
                     try:
                         if uploaded.size > 10 * 1024 * 1024:
                             st.warning(f"圖片過大（{uploaded.size / 1024 / 1024:.1f} MB），請上傳 10 MB 以內的圖片。")
@@ -993,13 +993,13 @@ if _clicked:
                             mime = uploaded.type or "image/jpeg"
                             img_ctx = analyze_image(_gemini_key(), img_bytes, mime)
                             context_parts.append(f"圖片分析：{img_ctx}")
-                            st.write(f"🎨 {img_ctx}")
+                            st.write(f":material/palette: {img_ctx}")
                     except Exception as e:
                         st.warning(f"圖片分析失敗：{e}")
 
                 if text_ctx.strip():
                     context_parts.append(f"文字描述：{text_ctx.strip()}")
-                    st.write(f"💬 文字情境已加入")
+                    st.write(":material/chat_bubble: 文字情境已加入")
 
                 # 組合使用者特質與當下狀態
                 traits_parts = []
@@ -1056,7 +1056,7 @@ if _clicked:
                 genre_msg = "、".join(genres) if genres else "不限"
                 _ratio_msg = "" if is_guest_mode() else f"新藝人 {new_artist_ratio}%・"
                 st.write(
-                    f"🤖 Gemini 生成 {num_songs} 首推薦中"
+                    f":material/auto_awesome: Gemini 生成 {num_songs} 首推薦中"
                     f"（{_ratio_msg}語言：{lang_msg}・曲風：{genre_msg}"
                     f"・避開過往 {len(history)} 首）..."
                 )
@@ -1102,7 +1102,7 @@ if _clicked:
                 if _has_spotify:
                     # 兩種模式現在都超額生成，訊息統一成「候選 → 篩出」
                     _cand_msg = f"{len(unique_recs)} 首候選 → 篩出 {num_songs} 首"
-                    st.write(f"🔍 Spotify 搜尋歌曲...（{_cand_msg}，並行搜尋）")
+                    st.write(f":material/search: Spotify 搜尋歌曲...（{_cand_msg}，並行搜尋）")
                     _search_token = _get_search_token()
                 else:
                     st.write(f"⚠️ 未設定 Spotify API，跳過搜尋（{len(unique_recs)} 首）")
@@ -1203,7 +1203,7 @@ if _clicked:
                     for _ in range(REFILL_MAX):
                         _short = num_songs - _playable(found, _novelty)
                         _refill_hint = "更冷門的" if profile is not None else "不同的"
-                        st.write(f"🔁 過濾後少了 {_short} 首，補生成一輪{_refill_hint}...")
+                        st.write(f":material/refresh: 過濾後少了 {_short} 首，補生成一輪{_refill_hint}...")
                         try:
                             _extra = get_recommendations(
                                 _gemini_key(),
@@ -1329,11 +1329,13 @@ if _clicked:
                     except Exception:
                         pass
 
-                status.update(label=f"✅ 完成！找到 {len(found)} 首推薦", state="complete")
+                status.update(label=f":material/check_circle: 完成！找到 {len(found)} 首推薦", state="complete")
 
         # 結果寫入 session_state，讓「加入歌單」按鈕能存取
         st.session_state.found = found
         st.session_state.context_interp = result.get("context_interpretation", "")
+        st.session_state.playlist_title = result.get("playlist_title", "")
+        st.session_state.playlist_blurb = result.get("playlist_blurb", "")
         # 強制重跑，讓頁面頂端的 _hist_n 讀到剛存入的歷史計數
         st.rerun()
 
@@ -1383,7 +1385,8 @@ if "found" in st.session_state and st.session_state.found:
         with save_col1:
             playlist_name = st.text_input(
                 "歌單名稱",
-                value=f"AI Discovery {_local_now().strftime('%Y-%m-%d %H:%M')}",
+                value=st.session_state.get("playlist_title", "").strip()
+                or f"我的專屬歌單 {_local_now().strftime('%m/%d')}",
                 label_visibility="collapsed",
             )
         with save_col2:
@@ -1394,7 +1397,11 @@ if "found" in st.session_state and st.session_state.found:
         with st.spinner("建立歌單並寫入 Spotify..."):
             try:
                 uris = [t["uri"] for t in found if t.get("uri")]
-                pl = create_playlist_with_tracks(playlist_name, uris)
+                pl = create_playlist_with_tracks(
+                    playlist_name, uris,
+                    description=st.session_state.get("playlist_blurb", "")
+                    or st.session_state.get("context_interp", ""),
+                )
                 st.success(f"歌單建立成功！[在 Spotify 開啟]({pl['external_urls']['spotify']})")
             except Exception as e:
                 err_msg = str(e)
@@ -1427,7 +1434,7 @@ if "found" in st.session_state and st.session_state.found:
                     st.error(f"寫入失敗：{e}")
 
     st.markdown(styles.results_header_html(len(found)), unsafe_allow_html=True)
-    view_col, plat_col, slider_col = st.columns([2, 2, 3])
+    view_col, plat_col, slider_col = st.columns([2, 2, 3], vertical_alignment="center")
     with view_col:
         view_mode = st.radio(
             "顯示方式",

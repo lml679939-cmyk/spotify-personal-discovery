@@ -504,8 +504,18 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
   🫥→search_off。styles 端：💭→紫色火花、封面佔位 🎵→`SVG_NOTES`、💿→迷你黑膠
   `_mini_vinyl()`、理由標籤的 💡 移除、BYOK 步驟去 emoji（數字圈就是視覺錨）、
   隱私徽章 🔒→新資產 `SVG_LOCK`（鎖環用線條版聯集畫法）。
-  **刻意保留的 emoji**：🧭 出圈標籤（語意標記，見「呈現層」）、生成過程的
-  st.status 敘事行（暫態文字）、警示訊息的 ⚠️ 前綴與 toast——這些不算 UI chrome。
+  **刻意保留的 emoji**：🧭 出圈標籤（語意標記，見「呈現層」）、警示訊息的 ⚠️ 前綴與 toast、
+  複製歌單分享文字開頭的 🎵（那是複製進剪貼簿的**純文字**，`:material/` 不會被解析成圖示）、
+  `page_icon` 的 🎵（瀏覽器分頁圖示，只吃 emoji／圖檔）。
+  ⚠️ **生成過程的 st.status 敘事行原本也刻意留 emoji，2026-08-22 已全部改成 Material 行內圖示**
+  （🔗→sync／✅→check_circle／🌍→my_location／📍→location_on／🖼️→image／🎨→palette／
+  💬→chat_bubble／🤖→auto_awesome／🔍→search／🔁→refresh／🎶→person_off／⏳→hourglass_top，
+  在 `app.py` 生成 handler 的 `st.status` 容器內）——使用者要求全站一致。**別再改回 emoji。**
+  只有那三行 ⚠️ 警示（連線重試／未設 Spotify API／補生成失敗）照全站警示慣例留著。
+- **行內圖示（markdown 的 `:material/xxx:`）與後面文字間距**：Streamlit 不給間距
+  （實測 gap=0、緊貼），用 `span[translate="no"]:not([data-testid="stIconMaterial"]):not([data-testid="stExpanderIcon"])`
+  補 `margin-right:0.4em`（生成敘事行／隱私／歷史／額度 caption 都受惠；那兩個 `:not()`
+  一定要在，否則會誤加到按鈕與 expander 圖示、多推一截）。上下置中實測本來就 OK（偏差 0.7px→補 margin 後量到 0）。
 - expander 圖示的染色 CSS 綁 key（`.st-key-exp_music …`），改 key 名要同步改。
 - 量測：Material 版 pills 寬 133px（emoji 版 134）、等高網格、手機 375px 皆不受影響。
 

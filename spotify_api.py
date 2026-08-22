@@ -500,16 +500,25 @@ def fetch_user_profile() -> dict:
     return profile
 
 
-def create_playlist_with_tracks(playlist_name: str, track_uris: list[str]) -> dict:
-    """建立新歌單並加入曲目，回傳歌單資訊"""
+def create_playlist_with_tracks(
+    playlist_name: str, track_uris: list[str], description: str | None = None,
+) -> dict:
+    """建立新歌單並加入曲目，回傳歌單資訊。
+
+    description 給了就用（例如 Gemini 生成的情境詩意敘述，讓歌單少一點 AI 味）；
+    沒給才退回「自動生成・時間戳」的預設。
+    """
     sp = get_spotify_client()
+    _desc = (description or "").strip() or \
+        f"由 Spotify Personal Discovery 自動生成・{_local_now().strftime('%Y-%m-%d %H:%M')}"
+    _desc = _desc[:300]  # Spotify 歌單敘述上限約 300 字，超過會被拒/截斷
     # 新 endpoint：POST /me/playlists（舊的 /users/{id}/playlists 已被移除）
     playlist = sp._post(
         "me/playlists",
         payload={
             "name": playlist_name,
             "public": False,
-            "description": f"由 Spotify Personal Discovery 自動生成・{_local_now().strftime('%Y-%m-%d %H:%M')}",
+            "description": _desc,
         },
     )
     # 新 endpoint：POST /playlists/{id}/items（舊的 /tracks 已被改名）

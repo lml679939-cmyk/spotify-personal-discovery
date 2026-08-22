@@ -137,6 +137,8 @@ def _parse_json_robust(text: str) -> dict:
     result = {
         "taste_profile": _str_field(text, "taste_profile"),
         "context_interpretation": _str_field(text, "context_interpretation"),
+        "playlist_title": _str_field(text, "playlist_title"),
+        "playlist_blurb": _str_field(text, "playlist_blurb"),
         "recommendations": [],
     }
     for m in _JSON_OBJ_RE.finditer(text):
@@ -169,6 +171,8 @@ def _flatten_channels(data: dict) -> dict:
     return {
         "taste_profile": data.get("taste_profile", ""),
         "context_interpretation": data.get("context_interpretation", ""),
+        "playlist_title": data.get("playlist_title", ""),
+        "playlist_blurb": data.get("playlist_blurb", ""),
         "recommendations": [
             r for r in recs if isinstance(r, dict) and r.get("title") and r.get("artist")
         ],
@@ -301,7 +305,18 @@ def build_prompt(
                  '"reason":"和你聽的音樂的連結，例如「與○○同廠牌」「一樣的迷幻吉他」，20字內"}')
     item_fam = '{"title":"歌名","artist":"音樂人","fame":3,"reason":"理由20字內"}'
     schema_parts = ['"taste_profile":"品味特徵 2-3 句"',
-                    '"context_interpretation":"情境理解（一句話）"']
+                    '"context_interpretation":"情境理解（一句話）"',
+                    '"playlist_title":"取一個簡短有風格的歌單名當 vibe 標籤，多用'
+                    '「英文短語 // 中文短語」或「英文 : 中文」的雙語形式（也可純英文），'
+                    '依當下情境換內容。風格參考：Pre-Workout Warmth // 暖機午後、'
+                    'Focus to Flow: 蓄能節奏、Afternoon Ignition // 漸進熱身、Mind to Muscle。'
+                    '要精簡、別寫成長句，別出現「AI」「推薦」「歌單」"',
+                    '"playlist_blurb":"用雜誌歌單編輯的口吻寫一段介紹（繁體中文，3-4 句）：'
+                    '先用有畫面感的開場鉤住情境，再點出這份歌單為什麼場景/心情而作，'
+                    '自然帶到裡面的音樂風格與氛圍，最後用一個溫暖的畫面收尾。風格像這樣：'
+                    '「城市的魅力往往不在地標，而在微雨落下時…這是一份專為在城市裡散步準備的歌單：'
+                    '帶點率性的英倫搖滾，揉合慵懶 R&B 與明亮當代流行…把尋常街景走成一段隨性鮮活的公路電影。」'
+                    '要有溫度、別像 AI 分析報告、別條列、別超過 4 句"']
     if disc_n:
         schema_parts.append(f'"discovery":[{item_disc}]')
     if fam_n:

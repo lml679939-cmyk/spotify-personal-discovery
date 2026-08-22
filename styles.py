@@ -491,6 +491,14 @@ h2.y2k-form-title {{ font-size: 2.4rem !important; }}
    它的字型由上方 span 全域規則的 :not() 排除清單保護，見那條規則的註解 */
 /* 圖示行高固定 1：行高繼承 1.6 會把連字字圖抬離盒中心，按鈕裡看起來偏上 */
 [data-testid="stIconMaterial"], [data-testid="stExpanderIcon"] {{ line-height: 1 !important; }}
+/* markdown 行內圖示（:material/xxx: 寫在 st.write / st.caption / ### 裡，例如生成敘事行、
+   隱私/歷史/額度 caption）與後面文字實測 gap=0、緊貼在一起。補右邊距拉開。
+   ⚠️ 這種變體無 testid、只有 translate="no"，且**必須**排除按鈕(stIconMaterial)與
+   expander(stExpanderIcon)——它們也帶 translate="no"、是 flex 版、間距由 flex 自理，
+   加 margin 會多推一截。上下置中實測本來就 OK（icon 中心僅低文字 0.7px），故不動垂直。 */
+span[translate="no"]:not([data-testid="stIconMaterial"]):not([data-testid="stExpanderIcon"]) {{
+    margin-right: 0.4em;
+}}
 .st-key-exp_songs [data-testid="stExpanderIcon"] {{ color: var(--y2k-pink) !important; }}
 .st-key-exp_music [data-testid="stExpanderIcon"] {{ color: #00A88A !important; }}
 .st-key-exp_mood [data-testid="stExpanderIcon"] {{ color: #E0A800 !important; }}
