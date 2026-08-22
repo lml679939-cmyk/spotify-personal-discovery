@@ -446,7 +446,7 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 - **HTML helpers**：
   - `inject_global_css()` — app.py 頂部呼叫，注入全域 CSS
   - `login_hero_html()` — 登入頁頂部 Hero 區（圖示 + 漸層標題）
-  - `form_hero_html()` — 主表單頁 Hero（音符/卡帶/黑膠三個圖示 + 漸層標題「想成為你專屬的歌單」）
+  - `form_hero_html()` — 主表單頁 Hero（放大漸層標題「想成為你專屬的歌單」左對齊＋小圖示漂浮裝飾）
     ⚠️ Streamlit 自己的 `.stMarkdown h2` 是 2.25rem，單一 class 選擇器蓋不過去——
     字級規則要寫成 `h2.y2k-form-title { font-size: … !important }`
   - `login_spotify_card()` / `login_guest_card()` — 登入方式卡片
@@ -877,22 +877,23 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 
 ## 主表單版面（Hero「想成為你專屬的歌單」，2026-08 漸進式揭露改版）
 
-> 標題已從 `st.subheader()` 改成 `styles.form_hero_html()`（圖示 + 漸層字，與登入頁同一套視覺）。
+> 標題走 `styles.form_hero_html()`：一行**左對齊的大漸層字**「想成為你專屬的歌單」＋小圖示漂浮裝飾。
 
-**Hero 尺寸（2026-08 放大）**：與登入頁 hero **同級**，不要再做「小一階」——兩個 hero
-不會同時出現（一個在登入頁、一個在表單頁），各自都是該頁主標題，做小反而沒有標題感。
-- 圖示 `68 / 76 / 56` px（三個 SVG 長寬比不同，是逐個微調的，別統一成同一個數字）
-- 標題 `h2.y2k-form-title` 桌機 2.4rem、手機 2rem。⚠️ 2026-08-22 曾試 2.6rem 對齊登入 hero 的
-  SoundCurator wordmark，但**表單 hero 是「圖示＋標題」、登入 hero 只有字**，同字級會讓標題墨水高
-  ≈圖示高（量到 56.8 vs 56）又更寬（372 vs 圖示群 ~232），把圖示比成配角、看起來頭重——**已改回
-  2.4rem，兩個 hero 刻意不同字級**。別再為了「一致」把它改成 2.6rem。
-  ⚠️ Streamlit 的 `.stMarkdown h2` 是 2.25rem，**單一 class 選擇器蓋不過去**，
-  一定要寫成 `h2.y2k-form-title { … !important }`
-- 手機圖示用 `.y2k-form-icons > span { transform: scale(0.82) }` 縮一階
-  ⚠️ **選擇器必須限定在圖示列**。寫成 `.y2k-form-hero span` 會連標題文字一起縮小——
-  Streamlit 會在 `<h2>` 裡再包一層 span，量到 `transform: matrix(0.82,…)` 就是踩到這個。
-- 量測值：桌機圖示 68/76/56、標題 38.4px、hero 高 117px；
-  手機圖示 56/62/46、標題 32px 單行、hero 高 109px；兩者皆無水平溢出。
+**設計（2026-08-22 定案，多輪迭代）**：演進是「三大圖示置中→拿掉圖示改左對齊→加回小裝飾」。
+使用者最終要：大標題、左對齊（跟表單元素齊）、圖示縮小為精緻裝飾（不是舊的三大置中圖示）。
+- **左對齊**：hero `text-align:left`，標題左緣對齊表單元素（實測 380==生成鈕左緣）。
+  左對齊後 Streamlit 標題尾端錨點不再推偏（那是**置中**才有的問題），順帶少一個雷。
+- **標題** `h2.y2k-form-title` 桌機 **2.9rem**、手機 2rem（!important；`.stMarkdown h2` 預設 2.25rem
+  蓋不過，一定要寫 `h2.y2k-form-title { … !important }`）。⚠️ 別再回頭對齊登入 wordmark——
+  之前試 2.6rem 頭重是因為當時還有**大圖示**；現在無大圖示、2.9rem 沒問題，且兩 hero 在不同頁本就不必同字級。
+- **裝飾**（都掛 `.y2k-decor` 類別，方便手機一次收掉）：黑膠＋青星芒用 `position:absolute` 漂左上角；
+  黃星芒＋音符＋紫星芒**接在標題後面 inline**（`align-self:flex-start/flex-end` + margin 做浮動高低差）。
+  ⚠️ 右側裝飾**別用 `position:absolute; right:` 貼右邊緣**——hero 很寬會讓它們飄到遠處、把焦點拉散
+  （使用者實測嫌棄過）；改成 inline 接在標題後才會「貼著標題、收攏」。左上的用絕對定位沒問題。
+  ⚠️ hero 要 `position:relative`＋`min-height:148px` 撐出裝飾空間、且容器包住裝飾才不會蓋到下面表單。
+  標題 div 要 `z-index:2` 蓋在裝飾上（萬一重疊，字在上面才讀得到）。
+- **手機**（media query）：`.y2k-decor { display:none }`＋`.y2k-form-hero { min-height:0 }`——375px 下
+  裝飾會蓋到縮小標題/溢出，直接收掉，只留大標題＋**標題尾那顆黃星芒**（它不是 `.y2k-decor`、刻意保留）。實測無水平溢出。
 
 ```
 第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → 生成按鈕

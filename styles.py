@@ -401,7 +401,7 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 [data-testid="stMarkdownContainer"]:has(.y2k-login-hero) {{ margin-bottom: 0 !important; }}
 /* ⚠️ Streamlit 自己的 .stMarkdown h2 是 2.25rem，單一 class 選擇器蓋不過去——
    一定要寫成 h2.y2k-form-title 並加 !important */
-h2.y2k-form-title {{ font-size: 2.4rem !important; }}
+h2.y2k-form-title {{ font-size: 2.9rem !important; }}
 
 /* 標題裡不想被拆散的補充片語（例如括號說明）：整段當一個字，
    要換行就整段換到下一行，不會斷成「…給 AI / 分析）」 */
@@ -582,7 +582,12 @@ span[translate="no"]:not([data-testid="stIconMaterial"]):not([data-testid="stExp
     /* 兩欄堆疊後上傳區是獨立欄位，維持 16px（桌機的 -8 是要貼齊隱形標題）*/
     .st-key-ctx_image {{ margin-top: 0 !important; }}
     h2.y2k-form-title {{ font-size: 2rem !important; }}
-    /* 圖示跟著縮一階，否則 375px 寬下三個圖示會把標題擠掉。
+    /* 表單 hero 的漂浮裝飾在 375px 會蓋到縮小的標題/溢出——手機直接收掉，
+       只留大標題＋標題尾那顆星芒（它在標題 div 內、不是 .y2k-decor，會保留）；
+       hero 也不用 min-height 撐裝飾空間了 */
+    .y2k-decor {{ display: none !important; }}
+    .y2k-form-hero {{ min-height: 0 !important; }}
+    /* 舊圖示列規則（現在無圖示，留著無害）：
        ⚠️ 選擇器一定要限定在圖示列——Streamlit 會在 <h2> 裡再包一層 span，
        寫成 .y2k-form-hero span 會連標題文字一起被縮小。 */
     .y2k-form-icons > span {{ transform: scale(0.82); }}
@@ -708,25 +713,42 @@ def login_hero_html():
 
 
 def form_hero_html():
-    """主表單頁的標題區：跟登入頁同一套視覺語言（圖示列 + 漸層字）。
+    """主表單頁的標題：放大漸層字＋小圖示漂浮裝飾、左對齊（2026-08-22，使用者定案）。
 
-    尺寸與登入頁的 hero 同級——這兩個 hero 不會同時出現（一個在登入頁、一個在表單頁），
-    各自都是該頁的主標題，做小一階反而沒有標題感。圖示寬度是逐個微調的
-    （三個 SVG 的長寬比不同），不要統一成同一個數字。
-
-    用注入 HTML 而不是 st.subheader，是為了避開 Streamlit 插在標題尾端的錨點元素
-    （inline-flex，會把置中標題推偏，手機換行時特別明顯）。
+    C·非對稱漂浮 ＋ A·標題尾星芒：黑膠＋星芒漂左上、音符＋星芒漂右下、標題尾綴一顆星芒。
+    圖示是「縮小的精緻裝飾」不是主角——`position:absolute` 定在 hero 四角留白、z-index 低於標題。
+    ⚠️ 字級走 CSS 的 `h2.y2k-form-title`（!important，桌機 2.9rem／手機 2rem）。
+    ⚠️ 標題左對齊、左緣對齊表單元素；裝飾用 `.y2k-decor` 類別方便手機 media query 收掉/縮小。
+    ⚠️ hero 用 `position:relative`＋`min-height` 撐出裝飾空間，容器要包住裝飾才不會蓋到下面表單。
     """
-    return _tidy(f"""<div class="y2k-form-hero" style="text-align:center;padding:0.2rem 0 0 0">
-  <div class="y2k-form-icons" style="display:flex;justify-content:center;align-items:center;gap:16px;margin-bottom:0.6rem">
-    <span style="display:inline-block;width:68px">{SVG_NOTES}</span>
-    <span style="display:inline-block;width:76px">{SVG_CASSETTE}</span>
-    <span style="display:inline-block;width:56px">{SVG_VINYL}</span>
-  </div>
-  <h2 class="y2k-form-title" style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;
-    background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);
-    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-    margin:0;padding:0;line-height:1.25;text-align:center">想成為你專屬的歌單</h2>
+    _vinyl = ('<svg viewBox="0 0 100 100" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">'
+              '<circle cx="50" cy="50" r="45" fill="#2D1B4E"/>'
+              '<circle cx="50" cy="50" r="30" fill="none" stroke="#FF69B4" stroke-width="0.6" opacity="0.4"/>'
+              '<circle cx="50" cy="50" r="22" fill="none" stroke="#9B59B6" stroke-width="0.8" opacity="0.5"/>'
+              '<circle cx="50" cy="50" r="15" fill="#FF69B4"/><circle cx="50" cy="50" r="10" fill="#FFD700"/>'
+              '<circle cx="50" cy="50" r="4" fill="#2D1B4E"/></svg>')
+    _notes = ('<svg viewBox="0 0 80 60" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">'
+              '<g fill="#FF69B4"><ellipse cx="17" cy="45.5" rx="7.5" ry="5.5" transform="rotate(-20 17 45.5)"/>'
+              '<rect x="19.6" y="12" width="3.4" height="33.5" rx="1.7"/>'
+              '<path d="M22.5 12 C30.5 14.5 35 19 31.9 25.4 C31.6 26.1 31 26 30.8 25.3 C32.2 20 28.8 17 22.5 18.6 Z"/></g>'
+              '<g fill="#00D4AA"><ellipse cx="47" cy="43.5" rx="7.5" ry="5.5" transform="rotate(-20 47 43.5)"/>'
+              '<ellipse cx="66" cy="39.5" rx="7.5" ry="5.5" transform="rotate(-20 66 39.5)"/>'
+              '<rect x="49.6" y="9" width="3.4" height="34.5" rx="1.7"/><rect x="68.6" y="5" width="3.4" height="34.5" rx="1.7"/>'
+              '<path d="M49.6 8 L72 4 L72 9.5 L49.6 13.5 Z"/></g></svg>')
+
+    def _spark(c):
+        return ('<svg viewBox="0 0 30 30" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">'
+                f'<path d="M15 2 L17.5 12 L28 15 L17.5 18 L15 28 L12.5 18 L2 15 L12.5 12Z" fill="{c}"/></svg>')
+
+    return _tidy(f"""<div class="y2k-form-hero" style="position:relative;min-height:148px;box-sizing:border-box;display:flex;align-items:center;padding:0.2rem 0">
+<span class="y2k-decor" style="position:absolute;top:6px;left:2px;width:30px;transform:rotate(-10deg)">{_vinyl}</span>
+<span class="y2k-decor" style="position:absolute;top:18px;left:46px;width:17px">{_spark('#00D4AA')}</span>
+<div style="position:relative;z-index:2;display:flex;align-items:center;gap:9px">
+<h2 class="y2k-form-title" style="font-family:'Nunito','Noto Sans TC',sans-serif;font-weight:900;background:linear-gradient(135deg,#FF69B4,#9B59B6,#00D4AA);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0;padding:0;line-height:1.15;text-align:left">想成為你專屬的歌單</h2>
+<span style="width:22px;flex:none;align-self:flex-start;margin-top:2px">{_spark('#FFD700')}</span>
+<span class="y2k-decor" style="width:38px;flex:none;align-self:flex-end;margin-bottom:4px;transform:rotate(8deg)">{_notes}</span>
+<span class="y2k-decor" style="width:16px;flex:none;align-self:flex-start;margin-top:10px">{_spark('#9B59B6')}</span>
+</div>
 </div>""")
 
 
