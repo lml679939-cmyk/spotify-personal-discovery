@@ -93,7 +93,9 @@ python -m pytest -q                     # 199 tests，改任何 .py 都要跑
 > 已 push＋部署（工作區乾淨、199 tests 全過）。顯示名稱已改 **SoundCurator**、網址
 > `soundcurator.streamlit.app`（repo 仍 spotify-personal-discovery）。**驗收第 1 輪已完成**
 > （S1–S6 全進 `EVAL.md`，全 15/15 可播）。最近幾批：歌單命名有溫度化、結果頁版面校準、
-> 改名＋換網域、登入 hero 換成 Option C（黑膠當 Sound 的 o＋tagline，高度對齊表單 hero）。
+> 改名 SoundCurator＋換網域、**兩個 hero 全改版**——登入頁 Option C（黑膠當 Sound 的 o＋tagline）、
+> 表單頁大漸層字左對齊＋小圖示漂浮裝飾（詳見「主表單版面」與「版面幾何」兩段）。
+> ⚠️ 演算法本身（recommend/curate/spotify_api）近期**沒動**，改的都是 UI／版面／命名／文件。
 
 1. **開工第 2 輪演算法**（第 1 輪 eval 已是基準，可以動了）。依 `EVAL.md` 備註的證據排序：
    ① **指定歌手保底佔比**（最該先做）——S4：使用者想點開的 100% 是指定歌手、實際只給 27%。
@@ -1071,6 +1073,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
+| `0d86919` | feat: 表單 hero 改版——放大漸層標題（2.9rem）左對齊＋小圖示漂浮裝飾（黑膠/青星芒 absolute 漂左上、黃星芒/音符/紫星芒 inline 貼標題後收攏、手機 `.y2k-decor` 收掉），取代三大置中圖示。⚠️ 右裝飾別用 `absolute; right:` 貼右邊緣（hero 很寬→飄太遠、焦點拉散）、改 inline 貼標題後才收攏; docs: 主表單版面段重寫 |
+| `9b7455a`／`d83cbfa` | feat: 登入 hero Option C（黑膠當 Sound 的「o」＋tagline「不推弟，只推歌。還不快叫我乾歌」，取代三貼紙圖示＋漸層字）、高度對齊表單 hero（`min-height:117`＋`:has(.y2k-login-hero)` 歸零 -16px）；表單標題先 2.4→2.6rem 再改回 2.4rem（同字級會頭重、兩 hero 構圖不同故刻意不同字級——後於 0d86919 整個改版） |
 | `fe869fb`／`5de7d2b` | refactor: 顯示名稱 Spotify Personal Discovery → **SoundCurator**（hero／分頁／分享文字／歌單敘述／docstring／README；`HISTORY_PLAYLIST_NAME` 未動）；docs: 部署網址 spotify-lml → `soundcurator.streamlit.app`（`_is_local_dev()` 只認 localhost、不受影響）。⚠️ 換子網域要同步 Streamlit App URL＋Spotify Redirect URI＋Streamlit Secrets 三處，否則方式二 redirect mismatch |
 | `4efad24` | fix: 結果頁「AI 情境解讀」火花置中（translateY -1.5px）、框下邊距 0.8rem→1rem 使 →🧭 caption 間距回全站 16px 節奏（皆先量再改） |
 | `210827a` | feat: 歌單命名有溫度化——Gemini 回應多生 `playlist_title`（短雙語 vibe 標籤，few-shot 你給的 Pre-Workout Warmth // 暖機午後 那類）＋ `playlist_blurb`（雜誌編輯口吻導言）；存歌單時 name 用 title、description 用 blurb（退 `context_interp`→自動生成時間戳），`create_playlist_with_tracks` 收 `description` 參數＋300 字上限；生成敘事行 emoji→Material 行內圖示（🔗→sync 等 11 個，⚠️ 警示保留）＋行內圖示補 `margin-right:0.4em`；結果控制列 `st.columns(vertical_alignment="center")`; docs: 驗收第 1 輪補完 S6（登入探索出圈率 100%、pop_blocked=10 證實登入天花板有效） |
