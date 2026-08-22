@@ -115,15 +115,23 @@ def _svg_inline(svg_str, width=60):
 
 
 def _mini_vinyl(size=12):
-    """行內迷你黑膠（取代 💿）：縮到文字行高內、微降對齊專輯名的 x-height 中心。
+    """行內迷你黑膠（取代 💿）：填滿行內小方框、對齊專輯名的視覺墨水中心。
 
-    ⚠️ vertical-align 是量測校準值（先量再改）：canvas 量到專輯名 0.75rem 的 x-height=6px，
-    黑膠(12px)中心要落在 baseline-3（x-height 中心）才視覺置中 → vertical-align:-3px。
-    舊值 -2px 讓黑膠中心在 x-height 上方 1px、看起來偏高（使用者實測嫌棄）。
-    公式：`-((size - xh)/2)px`；改 size 或專輯名字級都要重算。
+    ⚠️ 兩件事都是量測結果（先量再改），缺一不可——之前只調 vertical-align 沒調第①點，
+    使用者 reboot 兩次都說「沒有置中」，根因就在這：
+    ① `SVG_VINYL` 預設 display:inline，會坐在文字 baseline 上、在 span 內偏低 4.7px（實測），
+       所以黑膠中心根本不在 span 中心，vertical-align 再怎麼算都白校。**注入 display:block**
+       讓 SVG 以區塊填滿並置中 span（實測 svg 中心 == span 中心、殘差 0）才有意義。
+       登入 hero 的黑膠 o、表單 hero 的裝飾黑膠早就這樣做（那些 SVG 都帶 display:block）。
+    ② display:block 之後版面才線性可算：實測「黑膠中心 − x-height 中心 = -vertical-align - 3」(px)。
+       目標放在**文字墨水光學中心**（含大寫/上緣，比 x-height 中心高 1–2px）：
+       -2px → 正中拉丁專輯名墨水中心、CJK 名只低 1px（雙向最大偏差 1px，實測最佳折衷）。
+       -3px＝落在 x-height 中心，拉丁/CJK 都偏低 1–2px（看起來偏低）。改 size 或專輯字級要重量。
     """
+    svg = SVG_VINYL.replace(
+        "<svg ", '<svg style="display:block;width:100%;height:100%" ', 1)
     return (f'<span style="display:inline-block;width:{size}px;height:{size}px;'
-            f'vertical-align:-3px">{SVG_VINYL}</span>')
+            f'vertical-align:-2px">{svg}</span>')
 
 
 
