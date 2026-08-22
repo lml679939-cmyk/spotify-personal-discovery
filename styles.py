@@ -115,9 +115,15 @@ def _svg_inline(svg_str, width=60):
 
 
 def _mini_vinyl(size=12):
-    """行內迷你黑膠（取代 💿）：縮到文字行高內、微降 2px 對齊 x-height。"""
+    """行內迷你黑膠（取代 💿）：縮到文字行高內、微降對齊專輯名的 x-height 中心。
+
+    ⚠️ vertical-align 是量測校準值（先量再改）：canvas 量到專輯名 0.75rem 的 x-height=6px，
+    黑膠(12px)中心要落在 baseline-3（x-height 中心）才視覺置中 → vertical-align:-3px。
+    舊值 -2px 讓黑膠中心在 x-height 上方 1px、看起來偏高（使用者實測嫌棄）。
+    公式：`-((size - xh)/2)px`；改 size 或專輯名字級都要重算。
+    """
     return (f'<span style="display:inline-block;width:{size}px;height:{size}px;'
-            f'vertical-align:-2px">{SVG_VINYL}</span>')
+            f'vertical-align:-3px">{SVG_VINYL}</span>')
 
 
 
@@ -850,9 +856,11 @@ def track_card_html(track, index, compact_badge=False):
     )
 
     # 沒有理由文字時整塊不畫——否則會留下一個只有 💡 的空標籤（密集網格會把 reason 清掉）
+    # ⚠️ padding 上4下1 刻意不對稱：CJK 字在行框裡偏上（實測墨水中心比對稱 padding 的 pill 中心高
+    #    1.56px），多給上邊距把字壓下來才視覺置中（先量再改，pad 4/1 量到殘差 -0.06px）。
     reason_html = (
         f'<div style="margin-top:5px">'
-        f'<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7rem;'
+        f'<span style="display:inline-block;padding:4px 8px 1px 8px;border-radius:10px;font-size:0.7rem;'
         f"font-weight:700;color:{accent_text};background:{accent};"
         f"font-family:'Nunito','Noto Sans TC',sans-serif;"
         f'border:1.5px solid #2D1B4E;max-width:100%;overflow:hidden;'
