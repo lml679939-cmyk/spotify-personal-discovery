@@ -534,6 +534,28 @@ def test_fav_floor_matches_pool_by_tag_across_scripts():
     assert any(t["name"] == "My Jinji" for t in result)
 
 
+def test_fav_floor_counts_romanized_llm_card_via_artist_id():
+    # ① CJK id 比對：LLM 卡被搜尋端解析成羅馬拼音（陳綺貞→Cheer Chen），名字對不上；
+    # pool 卡帶同一個 artist_id → 用 id 認出來，fav_have 不再低估（否則會多抓、overshoot）
+    llm_card = {"name": "旅行的意義", "artist": "Cheer Chen",
+                "artist_names": ["Cheer Chen"], "artist_ids": ["ar_cheer"]}
+    tracks = [llm_card] + [_t(f"ctx{i}", f"N{i}") for i in range(6)]
+    pool = [{"name": "太陽", "artist": "Cheer Chen", "artist_names": ["Cheer Chen"],
+             "artist_ids": ["ar_cheer"], "_fav_artist": "陳綺貞"}]
+    result, stats = curate_tracks(
+        tracks, num_songs=6, fav_artists=["陳綺貞"], fav_pool=pool,
+    )
+    # 沒有 id 比對的話 "Cheer Chen" ≠ "陳綺貞" → fav_have=0；有 id → 認出 LLM 卡 → 1
+    assert stats["fav_have"] == 1
+
+
+def test_track_matches_fav_by_id_when_name_differs():
+    # 單元層級：純靠 artist_id、名字完全對不上也算 fav
+    card = {"name": "x", "artist": "Cheer Chen", "artist_ids": ["ar_cheer"]}
+    assert _track_matches_fav(card, ["陳綺貞"], {"陳綺貞"}, {"ar_cheer"}) is True
+    assert _track_matches_fav(card, ["陳綺貞"], {"陳綺貞"}) is False   # 沒給 id 就比不出來
+
+
 def test_fav_floor_without_pool_only_reports_stats():
     # 第一輪 curate（fav_pool=None）只算 fav_floor/fav_have 供 app.py 決定要不要去抓 pool
     tracks = [_t("fav1", "陳綺貞")] + [_t(f"ctx{i}", f"N{i}") for i in range(6)]

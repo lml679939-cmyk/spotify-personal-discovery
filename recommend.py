@@ -776,13 +776,23 @@ def _fav_norm_set(fav_artists: list[str] | None) -> set[str]:
     return {n for n in (_norm_artist(f) for f in (fav_artists or [])) if n}
 
 
-def _track_matches_fav(t: dict, fav_artists: list[str] | None, fav_norm: set[str]) -> bool:
-    """這首歌是不是來自指定歌手之一。
+def _track_matches_fav(
+    t: dict,
+    fav_artists: list[str] | None,
+    fav_norm: set[str],
+    fav_ids: set[str] | None = None,
+) -> bool:
+    """這首歌是不是來自指定歌手之一。比對優先序：
 
-    pool 卡帶 `_fav_artist` 標籤（在 fetch 時就綁定，跨文字系統可靠——
-    「落日飛車」抓回來的曲目主藝人可能顯示成 "Sunset Rollercoaster"）；
-    LLM 卡沒有標籤，靠藝名正規化比對（同文字系統），再加 _loose_match 當寬鬆備援。
+    1. **Spotify artist id**（`fav_ids`，最可靠、跨文字系統）——認得出被搜尋端解析成羅馬
+       拼音的 LLM 卡（陳綺貞→"Cheer Chen"）：名字比不出來、id 一樣。id 由 `_apply_fav_floor`
+       從 pool 卡免費收集（pool 卡就是該歌手的曲目，見那裡）；沒帶 fav_ids 時退回名字比對。
+    2. `_fav_artist` 標籤（pool 卡在 fetch 時綁定，同樣跨文字系統可靠——「落日飛車」抓回來
+       的曲目主藝人可能顯示成 "Sunset Rollercoaster"）。
+    3. 藝名正規化比對（LLM 卡、同文字系統），再加 _loose_match 當寬鬆備援。
     """
+    if fav_ids and (set(t.get("artist_ids") or ()) & fav_ids):
+        return True
     tag = _norm_artist(t.get("_fav_artist", ""))
     if tag and tag in fav_norm:
         return True
@@ -823,8 +833,20 @@ def _apply_fav_floor(
     if not fav_norm:
         return result
 
+    # ① CJK id 比對：從 pool 卡收集每位指定歌手的 Spotify artist id（pool 卡就是該歌手的
+    # 曲目，主藝人 id[0] ＝ 該歌手 id）。用 id 能認出被搜尋端解析成羅馬拼音的 LLM 卡
+    # （陳綺貞→"Cheer Chen"，名字比不出來、id 一樣），fav_have 才不會低估、避免 overshoot。
+    # 零額外 API：id 是 pool 免費附帶的。pool 為 None（第一輪）時這裡是空的，退回名字比對。
+    fav_ids_by_norm: dict[str, set[str]] = {}
+    for c in (fav_pool or []):
+        tag = _norm_artist(c.get("_fav_artist", ""))
+        aids = c.get("artist_ids") or []
+        if tag in fav_norm and aids:
+            fav_ids_by_norm.setdefault(tag, set()).add(aids[0])
+    fav_ids_all: set[str] = set().union(*fav_ids_by_norm.values()) if fav_ids_by_norm else set()
+
     def _is_fav(t: dict) -> bool:
-        return _track_matches_fav(t, fav_artists, fav_norm)
+        return _track_matches_fav(t, fav_artists, fav_norm, fav_ids_all)
 
     def _key(t: dict) -> tuple[str, str]:
         return _track_key_from(t.get("name") or t.get("title") or "", _track_primary(t))
@@ -844,14 +866,18 @@ def _apply_fav_floor(
     for c in fav_pool:
         tag = _norm_artist(c.get("_fav_artist", ""))
         bucket = tag if tag in buckets else next(
-            (f for f in fav_norm if _track_matches_fav(c, fav_artists, {f})), None
+            (f for f in fav_norm
+             if _track_matches_fav(c, fav_artists, {f}, fav_ids_by_norm.get(f))), None
         )
         if bucket is None or _key(c) in present:
             continue
         buckets[bucket].append(c)
 
-    # 目前各指定歌手已貢獻幾首——先補「較少的」那位，達成平均分配
-    rep = {f: sum(1 for t in have if _track_matches_fav(t, fav_artists, {f})) for f in fav_norm}
+    # 目前各指定歌手已貢獻幾首——先補「較少的」那位，達成平均分配（同樣走 id 比對，
+    # 才不會把羅馬拼音的 LLM 卡漏算成 0、害那位歌手被過度回補）
+    rep = {f: sum(1 for t in have
+                  if _track_matches_fav(t, fav_artists, {f}, fav_ids_by_norm.get(f)))
+           for f in fav_norm}
     per_cap = max(MAX_TRACKS_PER_ARTIST, -(-floor // len(fav_norm)))  # 保底÷人數，向上取整
 
     add: list[dict] = []
