@@ -925,10 +925,6 @@ projective_answer = st.text_input(
     label_visibility="collapsed",
 )
 
-# 生成按鈕的版面位置。實際內容要等下方所有 widget 都建立完才填得進去，
-# 用 container 佔位就能讓按鈕顯示在偏好設定「上面」，程式碼卻仍在後面。
-generate_slot = st.container()
-
 # 推薦歷史：狀態列跟著生成按鈕走，清除按鈕收進「推薦歌曲數」（罕用且不可逆）
 _session_hist_n = len(st.session_state.get("recommend_history", []))
 _persistent_hist_n = 0 if is_guest_mode() else len(load_persistent_history())
@@ -1115,7 +1111,8 @@ with st.expander(f"關於你　·　{_traits_sum}", expanded=False,
     with col_zd:
         zodiac = st.selectbox("星座", ZODIAC_OPTIONS, key="zodiac")
 
-# ══ 把生成按鈕填回上方預留的位置 ═════════════════════════
+# ══ 生成按鈕：放在所有偏好設定之後（使用者填完再送出，2026-08-23 從表單上方移到這裡）═══
+generate_slot = st.container()   # 就在此建，按鈕/狀態/進度都渲染在「關於你」下方
 # 節流狀態要在建立按鈕「之前」算好——按鈕的 disabled 參數當下就要定
 _rl_ok, _rl_wait, _rl_left = ratelimit.status(_rate_key(), time.time())
 _rl_exhausted = not _rl_ok and not _rl_wait
@@ -1698,8 +1695,6 @@ if "found" in st.session_state and st.session_state.found:
     st.markdown(styles.results_header_html(len(found)), unsafe_allow_html=True)
     # 同意閘：歌單出現後才邀請記住回饋（登入＋DB可用＋未同意時）
     _render_consent_banner()
-    # 歌單層級 3 段滿意度（同意後才顯示）——主動打分的低成本訊號
-    _render_playlist_rating()
     view_col, plat_col, slider_col = st.columns([2, 2, 3], vertical_alignment="center")
     with view_col:
         view_mode = st.radio(
@@ -1808,8 +1803,9 @@ if "found" in st.session_state and st.session_state.found:
             st.link_button(_label, _url, width="stretch")
             _render_feedback(track)
 
-    # ── 複製 / 分享到 LINE ──────────────────────────────────
+    # ── 歌單整體評分：瀏覽完歌單之後、複製之前才問（使用者看過清單再評分）──
     st.divider()
+    _render_playlist_rating()
 
     # 組合可分享的純文字（在欄位外先計算，不渲染任何元件）
     _ctx = st.session_state.get("context_interp", "")

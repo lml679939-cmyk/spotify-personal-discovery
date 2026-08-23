@@ -985,8 +985,9 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
   裝飾會蓋到縮小標題/溢出，直接收掉，只留大標題＋**標題尾那顆黃星芒**（它不是 `.y2k-decor`、刻意保留）。實測無水平溢出。
 
 ```
-第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題 → 生成按鈕
+第一層（一進來就看到）  情境輸入（自動偵測 / 文字 / 圖片）→ 投射問題
 第二層（摺疊 expander） 推薦歌曲數 · 音樂偏好 · 現在的心情 · 關於你（圖示走 Material，見「圖示系統」）
+生成按鈕                （2026-08-23 起放在四個摺疊區之後、表單最底——使用者填完偏好再送出）
 （活動情境 pills 已於 2026-08 移除——與「分享一下你的日常吧」文字欄重複）
 ```
 
@@ -996,8 +997,10 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
   沒有 key 時 Streamlit 用標題文字認元件，摘要一變就被當成新元件重建、摺疊狀態歸零——
   症狀是「拖一下滑桿面板就自己關起來」。`st.expander(key=...)` 需要 Streamlit >= 1.57。
 - `_brief(items, limit=2)` 把多選縮成「前 2 項 +N」；`_summary(parts, empty)` 組合摘要、全空時顯示 empty。
-- **生成按鈕用 `generate_slot = st.container()` 佔位**：版面在摺疊區上方，程式碼卻在所有 widget 之後，
-  這樣 handler 才讀得到 `languages` / `mood_energy` 等變數。進度狀態也走 `generate_slot.columns()`。
+- **生成按鈕在「關於你」之後、表單最底**（2026-08-23 從表單上方移下來，使用者填完偏好再送出）。
+  `generate_slot = st.container()` 就在四個 expander **之後**才建，按鈕/狀態/進度都渲染在此；
+  因為已在所有 widget 後面，handler 本來就讀得到 `languages` / `mood_energy`（不再需要「佔位」技巧）。
+  進度狀態也走 `generate_slot.columns()`。
 - 投射問題那一列包在 `st.container(key="proj_row")` 裡，`styles.py` 用 `.st-key-proj_row` 把兩欄
   改成 `flex:0 0 auto; width:auto`、`gap:1.25rem`——題目長度 170–403px 差很多，固定欄寬時
   短題目後面會空一大片（量到 500px）。改完不論題目長短，按鈕都固定在題目右側 20px，
@@ -1033,8 +1036,11 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
   `consume_oauth_callback()` 把 `?error=` 或 token 交換例外寫進 `st.session_state["spotify_auth_error"]`，
   登入頁只在有值時 `st.warning()`。首頁平常只留一行「🔒 Token 只存在瀏覽器分頁記憶體」。
 - expander 內距 `[data-testid="stExpanderDetails"]` 上下各 1.35rem（21.6px），0.75rem 太擠。
-- 「推薦歌曲數」緊接在生成按鈕下方（程式碼也放在 `generate_slot` 之後、其他 expander 之前）。
-  清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數顯示在生成按鈕下方。
+- 「推薦歌曲數」是第一個摺疊區（在生成按鈕**上方**了，2026-08-23 生成按鈕下移後）。
+  清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數／冷卻狀態顯示在生成按鈕**下方**（跟著 `generate_slot`）。
+- **歌單整體評分（3 段 😕🙂😍）在結果區「歌曲清單之後、複製歌單之前」**（`_render_playlist_rating`，
+  2026-08-23 從結果頂端移下來——使用者瀏覽完清單再評分才合理，見「回饋訊號設計」`FEEDBACK_PERSISTENCE.md`）。
+  同意卡（`_render_consent_banner`）仍在結果**頂端**（那是一次性的閘、要先看到）。
 - ⚠️ **widget 已經渲染之後**再用 `st.session_state["mbti"] = ...` 手動寫入會被 Streamlit 擋下。
   但「在該 widget 這一輪還沒建立**之前**先寫」是合法的——`app.py` 的「換一題」就靠這招
   重設 `projective_a`（寫完馬上 `st.rerun()`，下一輪 widget 才讀到新值）。
