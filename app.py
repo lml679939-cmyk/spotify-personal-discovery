@@ -698,46 +698,58 @@ def _persist_history(found: list[dict]) -> None:
         _persist_fail()
 
 
-def _render_persist_sidebar() -> None:
-    """登入 ＋ DB 可用時，在 sidebar 顯示同意鈕（未同意）或刪除鈕（已同意）。"""
+def _render_consent_banner() -> None:
+    """未同意時，在**主頁面**（表單上方）顯示同意提示。
+
+    ⚠️ 刻意不放 sidebar——sidebar 預設收合、又用 CSS 藏了頂部列，同意鈕藏在裡面使用者
+    根本找不到（實測）。一個「要不要開始記住資料」的關鍵開關必須在主流程看得見。
+    """
     uk = _persist_uk()
-    if not uk:
+    if not uk or not st.session_state.get("persist_needs_consent"):
+        return
+    with st.container(key="consent_banner"):
+        st.info(
+            "想讓推薦越用越準嗎？同意後，你的 :material/thumb_up: / :material/thumb_down: / "
+            ":material/headphones: 與推薦歷史會以**雜湊後、看不出是誰**的形式存在本站，"
+            "用來改善推薦、並跨裝置同步——隨時可在左側選單一鍵刪除。",
+            icon=":material/database:",
+        )
+        if st.button("同意並開始記住回饋", icon=":material/check_circle:", key="consent_btn"):
+            uk2 = _persist_uk()
+            try:
+                conn = db.get_conn()
+                if conn is not None and uk2:
+                    db.set_consent(conn, uk2)
+                    st.session_state["persist_needs_consent"] = False
+                    st.session_state["persist_synced"] = False   # 觸發下一輪讀回
+            except Exception:
+                _persist_fail()
+            st.rerun()
+
+
+def _render_persist_sidebar() -> None:
+    """**已同意後**才在 sidebar 顯示「已記住」狀態＋刪除鍵——刪除是設定類、偶爾才用，
+    放收合的 sidebar 剛好；同意閘則走 _render_consent_banner 放主頁面。"""
+    uk = _persist_uk()
+    if not uk or st.session_state.get("persist_needs_consent"):
         return
     with st.sidebar:
         st.markdown("---")
-        if st.session_state.get("persist_needs_consent"):
-            st.caption(
-                ":material/database: 想讓推薦越用越準嗎？同意後，你的 :material/thumb_up: / "
-                ":material/thumb_down: / :material/headphones: 與推薦歷史會以**雜湊後、看不出是誰**"
-                "的形式存在本站，用來改善推薦、並跨裝置同步，隨時可一鍵刪除。"
-            )
-            if st.button("同意並開始記住回饋", icon=":material/check_circle:", width="stretch"):
-                uk2 = _persist_uk()
-                try:
-                    conn = db.get_conn()
-                    if conn is not None and uk2:
-                        db.set_consent(conn, uk2)
-                        st.session_state["persist_needs_consent"] = False
-                        st.session_state["persist_synced"] = False   # 觸發下一輪讀回
-                except Exception:
-                    _persist_fail()
-                st.rerun()
-        else:
-            st.caption(":material/database: 回饋與歷史已跨裝置記住（雜湊儲存）。")
-            if st.button("刪除我在本站的所有資料", icon=":material/delete:", width="stretch"):
-                uk2 = _persist_uk()
-                try:
-                    conn = db.get_conn()
-                    if conn is not None and uk2:
-                        db.delete_all(conn, uk2)
-                except Exception:
-                    _persist_fail()
-                for _k in ("track_feedback", "recommend_history", "persist_synced"):
-                    st.session_state.pop(_k, None)
-                for _wk in [w for w in st.session_state if isinstance(w, str) and w.startswith("w_fb::")]:
-                    st.session_state.pop(_wk, None)
-                st.session_state["persist_needs_consent"] = True
-                st.rerun()
+        st.caption(":material/database: 回饋與歷史已跨裝置記住（雜湊儲存）。")
+        if st.button("刪除我在本站的所有資料", icon=":material/delete:", width="stretch"):
+            uk2 = _persist_uk()
+            try:
+                conn = db.get_conn()
+                if conn is not None and uk2:
+                    db.delete_all(conn, uk2)
+            except Exception:
+                _persist_fail()
+            for _k in ("track_feedback", "recommend_history", "persist_synced"):
+                st.session_state.pop(_k, None)
+            for _wk in [w for w in st.session_state if isinstance(w, str) and w.startswith("w_fb::")]:
+                st.session_state.pop(_wk, None)
+            st.session_state["persist_needs_consent"] = True
+            st.rerun()
 
 
 if not is_authenticated() and not is_guest_mode():
@@ -793,6 +805,9 @@ start_geo_prefetch()
 start_profile_prefetch()
 
 st.markdown(styles.form_hero_html(), unsafe_allow_html=True)
+
+# 同意閘放主頁面（表單上方），不藏在收合的 sidebar；登入＋DB可用＋未同意時才顯示
+_render_consent_banner()
 
 # ══ 第一層：情境輸入（唯一必要的一區）═══════════════════
 # 隱私說明收進 help（問號圖示的 tooltip），不佔版面
