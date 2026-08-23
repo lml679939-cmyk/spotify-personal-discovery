@@ -1225,17 +1225,15 @@ if _clicked:
                         f"guest={is_guest_mode()}",
                         file=sys.stderr, flush=True,
                     )
-                lang_msg = "、".join(languages) if languages else "不限"
-                genre_msg = "、".join(genres) if genres else "不限"
+                # 這行是生成當下的暫態敘事，只留最關鍵的個人化旋鈕，保持一行不換行
+                # （語言/曲風/避開過往等細節本來就顯示在表單摘要與結果頁，不用在這裡重述）
                 _ratio_msg = (
-                    f"探索度：{st.session_state.get('guest_fame_mode', '均衡')}・"
+                    f"探索度：{st.session_state.get('guest_fame_mode', '均衡')}"
                     if is_guest_mode()
-                    else f"新藝人 {new_artist_ratio}%・"
+                    else f"新藝人 {new_artist_ratio}%"
                 )
                 st.write(
-                    f":material/auto_awesome: Gemini 生成 {num_songs} 首推薦中"
-                    f"（{_ratio_msg}語言：{lang_msg}・曲風：{genre_msg}"
-                    f"・避開過往 {len(history)} 首）..."
+                    f":material/auto_awesome: Gemini 生成 {num_songs} 首推薦中（{_ratio_msg}）..."
                 )
                 # 兩種模式都多要一些候選：刷掉一部分後才不會湊不滿使用者要的首數。
                 # 訪客的過濾較輕（去重＋同藝人上限），倍率不用登入版那麼大；
