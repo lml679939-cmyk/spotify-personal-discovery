@@ -231,3 +231,15 @@ def get_conn():
     import psycopg  # 延遲載入
     _conn = psycopg.connect(url)
     return _conn
+
+
+def reset_conn() -> None:
+    """丟棄快取的連線，下次 get_conn() 會重連。呼叫端在 DB 操作失敗時呼叫——
+    pooler 會關閉閒置連線，快取到一條死連線的話不重置就會一直失敗（整個行程都降級）。"""
+    global _conn
+    try:
+        if _conn is not None:
+            _conn.close()
+    except Exception:
+        pass
+    _conn = None

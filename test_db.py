@@ -215,3 +215,23 @@ def test_get_conn_none_without_url(monkeypatch):
     monkeypatch.setattr(db, "_config", lambda: (None, None))
     db._conn = None
     assert db.get_conn() is None
+
+
+def test_reset_conn_closes_and_clears():
+    class _C:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    c = _C()
+    db._conn = c
+    db.reset_conn()
+    assert db._conn is None and c.closed is True
+
+
+def test_reset_conn_noop_when_none():
+    db._conn = None
+    db.reset_conn()          # 不應拋錯
+    assert db._conn is None

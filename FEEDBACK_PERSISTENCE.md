@@ -131,15 +131,18 @@ create index history_user_time_idx on history (user_key, recommended_at desc);
 ## 分階段落地
 - **Phase 0（你做，gating）**：建 Supabase 專案、跑上面的 DDL、把 pooler 連線字串與 `PERSIST_HMAC_SECRET`
   填進 Streamlit Secrets（本機 `.env` 也放一份供開發）。
-- **Phase 1**：
-  - ✅ **`db.py` 已寫**（2026-08-23）：user_key 雜湊、key_str、feedback/history/consent 的 upsert/
-    delete/load/trim/delete_all、`is_enabled`/`get_conn`（psycopg 延遲載入）。**純邏輯＋假 conn 測試
-    21 條全過**（`test_db.py`，不需 Supabase）。
-  - ⬜ 待 Phase 0 後：把 `psycopg[binary]` 加進 requirements、`get_conn` 整合實測、登入時**讀取重建**
-    session、**同意閘**、登入頁**文案改**。
-- **Phase 2**：回饋 upsert/delete（背景寫、含情境快照）＋歷史 upsert 取代歌單寫入＋trim，接上 `app.py`。
-- **Phase 3**：刪除鍵＋隱私說明打磨＋（選）舊歷史一次性匯入。
-- **Phase 4（選）**：停掉或雙寫 Spotify 歷史歌單的決定。
+- ✅ **Phase 1（`db.py`，已寫 2026-08-23）**：user_key 雜湊、key_str、feedback/history/consent 的
+  upsert/delete/load/trim/delete_all、`is_enabled`/`get_conn`/`reset_conn`（psycopg 延遲載入）。
+  **純邏輯＋假 conn 測試 21 條**（`test_db.py`，不需 Supabase）。
+- ✅ **Phase 2（`app.py` 接線，已寫 2026-08-23）**：`import db`；登入算 `persist_uk`（HMAC，快取）；
+  `_persist_login_sync`（同意閘＋讀回回饋/歷史 seed session）；`_render_persist_sidebar`（未同意→同意鈕、
+  已同意→刪除鈕）；`_render_feedback` 變動時 `_persist_feedback`（帶 `last_gen_ctx` 情境快照）；
+  生成時 `_persist_history`＋trim（與 Spotify 歌單**雙寫**）。全部 try/except 降級、死連線 `reset_conn()`
+  自癒。`psycopg[binary]==3.3.4` 進 requirements。**⚠️ 現在 `db.is_enabled()` False → 全 no-op、
+  行為與改版前一致；要等 Phase 0 填好 Secrets 才真的生效，屆時必做登入實測**（登入→同意→按讚→
+  換裝置/清 session 再登入看回饋在不在→按刪除→確認清空）。
+- **Phase 3（待實測後）**：登入頁文案微調（目前揭露靠同意閘，已可接受）＋（選）舊 Spotify 歷史一次性匯入。
+- **Phase 4（選）**：停掉或維持雙寫 Spotify 歷史歌單的決定。
 - **Phase 5（選，另案）**：訪客匿名探勘、events-log 深度分析表。
 
 ## 工作量粗估

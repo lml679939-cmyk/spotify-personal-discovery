@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 import spotipy
 import ratelimit
 import styles
+import db
 
 from recommend import (
     GUEST_OVERGEN_FACTOR,
@@ -612,6 +613,133 @@ styles.inject_global_css()
 # ── OAuth callback 處理 + 登入閘門 ─────────────────────
 consume_oauth_callback()
 
+# ── 跨 session 持久化（Supabase，見 db.py / FEEDBACK_PERSISTENCE.md）───────
+# ⚠️ Secrets 沒設好時 db.is_enabled() 為 False → 以下全部是 no-op，安靜降級成 session 級，
+# 行為與改版前完全一樣。所有 DB 操作都 try/except 包住，失敗一律重置連線後降級，絕不讓生成/
+# 回饋壞掉。只有「登入 ＋ DB 可用 ＋ 已同意」時才真的讀寫。
+def _persist_uk() -> str | None:
+    """這位登入使用者的雜湊鍵（在登入區算好、快取在 session）；訪客或 DB 未啟用回 None。"""
+    if is_guest_mode() or not db.is_enabled():
+        return None
+    return st.session_state.get("persist_uk")
+
+
+def _persist_fail() -> None:
+    db.reset_conn()   # 死連線自癒：下次 get_conn 會重連
+
+
+def _persist_login_sync() -> None:
+    """登入後跑一次：查同意；已同意就把回饋＋歷史從 DB 讀回 session。失敗靜默降級。"""
+    uk = _persist_uk()
+    if not uk or st.session_state.get("persist_synced"):
+        return
+    try:
+        conn = db.get_conn()
+        if conn is None:
+            return
+        if not db.has_consent(conn, uk):
+            st.session_state["persist_needs_consent"] = True
+            return
+        fb = st.session_state.setdefault("track_feedback", {})
+        for e in db.load_feedback(conn, uk):
+            k = "fb::" + "||".join(_track_key(e["title"], e["artist"]))
+            fb.setdefault(k, {"title": e["title"], "artist": e["artist"], "state": e["state"]})
+        hist = db.load_history(conn, uk)
+        if hist:
+            st.session_state["recommend_history"] = (
+                hist + st.session_state.get("recommend_history", [])
+            )[-HISTORY_KEEP * 4:]
+        st.session_state["persist_synced"] = True
+        st.session_state["persist_needs_consent"] = False
+    except Exception:
+        _persist_fail()
+
+
+def _persist_feedback(track: dict, state: str | None) -> None:
+    """回饋變動時同步寫 DB（best-effort）；state=None ＝取消。未同意/未啟用則跳過。"""
+    uk = _persist_uk()
+    if not uk or st.session_state.get("persist_needs_consent"):
+        return
+    title = track.get("name") or track.get("title", "")
+    artist = track.get("artist", "")
+    try:
+        conn = db.get_conn()
+        if conn is None:
+            return
+        if state:
+            _fame = track.get("fame")
+            db.upsert_feedback(
+                conn, uk, title, artist, state,
+                fame=_fame if isinstance(_fame, int) else None,
+                is_discovery=bool(track.get("_discovery")),
+                reason=track.get("reason") or None,
+                ctx=st.session_state.get("last_gen_ctx") or {},
+            )
+        else:
+            db.delete_feedback(conn, uk, title, artist)
+    except Exception:
+        _persist_fail()
+
+
+def _persist_history(found: list[dict]) -> None:
+    uk = _persist_uk()
+    if not uk or st.session_state.get("persist_needs_consent"):
+        return
+    try:
+        conn = db.get_conn()
+        if conn is None:
+            return
+        db.upsert_history(conn, uk, [
+            {"title": t.get("name") or t.get("title", ""), "artist": t.get("artist", "")}
+            for t in found
+        ])
+        db.trim_history(conn, uk)
+    except Exception:
+        _persist_fail()
+
+
+def _render_persist_sidebar() -> None:
+    """登入 ＋ DB 可用時，在 sidebar 顯示同意鈕（未同意）或刪除鈕（已同意）。"""
+    uk = _persist_uk()
+    if not uk:
+        return
+    with st.sidebar:
+        st.markdown("---")
+        if st.session_state.get("persist_needs_consent"):
+            st.caption(
+                ":material/database: 想讓推薦越用越準嗎？同意後，你的 :material/thumb_up: / "
+                ":material/thumb_down: / :material/headphones: 與推薦歷史會以**雜湊後、看不出是誰**"
+                "的形式存在本站，用來改善推薦、並跨裝置同步，隨時可一鍵刪除。"
+            )
+            if st.button("同意並開始記住回饋", icon=":material/check_circle:", width="stretch"):
+                uk2 = _persist_uk()
+                try:
+                    conn = db.get_conn()
+                    if conn is not None and uk2:
+                        db.set_consent(conn, uk2)
+                        st.session_state["persist_needs_consent"] = False
+                        st.session_state["persist_synced"] = False   # 觸發下一輪讀回
+                except Exception:
+                    _persist_fail()
+                st.rerun()
+        else:
+            st.caption(":material/database: 回饋與歷史已跨裝置記住（雜湊儲存）。")
+            if st.button("刪除我在本站的所有資料", icon=":material/delete:", width="stretch"):
+                uk2 = _persist_uk()
+                try:
+                    conn = db.get_conn()
+                    if conn is not None and uk2:
+                        db.delete_all(conn, uk2)
+                except Exception:
+                    _persist_fail()
+                for _k in ("track_feedback", "recommend_history", "persist_synced"):
+                    st.session_state.pop(_k, None)
+                for _wk in [w for w in st.session_state if isinstance(w, str) and w.startswith("w_fb::")]:
+                    st.session_state.pop(_wk, None)
+                st.session_state["persist_needs_consent"] = True
+                st.rerun()
+
+
 if not is_authenticated() and not is_guest_mode():
     show_login_required()
     st.stop()
@@ -631,6 +759,12 @@ else:
         if "user_display_name" not in st.session_state:
             _u = _sp_check.current_user()
             st.session_state["user_display_name"] = _u.get("display_name") or _u.get("id", "Spotify User")
+            # 跨 session 持久化的雜湊鍵（登入時算一次、快取；DB 未啟用就不算）
+            if db.is_enabled():
+                try:
+                    st.session_state["persist_uk"] = db.user_key(_u.get("id", ""), db.hmac_secret())
+                except Exception:
+                    pass
         with st.sidebar:
             st.markdown(f"### :material/account_circle: {st.session_state['user_display_name']}")
             st.caption("已連結 Spotify")
@@ -644,6 +778,11 @@ else:
     except Exception as e:
         st.error(f"Spotify 連線異常：{e}")
         st.stop()
+
+# 跨 session 持久化：登入且已同意 → 把回饋＋歷史讀回 session；sidebar 顯示同意/刪除鈕。
+# 訪客或 DB 未啟用時兩者皆 no-op。
+_persist_login_sync()
+_render_persist_sidebar()
 
 
 # 時區直接向瀏覽器要，不依賴 IP（雲端的代理鏈拿不到 client IP，見 _client_ip）
@@ -1380,6 +1519,17 @@ if _clicked:
                     except Exception:
                         pass
 
+                # 跨 session 持久化（DB）：記下這批的情境快照（給回饋當演算法探勘的欄位）＋寫歷史。
+                # 登入且已同意才真的寫；訪客/DB 未啟用為 no-op。
+                st.session_state["last_gen_ctx"] = {
+                    "guest": is_guest_mode(),
+                    "lang": languages or None,
+                    "genre": genres or None,
+                    "fame_mode": fame_mode if is_guest_mode() else None,
+                    "new_ratio": None if is_guest_mode() else new_artist_ratio,
+                }
+                _persist_history(found)
+
                 status.update(label=f":material/check_circle: 完成！找到 {len(found)} 首推薦", state="complete")
 
         # 結果寫入 session_state，讓「加入歌單」按鈕能存取
@@ -1533,6 +1683,7 @@ if "found" in st.session_state and st.session_state.found:
         wkey = "w_" + k
         if wkey not in st.session_state and k in fb:
             st.session_state[wkey] = _FB_LABEL_BY_STATE.get(fb[k]["state"])
+        _old_state = fb.get(k, {}).get("state")
         sel = st.pills(
             "回饋", options=list(_FB_STATE_BY_LABEL), selection_mode="single",
             key=wkey, label_visibility="collapsed",
@@ -1546,6 +1697,9 @@ if "found" in st.session_state and st.session_state.found:
             }
         else:
             fb.pop(k, None)
+        # 真的變動了才寫 DB（此函式每次渲染都會跑；登入讀回 seed 的那次 old==new，不會誤寫）
+        if state != _old_state:
+            _persist_feedback(track, state)
 
     # view_mode != 網格 時 cols_per_row 沒定義，靠 or 短路避開
     _fb_visible = view_mode != "網格" or cols_per_row <= 5
