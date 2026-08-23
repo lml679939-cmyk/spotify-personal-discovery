@@ -114,7 +114,8 @@ python -m pytest -q                     # 247 tests，改任何 .py 都要跑
   （Streamlit Secrets 未設 `SUPABASE_DB_URL`/`PERSIST_HMAC_SECRET`）→ **目前全 no-op、行為與改版前一致**。
   規格與 Phase 0（建 Supabase＋填 Secrets，使用者的事）見 `FEEDBACK_PERSISTENCE.md`。
   ⚠️ Secrets 一旦設好、DB 生效，**站方就開始留存資料**（雜湊 user_key＋回饋＋歷史）——那時登入頁
-  「Token 只存在記憶體」附近的敘述要補一句、揭露靠 sidebar 的同意閘（已做），且提供刪除鍵（已做）。
+  「Token 只存在記憶體」附近的敘述要補一句、揭露靠**結果區頂端的同意卡**（`_render_consent_banner`，
+  歌單出現後才顯示；刻意不放收合的 sidebar，實測會找不到），刪除鍵則在 sidebar（`_render_persist_sidebar`）。
   訪客版持久化仍未做（要 localStorage 自訂元件，或存匿名列供聚合，見規格 Phase 5）。
 - **雲端的位置與天氣**：已確認 Streamlit Cloud 的代理鏈拿不到 client IP（見「位置偵測」），
   時區已改由瀏覽器提供、時間正確，但位置與天氣在雲端一律不顯示。
