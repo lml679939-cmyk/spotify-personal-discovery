@@ -736,18 +736,37 @@ _session_hist_n = len(st.session_state.get("recommend_history", []))
 _persistent_hist_n = 0 if is_guest_mode() else len(load_persistent_history())
 _total_hist_n = _session_hist_n + _persistent_hist_n
 
+# 訪客「探索度」：標籤 → recommend 的 fame_mode（見 recommend.GUEST_FAME_MODES）。
+# 均衡＝改版前行為（預設）；探索才帶「至少一半 fame1-2」配額＋較嚴天花板。
+_GUEST_FAME_LABELS = {"熟悉": "familiar", "均衡": "balanced", "探索": "discovery"}
+
 _setting_sum = f"{st.session_state.get('num_songs', 15)} 首"
-if not is_guest_mode():
+if is_guest_mode():
+    _setting_sum += f" · {st.session_state.get('guest_fame_mode', '均衡')}"
+else:
     _setting_sum += f" · 新藝人 {st.session_state.get('new_artist_ratio', 70)}%"
 
 with st.expander(f"推薦歌曲數　·　{_setting_sum}", expanded=False,
                  key="exp_songs", icon=":material/tune:"):
     if is_guest_mode():
-        num_songs = st.slider(
-            "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
-        )
-        new_artist_ratio = 70
+        new_artist_ratio = 70          # 訪客沒有聆聽紀錄，用不到「新藝人佔比」
+        col_num, col_mode = st.columns(2)
+        with col_num:
+            num_songs = st.slider(
+                "推薦歌曲數量", min_value=5, max_value=30, value=15, step=1, key="num_songs",
+            )
+        with col_mode:
+            _fame_label = st.radio(
+                "探索度", options=list(_GUEST_FAME_LABELS.keys()), index=1,
+                horizontal=True, key="guest_fame_mode",
+                help="熟悉 = 以你可能認得的歌為主｜均衡 = 混一些驚喜（預設）｜"
+                     "探索 = 盡量給你沒聽過的冷門深軌。\n\n"
+                     "沒有聆聽紀錄可比對，所以用「有多紅」當驚喜度的替代訊號：探索會要求 AI 至少一半"
+                     "挑冷門曲、並擋掉太紅的歌，過濾較嚴、偶爾湊不滿。",
+            )
+        fame_mode = _GUEST_FAME_LABELS.get(_fame_label, "balanced")
     else:
+        fame_mode = "balanced"         # 登入模式走 new_artist_ratio，fame_mode 不生效
         col_num, col_mode = st.columns(2)
         with col_num:
             num_songs = st.slider(
@@ -1055,7 +1074,11 @@ if _clicked:
                     )
                 lang_msg = "、".join(languages) if languages else "不限"
                 genre_msg = "、".join(genres) if genres else "不限"
-                _ratio_msg = "" if is_guest_mode() else f"新藝人 {new_artist_ratio}%・"
+                _ratio_msg = (
+                    f"探索度：{st.session_state.get('guest_fame_mode', '均衡')}・"
+                    if is_guest_mode()
+                    else f"新藝人 {new_artist_ratio}%・"
+                )
                 st.write(
                     f":material/auto_awesome: Gemini 生成 {num_songs} 首推薦中"
                     f"（{_ratio_msg}語言：{lang_msg}・曲風：{genre_msg}"
@@ -1078,6 +1101,7 @@ if _clicked:
                         history=history or None,
                         fav_artists=fav_artists,
                         feedback=feedback,
+                        fame_mode=fame_mode,
                     )
                 except Exception as e:
                     st.error(f"推薦生成失敗：{e}")
@@ -1188,6 +1212,8 @@ if _clicked:
                         spare_capped=not _rate_limited,
                         # 指定歌手保底：帶著點名歌手（fav_pool 第一輪為 None，只先算 fav_have/floor）
                         fav_artists=fav_artists, fav_pool=fav_pool,
+                        # 訪客探索度（熟悉/均衡/探索）→ fame 天花板；登入模式不生效
+                        fame_mode=fame_mode,
                     )
 
                 raw_found = found
@@ -1220,6 +1246,7 @@ if _clicked:
                                     (r.get("title", ""), r.get("artist", "")) for r in unique_recs
                                 ],
                                 feedback=feedback,
+                                fame_mode=fame_mode,
                             )
                         except Exception as e:
                             st.write(f"⚠️ 補生成失敗，沿用現有結果（{e}）")

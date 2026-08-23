@@ -1,0 +1,270 @@
+{
+ "when": "2026-08-23T14:02:17",
+ "tag": "round2-discovery-v3",
+ "repair": true,
+ "fame_mode": "discovery",
+ "num_songs": 15,
+ "runs": [
+  {
+   "scenario": "S1",
+   "name": "深夜放空（華語限定）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 12,
+   "repaired": 5,
+   "final": 15,
+   "playable": 11,
+   "dead_cards": 4,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 0,
+   "fame_low_share": 0.33,
+   "gemini_s": 8.6,
+   "search_s": 12.3,
+   "lang_conform": 1.0,
+   "tracks": [
+    {
+     "name": "色香味俱全",
+     "artist": "Crispy脆樂團",
+     "fame": 3,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "身後",
+     "artist": "A-Mei Chang",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "柔軟的監牢 (Where’s Blue Fairy)",
+     "artist": "VH (Vast & Hazy)",
+     "fame": 2,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "秋各一方",
+     "artist": "白安",
+     "fame": 3,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "南音 [Live 08]",
+     "artist": "方大同",
+     "fame": 2,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "今天星期六",
+     "artist": "理想混蛋",
+     "fame": 3,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "你啊你啊 - 電視劇「用九柑仔店」插曲",
+     "artist": "Waa Wei",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "失落沙洲",
+     "artist": "LaLa Hsu",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "魚仔 - 電視劇<花甲男孩轉大人>主題曲",
+     "artist": "Crowd Lu",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "餘波盪漾",
+     "artist": "Hebe Tien",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "好久不見",
+     "artist": "Eason Chan",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "帶我走",
+     "artist": "楊乃文",
+     "fame": 4,
+     "repaired": false,
+     "dead": true
+    },
+    {
+     "name": "夢幻泡影",
+     "artist": "陳綺貞",
+     "fame": 2,
+     "repaired": false,
+     "dead": true
+    },
+    {
+     "name": "Dear John",
+     "artist": "魏如萱",
+     "fame": 2,
+     "repaired": false,
+     "dead": true
+    },
+    {
+     "name": "房間",
+     "artist": "茄子蛋",
+     "fame": 2,
+     "repaired": false,
+     "dead": true
+    }
+   ]
+  },
+  {
+   "scenario": "S3",
+   "name": "健身（全不限）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 0,
+   "repaired": 0,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 3,
+   "fame_low_share": 0.27,
+   "gemini_s": 5.7,
+   "search_s": 3.7,
+   "tracks": [
+    {
+     "name": "Higher Ground - Remastered 2003",
+     "artist": "Red Hot Chili Peppers",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Warriors",
+     "artist": "Imagine Dragons",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Engel",
+     "artist": "Rammstein",
+     "fame": 2,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "The Pot",
+     "artist": "TOOL",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Invincible",
+     "artist": "Pop Smoke",
+     "fame": 2,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Go",
+     "artist": "The Chemical Brothers, Q-Tip",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Moth Into Flame",
+     "artist": "Metallica",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Killed by Death",
+     "artist": "Motörhead",
+     "fame": 2,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Electric Feel",
+     "artist": "MGMT",
+     "fame": 1,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Thunder",
+     "artist": "Imagine Dragons",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Level Up",
+     "artist": "Ciara",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "DNA.",
+     "artist": "Kendrick Lamar",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Chop Suey!",
+     "artist": "System Of A Down",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "X Gon' Give It To Ya - Int'l Bonus track",
+     "artist": "DMX",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Bulls On Parade",
+     "artist": "Rage Against The Machine",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  }
+ ],
+ "search_cache": {
+  "size": 36,
+  "hits": 0,
+  "misses": 36
+ },
+ "repair_cache": {
+  "size": 10,
+  "hits": 1,
+  "misses": 10
+ }
+}

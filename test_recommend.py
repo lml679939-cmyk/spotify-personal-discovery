@@ -385,6 +385,67 @@ def test_guest_stats_count_each_drop_reason():
     assert stats["picked_familiar"] == len(result) == 3
 
 
+# ── 訪客探索度（fame_mode：熟悉/均衡/探索）──────────────────
+def test_guest_prompt_discovery_mode_adds_low_fame_quota():
+    # 探索：帶登入版那種「至少一半 fame1-2」的配額（疑點1：只給錨點 LLM 仍不自產 fame≤2）
+    p = build_guest_prompt("ctx", fame_mode="discovery")
+    assert "至少一半必須是 fame 1 或 2" in p
+
+
+def test_guest_prompt_familiar_mode_has_no_quota():
+    p = build_guest_prompt("ctx", fame_mode="familiar")
+    assert "至少一半必須是 fame" not in p
+    assert "fame 3-4" in p                      # 熟悉框架：熟悉曲目為主體
+
+
+def test_guest_prompt_balanced_is_default_and_unchanged():
+    # 均衡＝改版前行為：預設值就是 balanced，且沒有配額（避免破壞跨輪可比性）
+    default = build_guest_prompt("ctx")
+    balanced = build_guest_prompt("ctx", fame_mode="balanced")
+    assert default == balanced
+    assert "至少一半必須是 fame" not in default
+    assert "混入一部分 2-3 分" in default
+
+
+def test_guest_discovery_ceiling_blocks_fame_4():
+    # 探索天花板 65：fame 4（換算 80）超標被降權；均衡（80）剛好貼線不擋
+    tracks = [{**_t("大牌", "A"), "fame": 4}, {**_t("驚喜", "B"), "fame": 2}]
+    disc, s_disc = curate_tracks(tracks, num_songs=1, fame_mode="discovery")
+    assert disc[0]["name"] == "驚喜" and s_disc["pop_blocked"] == 1
+    bal, s_bal = curate_tracks(tracks, num_songs=1, fame_mode="balanced")
+    assert bal[0]["name"] == "大牌" and s_bal["pop_blocked"] == 0
+
+
+def test_guest_familiar_ceiling_blocks_nothing():
+    # 熟悉不擋：連 fame 5 國民金曲都保留（使用者要「聽得出來」的歌）
+    tracks = [{**_t("國民金曲", "A"), "fame": 5}, {**_t("冷門", "B"), "fame": 1}]
+    result, stats = curate_tracks(tracks, num_songs=1, fame_mode="familiar")
+    assert result[0]["name"] == "國民金曲" and stats["pop_blocked"] == 0
+
+
+def test_guest_default_fame_mode_matches_balanced():
+    # 不傳 fame_mode 必須完全等於 balanced（其他情境零行為變動）
+    tracks = [{**_t("金曲", "A"), "fame": 5}, {**_t("驚喜", "B"), "fame": 2},
+              {**_t("普通", "C"), "fame": 3}]
+    default, _ = curate_tracks(tracks, num_songs=2)
+    balanced, _ = curate_tracks(tracks, num_songs=2, fame_mode="balanced")
+    assert [t["name"] for t in default] == [t["name"] for t in balanced]
+
+
+def test_guest_unknown_fame_mode_falls_back_to_balanced():
+    tracks = [{**_t("金曲", "A"), "fame": 5}, {**_t("驚喜", "B"), "fame": 2}]
+    weird, _ = curate_tracks(tracks, num_songs=1, fame_mode="???")
+    balanced, _ = curate_tracks(tracks, num_songs=1, fame_mode="balanced")
+    assert [t["name"] for t in weird] == [t["name"] for t in balanced]
+
+
+def test_guest_stats_records_ceiling_per_mode():
+    tracks = [_t("A", "X")]
+    assert curate_tracks(tracks, fame_mode="familiar")[1]["ceiling"] is None
+    assert curate_tracks(tracks, fame_mode="balanced")[1]["ceiling"] == 80
+    assert curate_tracks(tracks, fame_mode="discovery")[1]["ceiling"] == 65
+
+
 # ── curate_tracks：指定歌手保底（fav floor，兩種模式共用）──────
 def _pool(name, fav_name, artist=None):
     """fav_artist_pool 回來的候選卡：帶 _fav_artist 標籤（fetch 時綁定，跨文字系統可靠）。"""

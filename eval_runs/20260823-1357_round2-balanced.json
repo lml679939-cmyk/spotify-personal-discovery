@@ -1,0 +1,270 @@
+{
+ "when": "2026-08-23T13:57:02",
+ "tag": "round2-balanced",
+ "repair": true,
+ "fame_mode": "balanced",
+ "num_songs": 15,
+ "runs": [
+  {
+   "scenario": "S1",
+   "name": "深夜放空（華語限定）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 5,
+   "repaired": 2,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 0,
+   "fame_low_share": 0.07,
+   "gemini_s": 8.7,
+   "search_s": 7.9,
+   "lang_conform": 1.0,
+   "tracks": [
+    {
+     "name": "你啊你啊 - 電視劇「用九柑仔店」插曲",
+     "artist": "Waa Wei",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "島嶼天光",
+     "artist": "Fire EX.",
+     "fame": null,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "魚仔 - 電視劇<花甲男孩轉大人>主題曲",
+     "artist": "Crowd Lu",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "推開世界的門",
+     "artist": "Naiwen Yang",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "身騎白馬",
+     "artist": "LaLa Hsu",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "慢冷",
+     "artist": "Fish Leong",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "给自己的歌 - Live",
+     "artist": "Jonathan Lee",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "克卜勒",
+     "artist": "Stefanie Sun",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "鏡中人 (《鏡雙城》動畫番劇主題曲)",
+     "artist": "郁可唯",
+     "fame": 3,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "你就不要想起我",
+     "artist": "Hebe Tien",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "是日救星",
+     "artist": "LaLa Hsu",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "南音 [Live 08]",
+     "artist": "方大同",
+     "fame": 2,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "空白格",
+     "artist": "Tanya Chua",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "小幸運 - 電影《我的少女時代》主題曲",
+     "artist": "Hebe Tien",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "忽然之間",
+     "artist": "Karen Mok",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  },
+  {
+   "scenario": "S3",
+   "name": "健身（全不限）",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 0,
+   "repaired": 0,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 3,
+   "fame_low_share": 0.0,
+   "gemini_s": 5.8,
+   "search_s": 3.9,
+   "tracks": [
+    {
+     "name": "Till I Collapse",
+     "artist": "Eminem, Nate Dogg",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "POWER",
+     "artist": "Kanye West",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Can't Hold Us (feat. Ray Dalton)",
+     "artist": "Macklemore, Ryan Lewis, Macklemore & Ryan Lewis, Ray Dalton",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "bad guy",
+     "artist": "Billie Eilish",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Guerrilla",
+     "artist": "ATEEZ",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "goosebumps",
+     "artist": "Travis Scott",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "X Gon' Give It To Ya - Int'l Bonus track",
+     "artist": "DMX",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Bodies",
+     "artist": "Drowning Pool",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Centuries",
+     "artist": "Fall Out Boy",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "The Way I Am",
+     "artist": "Eminem",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Pump Up The Jam",
+     "artist": "Technotronic",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Numb / Encore",
+     "artist": "JAŸ-Z, Linkin Park",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Blood // Water",
+     "artist": "grandson",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Bring Me To Life",
+     "artist": "Evanescence",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "INDUSTRY BABY (feat. Jack Harlow)",
+     "artist": "Lil Nas X, Jack Harlow",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  }
+ ],
+ "search_cache": {
+  "size": 36,
+  "hits": 0,
+  "misses": 36
+ },
+ "repair_cache": {
+  "size": 5,
+  "hits": 0,
+  "misses": 5
+ }
+}

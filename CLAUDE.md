@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（115）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 214 tests
+- **測試**：`test_recommend.py`（123）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 222 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 214 tests，改任何 .py 都要跑
+python -m pytest -q                     # 222 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -88,21 +88,21 @@ python -m pytest -q                     # 214 tests，改任何 .py 都要跑
 要在容器裡認真開發就先把 image 換成 3.12、拿掉那個 XSRF flag；只是隨手跑一下就
 知道上面兩件事即可。**別因為容器裡測試紅就去改測試或改 `_client_ip()` 的邏輯。**
 
-**接手後的第一件事**（2026-08-23 交接狀態，第 3 版）
+**接手後的第一件事**（2026-08-23 交接狀態，第 4 版）
 
-> ⚠️ **尚未 push**（工作區有第 2 輪第 1 項的改動、214 tests 全過）。顯示名稱 **SoundCurator**、
-> 網址 `soundcurator.streamlit.app`（repo 仍 spotify-personal-discovery）。
-> **第 2 輪演算法第 1 項「指定歌手保底佔比」已做完並驗收**（S4：指定歌手佔比 3/15→8/15、
-> fav_share 0.20→0.53，前後數字進 `EVAL.md` 第 2 輪節）。這是近期第一個真正動到演算法的改動
-> （前面幾批都是 UI／版面／命名）。細節見下方「指定歌手保底」段。
+> ⚠️ **第 2 輪第 2 項尚未 push**（第 1 項「指定歌手保底」已 push＝commit `00afdaf`；工作區有
+> 第 2 項的改動、222 tests 全過）。顯示名稱 **SoundCurator**、網址 `soundcurator.streamlit.app`
+> （repo 仍 spotify-personal-discovery）。**第 2 輪兩項演算法都已做完並驗收**（數字進 `EVAL.md`
+> 第 2 輪兩節）。細節見「指定歌手保底」「訪客探索度」兩段。
 
-1. ✅ **①指定歌手保底佔比（已完成，2026-08-23）**——不再只靠 prompt。`recommend._apply_fav_floor`
-   在驗證鏈最後一關用 `spotify_api.fav_artist_pool()`（重用 `_artist_catalog`）從點名歌手的真實
-   專輯目錄補深軌到 `FAV_MIN_SHARE=0.5`，放寬他們的同藝人上限、平均分配，零幻覺。見「指定歌手保底」段。
-   **下一步先 push**（跨模組改動，雲端記得 Reboot——這次沒動 requirements.txt，見「跨模組改動要 Reboot」）。
-2. **②訪客「熟悉/均衡/探索」fame 選項 + guest prompt fame 錨點**（還沒做，第 2 輪第 2 項）——
-   疑點1：訪客 LLM 幾乎不自產 fame≤2，兩件要綁一起做。**規矩不變**：改演算法前後各跑一輪
-   `eval_bench`，數字進 `EVAL.md`。
+1. ✅ **①指定歌手保底佔比（已完成＋已 push `00afdaf`，2026-08-23）**——`recommend._apply_fav_floor`
+   用 `spotify_api.fav_artist_pool()` 從點名歌手真實目錄補深軌到 `FAV_MIN_SHARE=0.5`，零幻覺。
+   S4：3/15→8/15、fav_share 0.20→0.53。見「指定歌手保底」段。
+2. ✅ **②訪客「熟悉/均衡/探索」fame 選項（已完成，2026-08-23，未 push）**——訪客新增「探索度」三檔。
+   均衡＝改版前行為（預設）；探索才帶「至少一半 fame1-2」配額＋較嚴天花板（65）。**兩件綁一起做**
+   （疑點1：只調天花板 LLM 仍不自產 fame≤2）。探索的挖法綁「知名歌手的專輯深軌」才不會幻覺暴增。
+   S1 fame≤2 0.07→0.33、S3 0→0.27。見「訪客探索度」段。**下一步先 push**（跨模組、沒動
+   requirements.txt→雲端記得 Reboot）。
 3. **驗證幻覺補救真的在線上生效**（還沒做）：在 `soundcurator.streamlit.app` 生成一份，再到
    Manage app 日誌撈 `[NOVELTY]`，看 `repaired` 有沒有上升、`spare_used`（死連結卡）有沒有下降。
    這是 `5c70d25` 的驗收指標。（部署日誌已確認 `[GEO] 找不到 client IP`＝雲端拿不到位置，非 bug。）
@@ -409,12 +409,13 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 （訪客分支，建議固定指向「清除推薦歷史」）；
 ④ 補生成對訪客也生效（`build_guest_prompt` 支援 `refill_exclude`，指令是「換別的」
 而非登入版的「往更冷門挑」）；
-⑤ **訪客也有 fame 天花板（2026-08-21）**：guest prompt 要求 fame 自評（同一套
-可操作錨點，但**不套**登入版「至少一半 1-2」的配額——訪客要的不一定是探索），
-`_basic_dedupe(fame_ceiling=GUEST_POP_CEILING=80)` 兩段式：只擋 fame 5（≈95）
-的國民金曲層級、fame 4（=80）貼線通過；**超標只降權不刪除**——排序優先序是
+⑤ **訪客 fame 天花板（2026-08-21 起，2026-08-23 改成三檔可調）**：guest prompt 要求 fame 自評，
+天花板與「是否套配額」現在由使用者選的**探索度**決定（見「訪客探索度」段）——**均衡＝
+`GUEST_POP_CEILING=80`＋不套配額，就是這裡描述的改版前行為**（預設）；熟悉不擋；探索降到 65
+＋套「至少一半 1-2」配額。以下描述的是均衡檔：`_basic_dedupe(fame_ceiling=80)` 兩段式，
+只擋 fame 5（≈95）的國民金曲層級、fame 4（=80）貼線通過；**超標只降權不刪除**——排序優先序是
 「不超標 → 太紅 → 搜不到」，湊不滿時超標的照樣回補，數量永不縮水
-（訪客沒有「想聽經典金曲」的意圖訊號，硬擋會毀掉那種請求）。
+（均衡檔沒有「想探索」的意圖訊號，硬擋會毀掉「想聽經典金曲」那種請求；探索檔才是意圖訊號）。
 被截掉的超標首數計進 `stats["pop_blocked"]`。
 去重鍵沿用括號剝除的正規化，同藝人的 `Interlude (I)` / `Interlude (II)` 視為同一首。
 
@@ -456,6 +457,44 @@ pool 又跨使用者快取，成本低。要根治得把 pool 解析到的 Spoti
 **測試**：`test_recommend.py` 的「指定歌手保底」段（10 條）＋ `test_spotify_api.py` 的 `fav_artist_pool`
 段（含 CJK top-result、嚴格補救不 fallback）。無 fav_artists 時 `_apply_fav_floor` 原樣返回，
 其他情境零行為變動（有測試釘住），所以第 2 輪只需重跑 S4。
+
+### 訪客探索度（fame_mode：熟悉/均衡/探索，2026-08-23，第 2 輪第 2 項）
+
+> ✅ **驗收有效**：探索模式讓 LLM 自產 fame≤2 大增（S1 華語 0.07→0.33、S3 健身 0→0.27），
+> 均衡＝改版前行為零變動。前後數字在 `EVAL.md` 第 2 輪第 2 節。
+
+**要解決的問題（EVAL 第 1 輪疑點 1）**：訪客的 fame 天花板（`GUEST_POP_CEILING=80`）形同虛設——
+LLM 幾乎不自產 fame≤2，`fame_low_share` 普遍是 0，S1 華語甚至五首 fame5 國民金曲全數入列。
+訪客沒有聆聽紀錄可比對，「太紅」是唯一的驚喜度訊號，但沒有工具讓使用者調、LLM 也不配合。
+
+**做法**：訪客表單新增「探索度」三檔（`app.py` 的 `_GUEST_FAME_LABELS`，radio）→ `fame_mode`：
+
+| 模式 | 天花板（`GUEST_CEILING_BY_MODE`） | guest prompt fame 錨點（`_GUEST_FAME_PUSH`） |
+|---|---|---|
+| 熟悉 familiar | None（不擋，要「聽得出來」的歌） | 以樂迷熟悉曲目（fame 3-4）為主體 |
+| **均衡 balanced（預設）** | 80（只壓 fame 5，＝改版前） | 混一部分 2-3 分（＝改版前，逐字不動保跨輪可比）|
+| 探索 discovery | 65（擋 fame 4-5，＝登入版 discovery） | **「至少一半 fame 1-2」配額＋具體挖法** |
+
+**⚠️ 兩件必須綁一起做（疑點 1 的核心）**：只調天花板、prompt 不改的話，LLM 不自產 fame≤2 →
+探索模式湊不滿 → 天花板兩段式不縮量 → 大熱門回補 → 空轉。所以探索同時降天花板**且**在
+prompt 下配額。`fame_mode` 一路從 `app.py`→`get_recommendations`→`build_guest_prompt`（錨點）
+＋`curate_tracks`（天花板）；登入模式走 new_ratio，傳了也不生效。
+
+**⚠️ 探索 prompt 的「挖法」教訓（三版迭代，都有 eval 數字）**：
+- 只給抽象「往深挖」→ fame≤2 幾乎不動（LLM 挑「稍微不那麼紅」的 fame 3 安全牌）。
+- 加「換不同國家/年代/廠牌、較小眾的名字」→ fame≤2 衝高，但**華語死卡暴增**（推向小眾→
+  幻覺/搜不到暴增，CLAUDE 早有此警告）。**小眾藝人是危險槓桿。**
+- **採用版＝把挖法綁在「你確定有名氣的音樂人的專輯曲/B-side」**（＝登入版 familiar channel 的
+  安全版，不是 discovery channel 的小眾版）：fame≤2 大幅上升、非華語情境零死卡。
+  **安全槓桿是「知名歌手的深軌」，不是「小眾歌手」。**
+
+**已知限制**：華語專輯深軌的 Spotify 搜尋召回本來就差，探索疊加後死卡會多幾張（eval S1 探索
+4 死卡）——**既有限制、非本項引入**，且 eval 不做補生成＝最壞情況；app 端有補生成＋幻覺補救＋
+墊底卡上限＋「湊不滿」說明吸收。使用者主動選探索，「更冷門、偶爾附搜尋連結」在預期內。
+
+**測試**：`test_recommend.py` 的「訪客探索度」段（8 條）——三模式的天花板差異、探索有配額/
+熟悉沒有、**預設＝balanced 且逐字不變**、未知模式退回 balanced。改任何一檔的文案先跑
+`eval_bench.py --mode <檔> --only S1 S3` 對照（S1 華語是最容易踩幻覺的照妖鏡）。
 
 ### 歷史去重
 - 三個上限別搞混：`HISTORY_KEEP=200`（session 內保留幾筆）、
@@ -1021,6 +1060,7 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 | **指定歌手** | `fav_artists` | **`fav_artists_input`** | 文字輸入，逗號分隔，傳入 prompt 讓 AI 優先推薦 |
 | 推薦數量 | `num_songs` | `num_songs` | 5–30 首 |
 | 新藝人佔比 | `new_artist_ratio` | `new_artist_ratio` | 0–100%（僅登入模式） |
+| **探索度** | `fame_mode`（經 `_GUEST_FAME_LABELS` 轉） | **`guest_fame_mode`**（存中文標籤） | 僅訪客模式：熟悉/均衡/探索，radio。均衡＝改版前行為，見「訪客探索度」段 |
 | 投射問題回答 | `projective_answer` | `projective_a` | 題目本身在 `projective_q`、輪替順序在 `proj_order` |
 | MBTI／血型／星座 | 同名 | `mbti` / `blood_type` / `zodiac` | 摘要用 |
 | 心情雙軸 | 同名 | `mood_energy` / `mood_valence` | 1–10 slider |
@@ -1093,7 +1133,7 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
-| `test_*.py`（5 個） | `test_recommend`(115) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) | 改對應模組時同步 |
+| `test_*.py`（5 個） | `test_recommend`(123) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) | 改對應模組時同步 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
 | `eval_bench.py` | 固定情境驗收跑分 CLI（訪客 S1–S5，見「驗收流程」） | 改演算法時跑 |
 | `EVAL.md` | 驗收紀錄（每輪一節，含人工三題） | 改演算法時填 |
@@ -1114,7 +1154,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| _(未 push)_ | feat: **指定歌手保底佔比**（第 2 輪演算法第 1 項）——`recommend._apply_fav_floor` 在驗證鏈最後用真實深軌把清單補到至少 `FAV_MIN_SHARE=0.5` 來自點名歌手、放寬他們的同藝人上限、平均分配、零幻覺；`spotify_api.fav_artist_pool()` 重用 `_artist_catalog`；CJK 藝名（陳綺貞→Cheer Chen）走 `allow_top_result=True` 取搜尋第一筆（**只給保底、幻覺補救維持嚴格**，結果分開快取）。S4：指定歌手佔比 3/15→8/15、fav_share 0.20→0.53（`EVAL.md` 第 2 輪）。+15 tests（共 214）。見「指定歌手保底」段 |
+| _(未 push)_ | feat: **訪客探索度三檔**（第 2 輪演算法第 2 項）——訪客表單新增「熟悉/均衡/探索」radio → `fame_mode`。均衡＝改版前行為（預設，逐字不動）；探索才降天花板（`GUEST_POP_CEILING_DISCOVERY=65`）＋在 guest prompt 套「至少一半 fame1-2」配額（兩件綁一起做，疑點1）。探索的挖法綁「知名歌手的專輯深軌」而非小眾藝人（小眾→幻覺/搜不到暴增，三版迭代才收斂）。S1 華語 fame≤2 0.07→0.33、S3 健身 0→0.27（`EVAL.md` 第 2 輪第 2 節）。+8 tests（共 222）。見「訪客探索度」段 |
+| `00afdaf` | feat: **指定歌手保底佔比**（第 2 輪演算法第 1 項）——`recommend._apply_fav_floor` 在驗證鏈最後用真實深軌把清單補到至少 `FAV_MIN_SHARE=0.5` 來自點名歌手、放寬他們的同藝人上限、平均分配、零幻覺；`spotify_api.fav_artist_pool()` 重用 `_artist_catalog`；CJK 藝名（陳綺貞→Cheer Chen）走 `allow_top_result=True` 取搜尋第一筆（**只給保底、幻覺補救維持嚴格**，結果分開快取）。S4：指定歌手佔比 3/15→8/15、fav_share 0.20→0.53（`EVAL.md` 第 2 輪）。+15 tests。見「指定歌手保底」段 |
 | `0d86919` | feat: 表單 hero 改版——放大漸層標題（2.9rem）左對齊＋小圖示漂浮裝飾（黑膠/青星芒 absolute 漂左上、黃星芒/音符/紫星芒 inline 貼標題後收攏、手機 `.y2k-decor` 收掉），取代三大置中圖示。⚠️ 右裝飾別用 `absolute; right:` 貼右邊緣（hero 很寬→飄太遠、焦點拉散）、改 inline 貼標題後才收攏; docs: 主表單版面段重寫 |
 | `9b7455a`／`d83cbfa` | feat: 登入 hero Option C（黑膠當 Sound 的「o」＋tagline「不推弟，只推歌。還不快叫我乾歌」，取代三貼紙圖示＋漸層字）、高度對齊表單 hero（`min-height:117`＋`:has(.y2k-login-hero)` 歸零 -16px）；表單標題先 2.4→2.6rem 再改回 2.4rem（同字級會頭重、兩 hero 構圖不同故刻意不同字級——後於 0d86919 整個改版） |
 | `fe869fb`／`5de7d2b` | refactor: 顯示名稱 Spotify Personal Discovery → **SoundCurator**（hero／分頁／分享文字／歌單敘述／docstring／README；`HISTORY_PLAYLIST_NAME` 未動）；docs: 部署網址 spotify-lml → `soundcurator.streamlit.app`（`_is_local_dev()` 只認 localhost、不受影響）。⚠️ 換子網域要同步 Streamlit App URL＋Spotify Redirect URI＋Streamlit Secrets 三處，否則方式二 redirect mismatch |

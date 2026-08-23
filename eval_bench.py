@@ -4,6 +4,7 @@
     python eval_bench.py                     # 跑全部情境
     python eval_bench.py --only S1 S4        # 只跑指定情境
     python eval_bench.py --no-repair         # 關閉幻覺補救（量「改動前」的對照）
+    python eval_bench.py --mode discovery    # 訪客探索度（familiar/balanced/discovery，預設 balanced）
     python eval_bench.py --tag before-xxx    # 給這輪取個標籤（進檔名與 JSON）
 
 需要 .env 內有 GEMINI_API_KEY / SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET。
@@ -107,7 +108,7 @@ def _make_client():
     return _sp(auth.get_access_token(as_dict=False))
 
 
-def run_scenario(sc: dict, sp, api_key: str, repair: bool) -> dict:
+def run_scenario(sc: dict, sp, api_key: str, repair: bool, fame_mode: str = "balanced") -> dict:
     t0 = time.perf_counter()
     result = get_recommendations(
         api_key, None, sc["context"],
@@ -115,6 +116,7 @@ def run_scenario(sc: dict, sp, api_key: str, repair: bool) -> dict:
         user_traits=sc["user_traits"],
         languages=sc["languages"], genres=sc["genres"],
         fav_artists=sc["fav_artists"],
+        fame_mode=fame_mode,
     )
     gemini_s = time.perf_counter() - t0
 
@@ -164,7 +166,7 @@ def run_scenario(sc: dict, sp, api_key: str, repair: bool) -> dict:
             print(f"  [fav_pool 失敗] {e}", flush=True)
     found, stats = curate_tracks(
         cards, history=None, profile=None, num_songs=NUM_SONGS,
-        fav_artists=sc["fav_artists"], fav_pool=fav_pool,
+        fav_artists=sc["fav_artists"], fav_pool=fav_pool, fame_mode=fame_mode,
     )
     playable = [t for t in found if not t.get("_no_spotify")]
 
@@ -212,6 +214,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", nargs="*", default=None)
     ap.add_argument("--no-repair", action="store_true")
+    ap.add_argument("--mode", choices=["familiar", "balanced", "discovery"], default="balanced",
+                    help="訪客探索度（fame_mode）；預設 balanced＝改版前行為")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
 
@@ -222,10 +226,11 @@ def main() -> None:
     sp = _make_client()
 
     todo = [s for s in SCENARIOS if not args.only or s["id"] in args.only]
+    print(f"探索度 fame_mode = {args.mode}", flush=True)
     runs = []
     for sc in todo:
         print(f"\n=== {sc['id']} {sc['name']} ===", flush=True)
-        m = run_scenario(sc, sp, api_key, repair=not args.no_repair)
+        m = run_scenario(sc, sp, api_key, repair=not args.no_repair, fame_mode=args.mode)
         runs.append(m)
         for i, t in enumerate(m["tracks"], 1):
             mark = "🛠" if t["repaired"] else ("✗" if t["dead"] else " ")
@@ -237,7 +242,8 @@ def main() -> None:
 
     out = {
         "when": datetime.now().isoformat(timespec="seconds"),
-        "tag": args.tag, "repair": not args.no_repair, "num_songs": NUM_SONGS,
+        "tag": args.tag, "repair": not args.no_repair, "fame_mode": args.mode,
+        "num_songs": NUM_SONGS,
         "runs": runs,
         "search_cache": search_cache_info(), "repair_cache": repair_cache_info(),
     }

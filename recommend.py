@@ -48,10 +48,20 @@ POP_CEILING_STRICT = 55      # new_ratio == 100（硬核探索）時收緊
 POP_CEILING_RELAX_STEP = 10  # 候選不足時每輪放寬多少（不回退熱門，只逐步放寬）
 POP_CEILING_MAX_RELAX = 80   # 放寬的絕對上限：再上去就是「不可能沒聽過」的大熱門了，
                              # 湊不滿寧可少幾首——不然放寬會把天花板擋掉的歌整批放回來
-GUEST_POP_CEILING = 80       # 訪客版天花板（比登入版寬鬆）：fame 5 換算 95 會超標、
+GUEST_POP_CEILING = 80       # 訪客「均衡」天花板（比登入版寬鬆）：fame 5 換算 95 會超標、
                              # fame 4 換算 80 剛好貼線通過——只壓「國民金曲」層級。
                              # 兩段式：超標只降低優先權，湊不滿時照樣回補，數量永不縮水
                              # （訪客沒有「經典金曲」之類的意圖訊號，硬擋會毀掉那種請求）
+GUEST_POP_CEILING_DISCOVERY = 65   # 訪客「探索」天花板：擋 fame 4-5（＝登入版 discovery），
+                             # 使用者主動選了探索＝有意圖訊號，可以壓得比均衡狠。仍走兩段式不縮量。
+# 訪客三檔「探索度」→ 天花板。與 guest prompt 的 fame 錨點**必須綁一起改**：只調天花板、
+# LLM 卻不自產 fame≤2 的話，探索模式湊不滿→天花板不縮量→大熱門回補→空轉（EVAL 第 1 輪疑點 1）。
+GUEST_FAME_MODES = ("familiar", "balanced", "discovery")
+GUEST_CEILING_BY_MODE = {
+    "familiar": None,                        # 熟悉：不擋，使用者要「聽得出來」的歌
+    "balanced": GUEST_POP_CEILING,           # 均衡（預設，＝改版前行為）：只壓 fame 5
+    "discovery": GUEST_POP_CEILING_DISCOVERY,  # 探索：擋 fame 4-5
+}
 NOVELTY_WEIGHT = 0.35        # 重排權重：0 = 完全照 LLM 順序，1 = 純冷門優先
 UNKNOWN_POP = 50             # 連 fame 都沒有時的中間值——不確定就不加分也不擋
 
@@ -401,6 +411,29 @@ def _feedback_block(feedback: dict | None) -> str:
     return "\n## 使用者對過往推薦的回饋\n" + "\n\n".join(parts) + "\n"
 
 
+_GUEST_FAME_ANCHOR = (
+    "## 每首都要標 fame（會影響排序，請誠實評估）\n"
+    "這首歌有多紅，填 1-5 整數。**基準：這首在該音樂人的 Spotify 熱門曲目排第幾。**\n"
+    "5=跨圈國民金曲（例：Adele《Someone Like You》）、"
+    "4=該音樂人最紅的前幾首（例：Nick Drake《Pink Moon》）、\n"
+    "3=樂迷普遍知道、2=要聽過整張專輯才知道、1=死忠樂迷才知道。\n"
+)
+# 三檔的差別只在最後這句「往哪個方向用力」。探索檔沿用登入版的校準教訓——只給抽象定義
+# 時 LLM 從不給 1-2 分，加上明確配額（至少一半 1-2）＋「整批標 3＝安全牌」的自我檢查才有效。
+_GUEST_FAME_PUSH = {
+    "familiar": "使用者想聽「聽得出來、熟悉」的歌——以樂迷熟悉的曲目（fame 3-4）為主體即可，不用刻意找冷門。\n",
+    "balanced": "太紅的歌（5 分）會被降低優先，請混入一部分 2-3 分的驚喜選曲。\n",
+    "discovery": (
+        "使用者想聽「幾乎沒聽過的驚喜」。**這份清單裡至少一半必須是 fame 1 或 2。**\n"
+        "怎麼挑到 fame 1-2、又不會找不到：從**你確定有名氣的音樂人**下手，但挑他們的\n"
+        "**專輯曲、B-side、非主打**、避開最紅的代表作——知名歌手的深軌通常真實存在、\n"
+        "又剛好落在 fame 1-2。整批都標 3 就是還在挑安全牌，請往同一位歌手的專輯深處再挖一層。\n"
+        "⚠️ 寧可給一首知名歌手你確定有的專輯曲，也不要為了冷門去猜一個「聽起來像是他會有」\n"
+        "的歌名——猜的曲名在 Spotify 找不到會被整首丟掉（推向太冷門時這種幻覺會暴增）。\n"
+    ),
+}
+
+
 def build_guest_prompt(
     context: str,
     num_songs: int = 15,
@@ -411,8 +444,14 @@ def build_guest_prompt(
     fav_artists: list[str] | None = None,
     refill_exclude: list[tuple[str, str]] | None = None,
     feedback: dict | None = None,
+    fame_mode: str = "balanced",
 ) -> str:
-    """訪客模式 prompt：沒有個人聆聽資料，純靠情境推薦。"""
+    """訪客模式 prompt：沒有個人聆聽資料，純靠情境推薦。
+
+    `fame_mode`（熟悉/均衡/探索，見 GUEST_FAME_MODES）決定 fame 錨點往哪個方向用力：
+    只有「探索」帶登入版那種「至少一半 fame 1-2」的配額——訪客要的不一定是探索，
+    但主動選了探索就是意圖訊號。⚠️ 這個配額必須配 GUEST_CEILING_BY_MODE 的天花板一起改。
+    """
     feedback_block = _feedback_block(feedback)
     if languages:
         lang_block = (
@@ -433,15 +472,9 @@ def build_guest_prompt(
         genre_block = "## 曲風偏好\n- 不限曲風，依情境自由選擇\n"
 
     # fame 自評（訪客版）：沒有聆聽紀錄可比對時，「太紅」是唯一可用的驚喜度訊號。
-    # 錨點沿用登入版的校準教訓——只給抽象定義時 LLM 從不給 1-2 分；
-    # 但不套登入版「至少一半 1-2」的配額，訪客要的不一定是探索
-    fame_block = (
-        "## 每首都要標 fame（會影響排序，請誠實評估）\n"
-        "這首歌有多紅，填 1-5 整數。**基準：這首在該音樂人的 Spotify 熱門曲目排第幾。**\n"
-        "5=跨圈國民金曲（例：Adele《Someone Like You》）、"
-        "4=該音樂人最紅的前幾首（例：Nick Drake《Pink Moon》）、\n"
-        "3=樂迷普遍知道、2=要聽過整張專輯才知道、1=死忠樂迷才知道。\n"
-        "太紅的歌（5 分）會被降低優先，請混入一部分 2-3 分的驚喜選曲。\n"
+    # 錨點共用、方向由 fame_mode 決定（見 _GUEST_FAME_PUSH）。
+    fame_block = _GUEST_FAME_ANCHOR + _GUEST_FAME_PUSH.get(
+        fame_mode, _GUEST_FAME_PUSH["balanced"]
     )
 
     if history:
@@ -517,6 +550,7 @@ def get_recommendations(
     fav_artists: list[str] | None = None,
     refill_exclude: list[tuple[str, str]] | None = None,
     feedback: dict | None = None,
+    fame_mode: str = "balanced",
 ) -> dict:
     client = _client(api_key)
     if profile is None:
@@ -524,7 +558,7 @@ def get_recommendations(
             context, num_songs, user_traits,
             languages=languages, genres=genres, history=history,
             fav_artists=fav_artists, refill_exclude=refill_exclude,
-            feedback=feedback,
+            feedback=feedback, fame_mode=fame_mode,
         )
     else:
         prompt = build_prompt(
@@ -938,6 +972,7 @@ def curate_tracks(
     spare_capped: bool = True,
     fav_artists: list[str] | None = None,
     fav_pool: list[dict] | None = None,
+    fame_mode: str = "balanced",
 ) -> tuple[list[dict], dict]:
     """登入模式的驗證鏈，回傳 (曲目, 統計)。
 
@@ -960,6 +995,8 @@ def curate_tracks(
 
     訪客模式（profile is None）改走 _basic_dedupe：歷史/同批去重＋同藝人上限、
     搜不到的排最後、刷掉的首數計進 stats（dup_history / dup_batch / artist_capped）。
+    `fame_mode`（熟悉/均衡/探索）只影響訪客的 fame 天花板（GUEST_CEILING_BY_MODE），
+    要配 build_guest_prompt 的同一個 fame_mode 一起用（見那裡的說明）。
     """
     stats = {
         "candidates": len(tracks), "dup": 0, "dup_history": 0, "dup_batch": 0,
@@ -972,8 +1009,11 @@ def curate_tracks(
         "pop_from_spotify": 0, "pop_from_fame": 0, "pop_unknown": 0,
     }
     if profile is None:
+        # 訪客天花板依「探索度」而定（熟悉=不擋／均衡=壓 fame5／探索=壓 fame4-5）
+        guest_ceiling = GUEST_CEILING_BY_MODE.get(fame_mode, GUEST_POP_CEILING)
+        stats["ceiling"] = guest_ceiling
         picked_guest = _basic_dedupe(
-            tracks, history, num_songs, stats=stats, fame_ceiling=GUEST_POP_CEILING
+            tracks, history, num_songs, stats=stats, fame_ceiling=guest_ceiling
         )
         picked_guest = _apply_fav_floor(
             picked_guest, fav_artists, fav_pool, num_songs or len(picked_guest), stats
