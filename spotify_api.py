@@ -636,6 +636,8 @@ def _search_tracks_parallel(
 # 幻覺歌手會被反覆提名——同歌手第二次補救零請求）。
 REPAIR_MAX_PER_BATCH = 5    # 每批最多補救幾首：成本上限 5 × 4 = 20 個請求
 REPAIR_ALBUM_FETCHES = 2    # 每位歌手最多抓幾張專輯的曲目
+FAV_POOL_PER_ARTIST = 8     # 指定歌手保底：每位點名歌手最多預抓幾首真實深軌當候選
+                            # （夠填「至少一半」的保底、又不狂打共用配額；重用同一份目錄快取）
 _REPAIR_CACHE: dict[str, list[dict] | None] = {}  # _norm_artist(名) → 候選卡（None=找不到）
 _REPAIR_CACHE_LOCK = threading.Lock()
 _REPAIR_STATS = {"hits": 0, "misses": 0}
@@ -646,19 +648,28 @@ def repair_cache_info() -> dict:
         return {"size": len(_REPAIR_CACHE), **_REPAIR_STATS}
 
 
-def _artist_catalog(artist: str, sp: spotipy.Spotify | None = None) -> list[dict] | None:
+def _artist_catalog(
+    artist: str, sp: spotipy.Spotify | None = None, allow_top_result: bool = False
+) -> list[dict] | None:
     """這位歌手的候選曲目卡清單（取自至多 REPAIR_ALBUM_FETCHES 張非合輯專輯）。
 
     跨使用者快取；「歌手找不到」也快取成 None。429 會往上拋（呼叫端要停止
     整批補救），跟搜尋快取同一條原則：限流造成的失敗不寫進快取。
+
+    `allow_top_result`：嚴格名稱比對失敗時，退而採用搜尋結果第一筆（最相關）。
+    只給「指定歌手保底」用——搜尋字串就是使用者親手打的藝名，第一筆幾乎必然是本尊；
+    最常見的情境是 CJK 藝名在 Spotify 存成羅馬拼音（「陳綺貞」→"Cheer Chen"），
+    嚴格比對跨文字系統對不上。⚠️ 幻覺補救**不能**開這個——LLM 給的歌手名不可信，
+    退而取第一筆會補到別的歌手，比不補更糟。兩種模式的結果分開快取避免互相污染。
     """
     key = _norm_artist(artist)
     if not key:
         return None
+    cache_key = key + "\x00top" if allow_top_result else key
     with _REPAIR_CACHE_LOCK:
-        if key in _REPAIR_CACHE:
+        if cache_key in _REPAIR_CACHE:
             _REPAIR_STATS["hits"] += 1
-            hit = _REPAIR_CACHE[key]
+            hit = _REPAIR_CACHE[cache_key]
             # 回複本：呼叫端會塞 reason / fame / _repaired，不能污染快取
             return [dict(t) for t in hit] if hit is not None else None
         _REPAIR_STATS["misses"] += 1
@@ -677,9 +688,11 @@ def _artist_catalog(artist: str, sp: spotipy.Spotify | None = None) -> list[dict
         ):
             match = a
             break
+    if match is None and allow_top_result:
+        match = next((a for a in found if a and a.get("id")), None)
     if match is None:
         with _REPAIR_CACHE_LOCK:
-            _REPAIR_CACHE[key] = None
+            _REPAIR_CACHE[cache_key] = None
         return None
 
     # ⚠️ artist_albums 的 limit 上限實測只剩 10（2026-08：20 與 50 都回 400
@@ -714,7 +727,7 @@ def _artist_catalog(artist: str, sp: spotipy.Spotify | None = None) -> list[dict
                 "artist_names": [a["name"] for a in t["artists"]],
             })
     with _REPAIR_CACHE_LOCK:
-        _REPAIR_CACHE[key] = [dict(t) for t in cards]
+        _REPAIR_CACHE[cache_key] = [dict(t) for t in cards]
     return cards
 
 
@@ -740,6 +753,40 @@ def repair_hallucinated_track(
             continue
         return dict(t, _repaired=True)
     return None
+
+
+def fav_artist_pool(
+    fav_artists: list[str],
+    exclude_keys: set[tuple[str, str]] | None = None,
+    sp: spotipy.Spotify | None = None,
+) -> list[dict]:
+    """指定歌手保底用的候選池：每位點名歌手在 Spotify 上真實存在的深軌卡清單。
+
+    重用 `_artist_catalog`（跨使用者快取、零幻覺），每首卡標上 `_fav_artist=<名>`
+    讓 curate 的保底邏輯能跨文字系統辨識（「落日飛車」抓回來主藝名可能是
+    "Sunset Rollercoaster"）。每位歌手至多取 FAV_POOL_PER_ARTIST 首。
+
+    `exclude_keys`：已在歷史／已聽過／本批出現的 (正規化歌名, 歌手)，先濾掉避免補出重複。
+    ⚠️ 撞 429 時 `_artist_catalog` 會往上拋 SpotifyException——呼叫端要接住並停止
+    整批保底（跟幻覺補救同一態度：限流時別再打）。
+    """
+    exclude_keys = exclude_keys or set()
+    out: list[dict] = []
+    for name in fav_artists or []:
+        # allow_top_result：使用者親手打的藝名，CJK 藝名常在 Spotify 存成羅馬拼音
+        catalog = _artist_catalog(name, sp, allow_top_result=True)   # 撞 429 會往上拋
+        if not catalog:
+            continue
+        taken = 0
+        for t in catalog:
+            key = _track_key_from(t["name"], (t.get("artist_names") or [""])[0])
+            if key in exclude_keys:
+                continue
+            out.append(dict(t, _fav_artist=name))
+            taken += 1
+            if taken >= FAV_POOL_PER_ARTIST:
+                break
+    return out
 
 
 # ── 跨 session 歷史（持久化在 Spotify 私人歌單） ────────────

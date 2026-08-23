@@ -1,0 +1,144 @@
+{
+ "when": "2026-08-23T01:54:40",
+ "tag": "before-favfloor",
+ "repair": true,
+ "num_songs": 15,
+ "runs": [
+  {
+   "scenario": "S4",
+   "name": "指定歌手",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 2,
+   "repaired": 1,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 2,
+   "fame_low_share": 0.0,
+   "gemini_s": 8.9,
+   "search_s": 6.9,
+   "fav_share": 0.2,
+   "tracks": [
+    {
+     "name": "旅行的意義",
+     "artist": "Cheer Chen",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "My Jinji",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Slow",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "你啊你啊 - 電視劇「用九柑仔店」插曲",
+     "artist": "Waa Wei",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Polaroid",
+     "artist": "Jonas Blue, Liam Payne, Lennon Stella",
+     "fame": 3,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "Stay Gold",
+     "artist": "BTS",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Sunday Morning",
+     "artist": "Maroon 5",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "California Dreamin' - Single Version",
+     "artist": "The Mamas & The Papas",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Lovely Day",
+     "artist": "Bill Withers",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "City Of Stars - From \"La La Land\" Soundtrack",
+     "artist": "Ryan Gosling, Emma Stone",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Daydream Believer",
+     "artist": "The Monkees",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Good day",
+     "artist": "IU",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Here Comes The Sun - Remastered 2009",
+     "artist": "The Beatles",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "golden hour",
+     "artist": "JVKE",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Can't Help Falling in Love",
+     "artist": "Elvis Presley",
+     "fame": 5,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  }
+ ],
+ "search_cache": {
+  "size": 18,
+  "hits": 0,
+  "misses": 18
+ },
+ "repair_cache": {
+  "size": 2,
+  "hits": 0,
+  "misses": 2
+ }
+}

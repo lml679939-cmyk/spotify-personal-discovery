@@ -38,6 +38,7 @@ from recommend import (
 from spotify_api import (
     REPAIR_MAX_PER_BATCH,
     _sp,
+    fav_artist_pool,
     repair_cache_info,
     repair_hallucinated_track,
     search_cache_info,
@@ -153,7 +154,18 @@ def run_scenario(sc: dict, sp, api_key: str, repair: bool) -> dict:
         cards.append(card)
     search_s = time.perf_counter() - t0
 
-    found, stats = curate_tracks(cards, history=None, profile=None, num_songs=NUM_SONGS)
+    # 指定歌手保底：與 app.py 同一條路徑——不夠就抓真實深軌補到承諾線（零幻覺）。
+    # 循序抓（省共用配額，跟這支腳本其餘搜尋一致），撞到限流就放棄補、照實記錄。
+    fav_pool: list = []
+    if sc["fav_artists"]:
+        try:
+            fav_pool = fav_artist_pool(sc["fav_artists"], exclude, sp=sp)
+        except Exception as e:
+            print(f"  [fav_pool 失敗] {e}", flush=True)
+    found, stats = curate_tracks(
+        cards, history=None, profile=None, num_songs=NUM_SONGS,
+        fav_artists=sc["fav_artists"], fav_pool=fav_pool,
+    )
     playable = [t for t in found if not t.get("_no_spotify")]
 
     m = {
@@ -176,11 +188,17 @@ def run_scenario(sc: dict, sp, api_key: str, repair: bool) -> dict:
             / max(1, len(playable)), 2)
     if sc["check"] == "fav_share":
         favs = sc["fav_artists"]
+        # ⚠️ _loose_match 跨文字系統對不上（「陳綺貞」vs Spotify 的 "Cheer Chen"），
+        # 會漏算保底補進來的卡；用 _fav_pick 標籤把那些明確補進來的一律算進去。
         m["fav_share"] = round(
             sum(1 for t in found
-                if any(_loose_match(f, t.get("_eval_claimed_artist", "")) or
+                if t.get("_fav_pick")
+                or any(_loose_match(f, t.get("_eval_claimed_artist", "")) or
                        _loose_match(f, t.get("artist", "")) for f in favs))
             / max(1, len(found)), 2)
+        m["fav_floor"] = stats["fav_floor"]      # 承諾線（round(15*0.5)=8）
+        m["fav_have"] = stats["fav_have"]        # LLM 自己給到幾首可播的指定歌手曲目
+        m["fav_added"] = stats["fav_added"]      # 程式端補了幾首真實深軌
     m["tracks"] = [
         {"name": t["name"], "artist": t["artist"],
          "fame": t.get("fame"), "repaired": bool(t.get("_repaired")),
@@ -214,7 +232,7 @@ def main() -> None:
             print(f"  {i:2d}.{mark} {t['name']} — {t['artist']} (fame={t['fame']})")
         keys = ("playable", "search_miss", "repaired", "dead_cards", "short_of_target",
                 "pop_blocked", "fame_low_share", "lang_conform", "fav_share",
-                "gemini_s", "search_s")
+                "fav_floor", "fav_have", "fav_added", "gemini_s", "search_s")
         print("  " + "  ".join(f"{k}={m[k]}" for k in keys if k in m))
 
     out = {

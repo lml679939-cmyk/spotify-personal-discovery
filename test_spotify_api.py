@@ -309,7 +309,8 @@ class FakeCatalogSpotify:
     def search(self, q, type, limit):
         self.calls += 1
         assert type == "artist"
-        return {"artists": {"items": [{"name": self.artist_name, "id": "ar1"}]}}
+        items = [] if self.artist_name is None else [{"name": self.artist_name, "id": "ar1"}]
+        return {"artists": {"items": items}}
 
     def artist_albums(self, aid, include_groups, limit):
         self.calls += 1
@@ -371,3 +372,42 @@ def test_repair_returns_copies_so_callers_cannot_poison_cache():
     first["reason"] = "第一批的理由"
     second = spotify_api.repair_hallucinated_track("編的 B", "Bathe Alone", set(), sp=sp)
     assert "reason" not in second
+
+
+# ── fav_artist_pool（指定歌手保底候選池）─────────────────────
+def test_fav_artist_pool_tags_cards_and_caps_per_artist():
+    sp = FakeCatalogSpotify(artist_name="陳綺貞", tracks=tuple(f"T{i}" for i in range(20)))
+    pool = spotify_api.fav_artist_pool(["陳綺貞"], sp=sp)
+    assert len(pool) == spotify_api.FAV_POOL_PER_ARTIST     # 每位歌手上限
+    assert all(c["_fav_artist"] == "陳綺貞" for c in pool)   # 綁定標籤供跨文字系統辨識
+    assert all(c.get("uri") and c.get("name") for c in pool)
+
+
+def test_fav_artist_pool_respects_exclude_keys():
+    sp = FakeCatalogSpotify(artist_name="陳綺貞", tracks=("T1", "T2", "T3", "T4"))
+    # T3 是深軌啟發式的第一首（4 軌中位）——先排除它，確認不會被放進池子
+    excluded = {_track_key("T3", "陳綺貞")}
+    pool = spotify_api.fav_artist_pool(["陳綺貞"], excluded, sp=sp)
+    assert all(_track_key(c["name"], "陳綺貞") not in excluded for c in pool)
+    assert all(c["name"] != "T3" for c in pool)
+
+
+def test_fav_artist_pool_uses_top_result_for_cjk_romanized_name():
+    # 使用者親手打 CJK 藝名、Spotify 存的是羅馬拼音（陳綺貞 → Cheer Chen），
+    # 嚴格比對對不上——指定歌手保底改採第一筆搜尋結果（本尊），池子不該是空的
+    sp = FakeCatalogSpotify(artist_name="Cheer Chen")
+    pool = spotify_api.fav_artist_pool(["陳綺貞"], sp=sp)
+    assert pool and all(c["_fav_artist"] == "陳綺貞" for c in pool)
+
+
+def test_fav_artist_pool_skips_artist_with_no_search_results():
+    # 搜尋完全沒有結果才略過（top-result 也沒得取）
+    sp = FakeCatalogSpotify(artist_name=None)
+    pool = spotify_api.fav_artist_pool(["查無此人"], sp=sp)
+    assert pool == []
+
+
+def test_repair_still_strict_no_top_result_fallback():
+    # 幻覺補救維持嚴格比對：LLM 給的歌手名不可信，退而取第一筆會補到別人
+    sp = FakeCatalogSpotify(artist_name="Totally Other Band")
+    assert spotify_api.repair_hallucinated_track("X", "LLM 亂編的歌手", set(), sp=sp) is None

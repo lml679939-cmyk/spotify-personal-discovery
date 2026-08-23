@@ -25,6 +25,7 @@ from recommend import (
     _norm_artist,
     _norm_title,
     _track_key_from,
+    _track_matches_fav,
     _parse_json_robust,
     _strip_code_fence,
     _track_key,
@@ -382,6 +383,145 @@ def test_guest_stats_count_each_drop_reason():
     assert stats["dup_batch"] == 1
     assert stats["artist_capped"] == 1
     assert stats["picked_familiar"] == len(result) == 3
+
+
+# ── curate_tracks：指定歌手保底（fav floor，兩種模式共用）──────
+def _pool(name, fav_name, artist=None):
+    """fav_artist_pool 回來的候選卡：帶 _fav_artist 標籤（fetch 時綁定，跨文字系統可靠）。"""
+    a = artist or fav_name
+    return {"name": name, "artist": a, "artist_names": [a], "_fav_artist": fav_name}
+
+
+def test_fav_floor_backfills_from_pool_when_llm_short():
+    # S4 的病：使用者點名兩位歌手，LLM 只給 1 首、同藝人上限又卡死。
+    # 保底用真實深軌補到 round(6*0.5)=3 首，並平均分配。
+    tracks = [_t("fav1", "陳綺貞")] + [_t(f"ctx{i}", f"N{i}") for i in range(6)]
+    pool = [_pool("旅行的意義", "陳綺貞"), _pool("My Jinji", "落日飛車"),
+            _pool("太陽", "陳綺貞"), _pool("Slow", "落日飛車")]
+    result, stats = curate_tracks(
+        tracks, num_songs=6, fav_artists=["陳綺貞", "落日飛車"], fav_pool=pool,
+    )
+    assert stats["fav_floor"] == 3
+    assert stats["fav_have"] == 1        # LLM 只給了 1 首可播的指定歌手曲目
+    assert stats["fav_added"] == 2       # 程式端補 2 首補到保底線
+    assert len(result) == 6              # 長度不變（置換掉 2 首非指定歌手曲目）
+    fav = [t for t in result if _track_matches_fav(t, ["陳綺貞", "落日飛車"],
+                                                   {"陳綺貞", "落日飛車"})]
+    assert len(fav) == 3
+
+
+def test_fav_floor_noop_without_fav_artists():
+    # 沒有指定歌手＝其他情境零行為變動：結果與統計都跟不帶 fav 參數時一致
+    tracks = [_t("fav1", "陳綺貞")] + [_t(f"ctx{i}", f"N{i}") for i in range(6)]
+    plain, _ = curate_tracks(tracks, num_songs=6)
+    result, stats = curate_tracks(tracks, num_songs=6, fav_artists=None,
+                                  fav_pool=[_pool("x", "陳綺貞")])
+    assert [t["name"] for t in result] == [t["name"] for t in plain]
+    assert stats["fav_floor"] == 0 and stats["fav_added"] == 0
+
+
+def test_fav_floor_distributes_evenly_across_named_artists():
+    # 不讓其中一位吃掉整個保底額：兩位各補一半
+    tracks = [_t(f"ctx{i}", f"N{i}") for i in range(10)]
+    pool = [_pool(f"A{i}", "陳綺貞") for i in range(5)] + \
+           [_pool(f"B{i}", "落日飛車") for i in range(5)]
+    result, stats = curate_tracks(
+        tracks, num_songs=8, fav_artists=["陳綺貞", "落日飛車"], fav_pool=pool,
+    )
+    assert stats["fav_floor"] == 4 and stats["fav_added"] == 4
+    from_a = sum(1 for t in result if t.get("_fav_artist") == "陳綺貞")
+    from_b = sum(1 for t in result if t.get("_fav_artist") == "落日飛車")
+    assert from_a == 2 and from_b == 2
+
+
+def test_fav_floor_relaxes_per_artist_cap_for_named_artist():
+    # 單一指定歌手：保底可以超過 MAX_TRACKS_PER_ARTIST（使用者明確點名＝想多聽幾首）
+    tracks = [_t(f"ctx{i}", f"N{i}") for i in range(10)]
+    pool = [_pool(f"deep{i}", "陳綺貞") for i in range(6)]
+    result, stats = curate_tracks(
+        tracks, num_songs=8, fav_artists=["陳綺貞"], fav_pool=pool,
+    )
+    assert stats["fav_floor"] == 4 and stats["fav_added"] == 4
+    from_a = sum(1 for t in result if t.get("_fav_artist") == "陳綺貞")
+    assert from_a == 4 > MAX_TRACKS_PER_ARTIST
+
+
+def test_fav_floor_replaces_hallucinated_fav_card():
+    # 搜不到的指定歌手卡（幻覺，_no_spotify）不算「已達成」，會被真實深軌替換掉
+    tracks = [
+        {"name": "編的歌名", "artist": "陳綺貞", "_no_spotify": True},
+        _t("ctx1", "N1"), _t("ctx2", "N2"),
+    ]
+    pool = [_pool("旅行的意義", "陳綺貞")]
+    result, stats = curate_tracks(
+        tracks, num_songs=3, fav_artists=["陳綺貞"], fav_pool=pool,
+    )
+    assert stats["fav_have"] == 0        # 幻覺卡不算可播的指定歌手曲目
+    assert stats["fav_added"] == 1
+    names = [t["name"] for t in result]
+    assert "旅行的意義" in names and "編的歌名" not in names
+
+
+def test_fav_floor_matches_pool_by_tag_across_scripts():
+    # pool 卡主藝名可能是羅馬拼音（落日飛車 → Sunset Rollercoaster），靠 _fav_artist 標籤辨識
+    tracks = [_t(f"ctx{i}", f"N{i}") for i in range(4)]
+    pool = [_pool("My Jinji", "落日飛車", artist="Sunset Rollercoaster")]
+    result, stats = curate_tracks(
+        tracks, num_songs=4, fav_artists=["落日飛車"], fav_pool=pool,
+    )
+    assert stats["fav_added"] == 1
+    assert any(t["name"] == "My Jinji" for t in result)
+
+
+def test_fav_floor_without_pool_only_reports_stats():
+    # 第一輪 curate（fav_pool=None）只算 fav_floor/fav_have 供 app.py 決定要不要去抓 pool
+    tracks = [_t("fav1", "陳綺貞")] + [_t(f"ctx{i}", f"N{i}") for i in range(6)]
+    result, stats = curate_tracks(tracks, num_songs=6, fav_artists=["陳綺貞"])
+    assert stats["fav_floor"] == 3 and stats["fav_have"] == 1
+    assert stats["fav_added"] == 0
+    assert len(result) == 6              # 沒 pool 就不動清單
+
+
+def test_fav_floor_dedupes_pool_against_existing():
+    # pool 裡與清單既有曲目同鍵的不重複補
+    tracks = [_t("旅行的意義", "陳綺貞")] + [_t(f"ctx{i}", f"N{i}") for i in range(6)]
+    pool = [_pool("旅行的意義", "陳綺貞"), _pool("太陽", "陳綺貞")]
+    result, stats = curate_tracks(
+        tracks, num_songs=6, fav_artists=["陳綺貞"], fav_pool=pool,
+    )
+    names = [t["name"] for t in result]
+    assert names.count("旅行的意義") == 1   # 沒有被補成兩首
+    assert "太陽" in names
+
+
+def test_fav_floor_grows_short_list_toward_target():
+    # 有空位時保底用真實深軌把短少的清單補長（順便解一部分「湊不滿」），不只是置換
+    tracks = [_t("ctx1", "N1"), _t("ctx2", "N2")]   # 只有 2 首，num_songs=6
+    pool = [_pool(f"deep{i}", "陳綺貞") for i in range(4)]
+    result, stats = curate_tracks(
+        tracks, num_songs=6, fav_artists=["陳綺貞"], fav_pool=pool,
+    )
+    # floor=3，但有空位 → 補到 per_cap=max(2, ceil(3/1)=3)=3，清單從 2 長到 5
+    assert stats["fav_added"] == 3
+    assert len(result) == 5
+
+
+def test_fav_floor_login_injects_real_tracks_not_marked_discovery():
+    # 登入模式：指定歌手不在聆聽紀錄、new_ratio=100、LLM 全給出圈曲。
+    # 保底補進的指定歌手曲目是「明確點名」不是「出圈」，_discovery 要 False。
+    profile = _profile(ids=["id::Known"])
+    tracks = [_st(f"D{i}", f"Fresh{i}", pop=10) for i in range(4)]
+    pool = [_pool("f1", "落日飛車"), _pool("f2", "落日飛車"),
+            _pool("f3", "陳綺貞"), _pool("f4", "陳綺貞")]
+    result, stats = curate_tracks(
+        tracks, profile=profile, new_ratio=100, num_songs=4,
+        fav_artists=["陳綺貞", "落日飛車"], fav_pool=pool,
+    )
+    assert stats["fav_floor"] == 2 and stats["fav_added"] == 2
+    fav_in = [t for t in result if t.get("_fav_pick")]
+    assert len(fav_in) == 2
+    assert all(not t.get("_discovery") for t in fav_in)     # 點名 ≠ 出圈
+    assert stats["picked_new"] == len(result) - 2           # 出圈只算真正沒接觸過的
 
 
 # ── curate_tracks：登入模式驗證鏈 ──────────────────────────

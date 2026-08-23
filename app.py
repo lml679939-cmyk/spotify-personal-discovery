@@ -47,6 +47,7 @@ from spotify_api import (
     clear_persistent_history,
     consume_oauth_callback,
     create_playlist_with_tracks,
+    fav_artist_pool,
     fetch_user_profile,
     get_login_url,
     get_spotify_client,
@@ -1179,12 +1180,14 @@ if _clicked:
 
                 # 驗證鏈：去重 → 排除聽過的曲目 → 分探索/熟悉兩桶 → 探索桶套流行度天花板
                 # → 依「LLM 順位 + 新穎度」重排取額
-                def _curate(cards: list[dict]) -> tuple[list[dict], dict]:
+                def _curate(cards: list[dict], fav_pool: list[dict] | None = None) -> tuple[list[dict], dict]:
                     return curate_tracks(
                         cards, history=history, profile=profile,
                         new_ratio=new_artist_ratio, num_songs=num_songs,
                         # 撞到限流時搜不到不代表歌是假的，補位卡不該再套比例上限
                         spare_capped=not _rate_limited,
+                        # 指定歌手保底：帶著點名歌手（fav_pool 第一輪為 None，只先算 fav_have/floor）
+                        fav_artists=fav_artists, fav_pool=fav_pool,
                     )
 
                 raw_found = found
@@ -1236,6 +1239,27 @@ if _clicked:
                         found, _novelty = _curate(raw_found)
                         if _playable(found, _novelty) >= num_songs:
                             break
+
+                # 指定歌手保底：LLM 對「指定歌手」的遵守率實測只有 0.2，同藝人上限又把
+                # 兩位歌手卡在 4 首。上面每輪 _curate（fav_pool=None）已算好 fav_have/fav_floor，
+                # 不夠就去抓那些歌手在 Spotify 上真實存在的深軌補到保底線（零幻覺），
+                # 並放寬他們的同藝人上限。撞到限流則跳過（跟幻覺補救同一態度：別再打）。
+                if (fav_artists and _search_token and not _rate_limited
+                        and _novelty.get("fav_have", 0) < _novelty.get("fav_floor", 0)):
+                    st.write(":material/mic: 指定歌手保底：補上真實深軌...")
+                    try:
+                        _fav_pool = fav_artist_pool(
+                            fav_artists, _exclude_keys, sp=_sp(_search_token)
+                        )
+                    except spotipy.SpotifyException as e:
+                        if e.http_status == 429:
+                            _rate_limited.append(True)
+                        _fav_pool = []
+                    except Exception:
+                        _fav_pool = []
+                    if _fav_pool:
+                        found, _novelty = _curate(raw_found, fav_pool=_fav_pool)
+
                 # ⚠️ 提示一律寫進 session_state：這段程式跑在 st.status 容器裡，
                 # 結尾的 st.rerun() 會把容器內容清掉，直接 st.warning() 使用者根本看不到。
                 # ⚠️ 而且要放在補生成迴圈**之後**——限流可能是補生成那一輪才撞到的，

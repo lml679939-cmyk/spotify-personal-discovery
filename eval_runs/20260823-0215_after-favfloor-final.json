@@ -1,0 +1,147 @@
+{
+ "when": "2026-08-23T02:15:16",
+ "tag": "after-favfloor-final",
+ "repair": true,
+ "num_songs": 15,
+ "runs": [
+  {
+   "scenario": "S4",
+   "name": "指定歌手",
+   "candidates": 18,
+   "unique": 18,
+   "search_miss": 5,
+   "repaired": 3,
+   "final": 15,
+   "playable": 15,
+   "dead_cards": 0,
+   "short_of_target": 0,
+   "dup_batch": 0,
+   "artist_capped": 0,
+   "pop_blocked": 1,
+   "fame_low_share": 0.07,
+   "gemini_s": 7.1,
+   "search_s": 6.6,
+   "fav_share": 0.53,
+   "fav_floor": 8,
+   "fav_have": 2,
+   "fav_added": 4,
+   "tracks": [
+    {
+     "name": "旅行的意義",
+     "artist": "Cheer Chen",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "和你在一起",
+     "artist": "Cheer Chen",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Teahouse",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": 4,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "Slow",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": 3,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Overlove (Rehab)",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": null,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "倔強愛情的勝利",
+     "artist": "Cheer Chen",
+     "fame": null,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Hyperfocus",
+     "artist": "落日飛車 Sunset Rollercoaster",
+     "fame": null,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "失敗者的飛翔",
+     "artist": "Cheer Chen",
+     "fame": null,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Summer Vibes",
+     "artist": "Jessica!",
+     "fame": 2,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Good day",
+     "artist": "IU",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Vincent",
+     "artist": "Don McLean",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Take It Easy - 2013 Remaster",
+     "artist": "Eagles",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "Sunday Morning",
+     "artist": "Maroon 5",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    },
+    {
+     "name": "YOU’VE GOT THE WORLD",
+     "artist": "Suchmos",
+     "fame": 3,
+     "repaired": true,
+     "dead": false
+    },
+    {
+     "name": "River Flows in You",
+     "artist": "Yiruma",
+     "fame": 4,
+     "repaired": false,
+     "dead": false
+    }
+   ]
+  }
+ ],
+ "search_cache": {
+  "size": 18,
+  "hits": 0,
+  "misses": 18
+ },
+ "repair_cache": {
+  "size": 7,
+  "hits": 0,
+  "misses": 7
+ }
+}

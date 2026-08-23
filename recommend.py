@@ -22,6 +22,11 @@ _NO_THINKING = types.ThinkingConfig(thinking_budget=0)
 
 
 MAX_TRACKS_PER_ARTIST = 2  # 同一次推薦中，同藝人最多出現幾首
+# 指定歌手保底佔比：使用者點名歌手時，最終清單至少這個比例來自那些歌手。
+# 與 build_prompt / build_guest_prompt 對 LLM 的承諾（「至少一半」）刻意一致——
+# LLM 實測遵守率只有 0.2–0.27（S4），且同藝人上限 2 又把兩位歌手硬卡在 4 首，
+# 所以保底靠程式端（curate_tracks 的 _apply_fav_floor）用真實深軌補、prompt 只是機率優化。
+FAV_MIN_SHARE = 0.5
 HISTORY_KEEP = 200          # session 內保留的歷史推薦上限
 PROMPT_HISTORY_MAX = 40     # 其中真正寫進 prompt 的筆數（完整排除靠程式端，見下）
 FEEDBACK_PROMPT_MAX = 20    # 每類回饋（讚/倒讚/聽過）最多寫進 prompt 的筆數，同短清單原則
@@ -732,6 +737,137 @@ def resolution_matches(
 
 
 # ── 後處理：驗證鏈 ────────────────────────────────────────
+def _fav_norm_set(fav_artists: list[str] | None) -> set[str]:
+    """指定歌手名字的正規化集合（空字串剔除）。"""
+    return {n for n in (_norm_artist(f) for f in (fav_artists or [])) if n}
+
+
+def _track_matches_fav(t: dict, fav_artists: list[str] | None, fav_norm: set[str]) -> bool:
+    """這首歌是不是來自指定歌手之一。
+
+    pool 卡帶 `_fav_artist` 標籤（在 fetch 時就綁定，跨文字系統可靠——
+    「落日飛車」抓回來的曲目主藝人可能顯示成 "Sunset Rollercoaster"）；
+    LLM 卡沒有標籤，靠藝名正規化比對（同文字系統），再加 _loose_match 當寬鬆備援。
+    """
+    tag = _norm_artist(t.get("_fav_artist", ""))
+    if tag and tag in fav_norm:
+        return True
+    names = t.get("artist_names") or [
+        a.strip() for a in (t.get("artist") or "").split(",")
+    ]
+    if any(_norm_artist(a) in fav_norm for a in names):
+        return True
+    return any(_loose_match(f, a) for f in (fav_artists or []) if f for a in names)
+
+
+def _apply_fav_floor(
+    result: list[dict],
+    fav_artists: list[str] | None,
+    fav_pool: list[dict] | None,
+    target: int,
+    stats: dict,
+) -> list[dict]:
+    """指定歌手保底：確保最終清單至少 FAV_MIN_SHARE 來自使用者點名的歌手。
+
+    為什麼要有這一關（S4 實證）：LLM 對「指定歌手」的遵守率只有 0.2，而同藝人上限 2
+    又把兩位指定歌手硬卡在 4 首（≈0.27）。對策三件：
+      ① 用 fav_pool（Spotify 上真實存在的深軌，來自 _artist_catalog，零幻覺）補到保底線
+      ② 對指定歌手放寬同藝人上限（使用者明確點名＝想多聽幾首）
+      ③ 各指定歌手之間平均分配，不讓其中一位吃掉整個保底額
+
+    純函式，兩種模式共用。`result` 是最終顯示順序的 list[dict]（搜不到的墊底卡在尾端），
+    回傳調整後的新清單（長度不超過 target；有空位時會用真實深軌把短少的清單補長，
+    順便解一部分「湊不滿」）。**無指定歌手時原樣返回，其他情境零行為變動。**
+
+    只計「可播放」的指定歌手曲目為已達成——搜不到的指定歌手卡（幻覺）不算數，會在
+    補進真實深軌時被優先替換掉。stats 記 fav_floor / fav_have / fav_added 供驗收與說明。
+    """
+    fav_norm = _fav_norm_set(fav_artists)
+    stats["fav_floor"] = 0
+    stats["fav_have"] = 0
+    stats["fav_added"] = 0
+    if not fav_norm:
+        return result
+
+    def _is_fav(t: dict) -> bool:
+        return _track_matches_fav(t, fav_artists, fav_norm)
+
+    def _key(t: dict) -> tuple[str, str]:
+        return _track_key_from(t.get("name") or t.get("title") or "", _track_primary(t))
+
+    floor = min(round(target * FAV_MIN_SHARE), target)
+    have = [t for t in result if _is_fav(t) and not t.get("_no_spotify")]
+    stats["fav_floor"] = floor
+    stats["fav_have"] = len(have)
+    if len(have) >= floor or not fav_pool:
+        return result
+
+    need = floor - len(have)
+    present = {_key(t) for t in result}
+
+    # pool 依「屬於哪位指定歌手」分組（tag 優先，其次靠比對）
+    buckets: dict[str, list[dict]] = {f: [] for f in fav_norm}
+    for c in fav_pool:
+        tag = _norm_artist(c.get("_fav_artist", ""))
+        bucket = tag if tag in buckets else next(
+            (f for f in fav_norm if _track_matches_fav(c, fav_artists, {f})), None
+        )
+        if bucket is None or _key(c) in present:
+            continue
+        buckets[bucket].append(c)
+
+    # 目前各指定歌手已貢獻幾首——先補「較少的」那位，達成平均分配
+    rep = {f: sum(1 for t in have if _track_matches_fav(t, fav_artists, {f})) for f in fav_norm}
+    per_cap = max(MAX_TRACKS_PER_ARTIST, -(-floor // len(fav_norm)))  # 保底÷人數，向上取整
+
+    add: list[dict] = []
+    added_keys: set[tuple[str, str]] = set()
+    order = sorted(fav_norm, key=lambda f: rep[f])
+    progress = True
+    while len(add) < need and progress:
+        progress = False
+        for f in order:
+            if len(add) >= need or rep[f] >= per_cap:
+                continue
+            while buckets[f]:
+                c = buckets[f].pop(0)
+                k = _key(c)
+                if k in present or k in added_keys:
+                    continue
+                card = dict(c, _fav_pick=True)
+                card.setdefault("reason", "你指定的歌手深軌")
+                add.append(card)
+                added_keys.add(k)
+                rep[f] += 1
+                progress = True
+                break
+    if not add:
+        return result
+    stats["fav_added"] = len(add)
+
+    # 保留：可播放的指定歌手曲目全留 + 新補的全留；其餘（含搜不到的墊底卡）只有在
+    # 會超過 target 時才從尾端（優先權最低、墊底卡最先）砍。有空位時清單就變長。
+    have_ids = {id(t) for t in have}
+    over = len(result) + len(add) - target
+    drop_ids: set[int] = set()
+    if over > 0:
+        for t in reversed(result):        # 尾端在前＝先砍（墊底卡、低順位）
+            if len(drop_ids) >= over:
+                break
+            if id(t) not in have_ids:      # 不砍可播放的指定歌手曲目
+                drop_ids.add(id(t))
+    kept = [t for t in result if id(t) not in drop_ids]
+
+    # 顯示順序：新補的插在「最後一首既有指定歌手」之後，搜不到的一律墊底
+    nonspare = [t for t in kept if not t.get("_no_spotify")]
+    spare = [t for t in kept if t.get("_no_spotify")]
+    insert_at = 0
+    for i, t in enumerate(nonspare):
+        if _is_fav(t):
+            insert_at = i + 1
+    return (nonspare[:insert_at] + add + nonspare[insert_at:] + spare)[:target]
+
+
 def _basic_dedupe(
     tracks: list[dict],
     history: list[dict] | None = None,
@@ -800,11 +936,18 @@ def curate_tracks(
     new_ratio: int = 70,
     num_songs: int | None = None,
     spare_capped: bool = True,
+    fav_artists: list[str] | None = None,
+    fav_pool: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """登入模式的驗證鏈，回傳 (曲目, 統計)。
 
     `spare_capped=False` 用在「搜尋本身失敗」時（例如撞到速率限制）：
     此時搜不到不代表歌是假的，補位卡不該再套 SPARE_MAX_RATIO 上限。
+
+    `fav_artists` / `fav_pool`：指定歌手保底（兩種模式共用，見 _apply_fav_floor）。
+    傳 fav_artists 時最後一關會確保清單至少 FAV_MIN_SHARE 來自點名歌手，不夠就用
+    fav_pool（呼叫端預抓的真實深軌，零幻覺）補上並放寬那些歌手的同藝人上限。
+    fav_pool 為空時只計算 fav_floor / fav_have（供呼叫端決定要不要去抓 pool）。
 
     順序：同批去重 → 排除聽過的曲目 → 分成「探索/熟悉」兩桶 → 探索桶套流行度天花板
     → 依「LLM 順位 + 新穎度」重排取額 → 不足時逐步放寬天花板（而不是回退熱門）。
@@ -823,12 +966,17 @@ def curate_tracks(
         "known_track": 0, "pop_blocked": 0, "artist_capped": 0,
         "discovery_pool": 0, "familiar_pool": 0, "picked_new": 0,
         "picked_familiar": 0, "spare_used": 0, "ceiling": None, "avg_pop_new": None,
+        # 指定歌手保底：承諾線、LLM 實際給到幾首（可播）、程式端補了幾首
+        "fav_floor": 0, "fav_have": 0, "fav_added": 0,
         # 天花板到底是靠哪個訊號在跑——三個都 0 代表整條過濾其實沒作用
         "pop_from_spotify": 0, "pop_from_fame": 0, "pop_unknown": 0,
     }
     if profile is None:
         picked_guest = _basic_dedupe(
             tracks, history, num_songs, stats=stats, fame_ceiling=GUEST_POP_CEILING
+        )
+        picked_guest = _apply_fav_floor(
+            picked_guest, fav_artists, fav_pool, num_songs or len(picked_guest), stats
         )
         stats["picked_familiar"] = len(picked_guest)
         return picked_guest, stats
@@ -962,19 +1110,28 @@ def curate_tracks(
     # ⚠️ 不要只照原始索引排——搜不到的卡片沒有封面、只有搜尋按鈕，夾在最前面會讓
     # 整份清單第一眼看起來像壞掉的（實測 15 首裡 3 首搜不到剛好都排在最前面）。
     picked.sort(key=lambda it: (bool(it[1].get("_no_spotify")), it[0]))
+    for i, t in picked:
+        t["_eff_pop"] = eff_pop.get(i, UNKNOWN_POP)   # 供保底後重算 avg_pop_new
     result = [t for _, t in picked]
+
+    # 指定歌手保底：用真實深軌把清單補到至少 FAV_MIN_SHARE 來自點名歌手（可能置換或補長）。
+    # 放在出圈標記與統計之前——補進來的曲目要一起參與後面的計數。
+    result = _apply_fav_floor(result, fav_artists, fav_pool, target, stats)
 
     # 標記哪幾首是「出圈」的，讓 UI 畫得出標籤。附解釋能提高使用者對陌生推薦的
     # 接受度（Spotify 自家 BaRT 的實證），標籤是那個解釋最省版面的形式。
+    # ⚠️ 保底補進來的（_fav_pick）是使用者明確點名的歌手，不是「出圈」——排除在外。
     # 訪客模式不設這個旗標——沒有已知清單，「出圈」對他們沒有意義。
     for t in result:
-        t["_discovery"] = not t.get("_no_spotify") and not _is_known_artist(t)
+        t["_discovery"] = (
+            not t.get("_no_spotify") and not t.get("_fav_pick") and not _is_known_artist(t)
+        )
 
-    new_items = [
-        (i, t) for i, t in picked if not t.get("_no_spotify") and not _is_known_artist(t)
-    ]
+    # 統計改由最終清單重算（保底可能置換/補長，picked 的計數已過時）
+    new_items = [t for t in result if t.get("_discovery")]
+    stats["spare_used"] = sum(1 for t in result if t.get("_no_spotify"))
     stats["picked_new"] = len(new_items)
     stats["picked_familiar"] = len(result) - len(new_items) - stats["spare_used"]
-    pops = [eff_pop[i] for i, _ in new_items if i in eff_pop]
+    pops = [t["_eff_pop"] for t in new_items if "_eff_pop" in t]
     stats["avg_pop_new"] = round(sum(pops) / len(pops), 1) if pops else None
     return result, stats
