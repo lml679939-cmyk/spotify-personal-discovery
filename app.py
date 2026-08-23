@@ -719,11 +719,12 @@ def _persist_playlist(*, rating: int | None = None, saved: bool = False,
 
 
 # 歌單層級 3 段滿意度：文獻上「拿到歌單當下答得出的是整份合不合味、不是逐首喜不喜歡」
-# （見 FEEDBACK_PERSISTENCE.md 的研究段）。用 Material 情緒圖示、3 段（不要 0-100，避免極端值）。
+# （見 FEEDBACK_PERSISTENCE.md 的研究段）。3 段（不用 0-100，避免極端值）。
+# ⚠️ 用**文字**不用 sentiment 圖示——使用者反映那三個情緒圖示「看很久看不出意義」（2026-08-23）。
 _PLAYLIST_RATING = {
-    ":material/sentiment_dissatisfied:": 1,
-    ":material/sentiment_neutral:": 2,
-    ":material/sentiment_very_satisfied:": 3,
+    "不太合": 1,
+    "還可以": 2,
+    "很對味": 3,
 }
 
 
@@ -1617,81 +1618,6 @@ if "found" in st.session_state and not st.session_state.found:
 if "found" in st.session_state and st.session_state.found:
     found = st.session_state.found
 
-    if st.session_state.context_interp:
-        st.markdown(
-            styles.context_interpretation_html(st.session_state.context_interp),
-            unsafe_allow_html=True,
-        )
-
-    # 出圈成果一行摘要。對使用者是透明度，對開發是免費的儀表板——
-    # 「新歌手比例」是這次改版唯一真正的驗收指標
-    _ns = st.session_state.get("novelty_stats")
-    if _ns:
-        _parts = [f"🧭 這批有 **{_ns['picked_new']}/{len(found)}** 首來自你沒接觸過的音樂人"]
-        if _ns.get("avg_pop_new") is not None:
-            _parts.append(f"平均知名度 {_ns['avg_pop_new']}/100（越低越冷門）")
-        _blocked = _ns["known_track"] + _ns["pop_blocked"] + _ns["dup_history"]
-        if _blocked:
-            _parts.append(f"幫你擋掉 {_blocked} 首可能聽過的")
-        st.caption("　·　".join(_parts))
-
-    # 加入 Spotify 歌單按鈕（訪客模式隱藏）
-    save_clicked = False
-    if not is_guest_mode():
-        save_col1, save_col2 = st.columns([3, 1])
-        with save_col1:
-            playlist_name = st.text_input(
-                "歌單名稱",
-                value=st.session_state.get("playlist_title", "").strip()
-                or f"我的專屬歌單 {_local_now().strftime('%m/%d')}",
-                label_visibility="collapsed",
-            )
-        with save_col2:
-            save_clicked = st.button("加入 Spotify", icon=":material/playlist_add:",
-                                     type="primary", width="stretch")
-
-    if save_clicked:
-        # 記下「想收藏整份」的行為訊號——不管 Spotify 寫入成功或 403，意圖都已表達（比嘴巴說可信）
-        _persist_playlist(saved=True)
-        with st.spinner("建立歌單並寫入 Spotify..."):
-            try:
-                uris = [t["uri"] for t in found if t.get("uri")]
-                pl = create_playlist_with_tracks(
-                    playlist_name, uris,
-                    description=st.session_state.get("playlist_blurb", "")
-                    or st.session_state.get("context_interp", ""),
-                )
-                st.success(f"歌單建立成功！[在 Spotify 開啟]({pl['external_urls']['spotify']})")
-            except Exception as e:
-                err_msg = str(e)
-                if "403" in err_msg or "Forbidden" in err_msg:
-                    st.error("Spotify 寫入被拒絕（403 Forbidden）")
-                    with st.expander("為什麼會這樣？怎麼解決？", expanded=True,
-                                     icon=":material/menu_book:"):
-                        st.markdown("""
-**原因**：Spotify 對 Development Mode App 的歌單寫入有限制，你的帳號可能不在這個 App 的授權用戶清單，或 App 沒有寫入權限。
-
-**解決方向（依序嘗試）**：
-
-1. **檢查 User Management Email**
-   到 [Developer Dashboard](https://developer.spotify.com/dashboard) → 你的 App → Settings → User Management，
-   確認填的 Email 完全等於你 Spotify 帳號註冊的 Email（到 [Spotify Profile](https://www.spotify.com/account/profile) 查看）。
-
-2. **重新授權 App**
-   到 [Spotify Apps 設定](https://www.spotify.com/account/apps) 撤銷這個 App 的授權，
-   然後從側邊欄登出、重新登入，強制觸發新的權限授予。
-
-3. **用自己的 API Keys（BYOK，最可靠）**
-   在「自訂 API Keys」填入自己申請的 Client ID / Secret 後重新登入——
-   自己 App 的擁有者寫入自己的歌單不受此限制。
-
-> ⚠️ 網路上常見的「申請 Extended Quota Mode」目前對個人開發者實際上已無法通過，不建議花時間等審核。
-                        """)
-                    st.markdown("---")
-                    st.markdown("**手動加入歌單的方法**：用下方卡片每首歌的「▶ Spotify」按鈕開啟歌曲，在 Spotify 中對歌曲按右鍵 → 加入歌單。")
-                else:
-                    st.error(f"寫入失敗：{e}")
-
     st.markdown(styles.results_header_html(len(found)), unsafe_allow_html=True)
     # 同意閘：歌單出現後才邀請記住回饋（登入＋DB可用＋未同意時）
     _render_consent_banner()
@@ -1765,8 +1691,7 @@ if "found" in st.session_state and st.session_state.found:
     _fb_visible = view_mode != "網格" or cols_per_row <= 5
     if _fb_visible:
         st.caption(
-            "先標 :material/headphones: 早就聽過（幫我校準新鮮度）；等你真的去聽了、有感覺，"
-            "再回來標 :material/thumb_up: 喜歡 / :material/thumb_down: 不合——下次生成 AI 都會參考"
+            "先標 :material/headphones: 早就聽過（幫我校準新鮮度）；等真的去聽了，可以再回來給予回饋"
         )
 
     if view_mode == "網格":
@@ -1803,7 +1728,86 @@ if "found" in st.session_state and st.session_state.found:
             st.link_button(_label, _url, width="stretch")
             _render_feedback(track)
 
-    # ── 歌單整體評分：瀏覽完歌單之後、複製之前才問（使用者看過清單再評分）──
+    # ══ 歌曲清單之後（2026-08-23 版面）：情境解讀 → 出圈摘要 → 加入 Spotify → 評分 → 複製 ══
+    st.divider()
+
+    # AI 情境解讀
+    if st.session_state.context_interp:
+        st.markdown(
+            styles.context_interpretation_html(st.session_state.context_interp),
+            unsafe_allow_html=True,
+        )
+
+    # 出圈成果一行摘要。對使用者是透明度，對開發是免費的儀表板——
+    # 「新歌手比例」是這次改版唯一真正的驗收指標（登入模式才有 novelty_stats）
+    _ns = st.session_state.get("novelty_stats")
+    if _ns:
+        _parts = [f"🧭 這批有 **{_ns['picked_new']}/{len(found)}** 首來自你沒接觸過的音樂人"]
+        if _ns.get("avg_pop_new") is not None:
+            _parts.append(f"平均知名度 {_ns['avg_pop_new']}/100（越低越冷門）")
+        _blocked = _ns["known_track"] + _ns["pop_blocked"] + _ns["dup_history"]
+        if _blocked:
+            _parts.append(f"幫你擋掉 {_blocked} 首可能聽過的")
+        st.caption("　·　".join(_parts))
+
+    # 加入 Spotify 歌單按鈕（訪客模式隱藏）
+    save_clicked = False
+    if not is_guest_mode():
+        save_col1, save_col2 = st.columns([3, 1])
+        with save_col1:
+            playlist_name = st.text_input(
+                "歌單名稱",
+                value=st.session_state.get("playlist_title", "").strip()
+                or f"我的專屬歌單 {_local_now().strftime('%m/%d')}",
+                label_visibility="collapsed",
+            )
+        with save_col2:
+            save_clicked = st.button("加入 Spotify", icon=":material/playlist_add:",
+                                     type="primary", width="stretch")
+
+    if save_clicked:
+        # 記下「想收藏整份」的行為訊號——不管 Spotify 寫入成功或 403，意圖都已表達（比嘴巴說可信）
+        _persist_playlist(saved=True)
+        with st.spinner("建立歌單並寫入 Spotify..."):
+            try:
+                uris = [t["uri"] for t in found if t.get("uri")]
+                pl = create_playlist_with_tracks(
+                    playlist_name, uris,
+                    description=st.session_state.get("playlist_blurb", "")
+                    or st.session_state.get("context_interp", ""),
+                )
+                st.success(f"歌單建立成功！[在 Spotify 開啟]({pl['external_urls']['spotify']})")
+            except Exception as e:
+                err_msg = str(e)
+                if "403" in err_msg or "Forbidden" in err_msg:
+                    st.error("Spotify 寫入被拒絕（403 Forbidden）")
+                    with st.expander("為什麼會這樣？怎麼解決？", expanded=True,
+                                     icon=":material/menu_book:"):
+                        st.markdown("""
+**原因**：Spotify 對 Development Mode App 的歌單寫入有限制，你的帳號可能不在這個 App 的授權用戶清單，或 App 沒有寫入權限。
+
+**解決方向（依序嘗試）**：
+
+1. **檢查 User Management Email**
+   到 [Developer Dashboard](https://developer.spotify.com/dashboard) → 你的 App → Settings → User Management，
+   確認填的 Email 完全等於你 Spotify 帳號註冊的 Email（到 [Spotify Profile](https://www.spotify.com/account/profile) 查看）。
+
+2. **重新授權 App**
+   到 [Spotify Apps 設定](https://www.spotify.com/account/apps) 撤銷這個 App 的授權，
+   然後從側邊欄登出、重新登入，強制觸發新的權限授予。
+
+3. **用自己的 API Keys（BYOK，最可靠）**
+   在「自訂 API Keys」填入自己申請的 Client ID / Secret 後重新登入——
+   自己 App 的擁有者寫入自己的歌單不受此限制。
+
+> ⚠️ 網路上常見的「申請 Extended Quota Mode」目前對個人開發者實際上已無法通過，不建議花時間等審核。
+                        """)
+                    st.markdown("---")
+                    st.markdown("**手動加入歌單的方法**：用下方卡片每首歌的「▶ Spotify」按鈕開啟歌曲，在 Spotify 中對歌曲按右鍵 → 加入歌單。")
+                else:
+                    st.error(f"寫入失敗：{e}")
+
+    # ── 歌單整體評分：瀏覽完歌單、看過 meta 之後才問（使用者看過清單再評分）──
     st.divider()
     _render_playlist_rating()
 
