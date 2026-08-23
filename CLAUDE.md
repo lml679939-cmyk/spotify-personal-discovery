@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（123）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13），共 222 tests
+- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（21，純邏輯＋假 conn，不需 DB），共 245 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 222 tests，改任何 .py 都要跑
+python -m pytest -q                     # 245 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -449,10 +449,13 @@ spotify_api.py → OAuth、Spotify clients、並行搜尋、歌單寫入、跨 s
 ⚠️ **只給保底用**：幻覺補救維持嚴格比對（`allow_top_result=False`），LLM 給的歌手名不可信，
 退而取第一筆會補到別人、比不補更糟。兩種模式的目錄結果**分開快取**（cache key 加 `\x00top`）避免互相污染。
 
-**已知限制（可接受，未修）**：被搜尋端解析成羅馬拼音的 LLM 指定歌手卡（Cheer Chen，沒有
-`_fav_artist` 標籤）`_track_matches_fav` 靠名字比不出 → 演算法的 `fav_have` 會**低估**，可能多抓
-一次 pool、偶爾把佔比推過 50%。但「保底」是下限不是上限，超標＝更多使用者點名的歌手、無害；
-pool 又跨使用者快取，成本低。要根治得把 pool 解析到的 Spotify artist id 傳進 curate 用 id 比對。
+**CJK id 比對（① 最小版，2026-08-23 已做）**：被搜尋端解析成羅馬拼音的 LLM 指定歌手卡
+（Cheer Chen，沒有 `_fav_artist` 標籤）名字比不出 → 舊版 `fav_have` 會低估、可能 overshoot。
+`_apply_fav_floor` 現在**從 pool 卡免費收集每位指定歌手的 Spotify artist id**（pool 卡主藝人
+id[0] ＝ 該歌手 id），`_track_matches_fav` 多一條 id 比對（優先於名字）→ **帶 pool 的第二輪
+`fav_have` 準確、不再 overshoot**，零額外 API。**殘留**：第一輪（`fav_pool=None`）沒有 id、
+仍靠名字比對，所以 app 端「要不要抓 pool」的判斷偶爾仍被低估觸發、多抓一次——但 pool 跨使用者
+快取、成本近零，接受。要連第一輪也修得多一個 `resolve_fav_artist_ids` 輕量搜尋（②完整版，未做）。
 
 **測試**：`test_recommend.py` 的「指定歌手保底」段（10 條）＋ `test_spotify_api.py` 的 `fav_artist_pool`
 段（含 CJK top-result、嚴格補救不 fallback）。無 fav_artists 時 `_apply_fav_floor` 原樣返回，
@@ -1133,7 +1136,9 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
-| `test_*.py`（5 個） | `test_recommend`(123) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) | 改對應模組時同步 |
+| `test_*.py`（6 個） | `test_recommend`(125) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) / `test_db`(21) | 改對應模組時同步 |
+| `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋同意）。純邏輯可測、psycopg 延遲載入。**Phase 1 已寫、尚未接上 app.py** | 見 `FEEDBACK_PERSISTENCE.md` |
+| `FEEDBACK_PERSISTENCE.md` | 回饋＋歷史持久化（資料庫版）規格／計畫 | 動工前讀 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
 | `eval_bench.py` | 固定情境驗收跑分 CLI（訪客 S1–S5，見「驗收流程」） | 改演算法時跑 |
 | `EVAL.md` | 驗收紀錄（每輪一節，含人工三題） | 改演算法時填 |
