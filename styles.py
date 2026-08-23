@@ -408,6 +408,15 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 .st-key-text_ctx,
 .st-key-ctx_image,
 .st-key-projective_a {{ margin-top: -8px; }}
+/* 同意提示卡（結果區頂端）：柔和粉底＋標準細框——取代 st.info 突兀的藍，與品牌粉呼應、
+   不搶生成 CTA。行內 :material: 圖示的上下置中靠全域規則，這裡只管卡片外觀與內距。 */
+.st-key-consent_banner {{
+    background: rgba(255, 105, 180, 0.10);
+    border: 2px solid rgba(45, 27, 78, 0.28);
+    border-radius: 14px;
+    padding: 0.9rem 1.15rem;
+    margin: 0.25rem 0 1rem;
+}}
 /* hero 的 markdown container 帶 -16px 負邊界，會把下面的第一個元件吸上來 */
 [data-testid="stMarkdownContainer"]:has(.y2k-form-title) {{ margin-bottom: 0 !important; }}
 /* 登入 hero（Option C）：min-height 117 對齊表單 hero，但 stMarkdownContainer 的 -16px

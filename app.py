@@ -699,20 +699,22 @@ def _persist_history(found: list[dict]) -> None:
 
 
 def _render_consent_banner() -> None:
-    """未同意時，在**主頁面**（表單上方）顯示同意提示。
+    """登入未同意時，在**歌單出現後**（結果區頂端）邀請記住回饋——這時使用者剛好想對這份
+    歌單按讚/倒讚，比一進站就用同意框擋在表單上方更貼切。
 
-    ⚠️ 刻意不放 sidebar——sidebar 預設收合、又用 CSS 藏了頂部列，同意鈕藏在裡面使用者
-    根本找不到（實測）。一個「要不要開始記住資料」的關鍵開關必須在主流程看得見。
+    ⚠️ 刻意不放 sidebar：sidebar 預設收合、又用 CSS 藏了頂部列，藏在裡面找不到（實測）。
+    ⚠️ 用 st.markdown 行內圖示（全域 CSS 已把行內 :material: 上下置中），不用 st.info——
+    st.info 的圖示與文字各自一欄，文字沒跟圖示上下對齊，且那個藍色與 Y2K 主題不搭。
+    卡片外觀由 styles.py 的 .st-key-consent_banner 上色。
     """
     uk = _persist_uk()
     if not uk or not st.session_state.get("persist_needs_consent"):
         return
     with st.container(key="consent_banner"):
-        st.info(
-            "想讓推薦越用越準嗎？同意後，你的 :material/thumb_up: / :material/thumb_down: / "
-            ":material/headphones: 與推薦歷史會以**雜湊後、看不出是誰**的形式存在本站，"
-            "用來改善推薦、並跨裝置同步——隨時可在左側選單一鍵刪除。",
-            icon=":material/database:",
+        st.markdown(
+            ":material/database: **想讓推薦越用越準嗎？** 同意後，你的 :material/thumb_up: / "
+            ":material/thumb_down: / :material/headphones: 與推薦歷史會以「雜湊後、看不出是誰」"
+            "的形式存在本站，用來改善推薦、並跨裝置同步。"
         )
         if st.button("同意並開始記住回饋", icon=":material/check_circle:", key="consent_btn"):
             uk2 = _persist_uk()
@@ -805,9 +807,6 @@ start_geo_prefetch()
 start_profile_prefetch()
 
 st.markdown(styles.form_hero_html(), unsafe_allow_html=True)
-
-# 同意閘放主頁面（表單上方），不藏在收合的 sidebar；登入＋DB可用＋未同意時才顯示
-_render_consent_banner()
 
 # ══ 第一層：情境輸入（唯一必要的一區）═══════════════════
 # 隱私說明收進 help（問號圖示的 tooltip），不佔版面
@@ -1650,6 +1649,8 @@ if "found" in st.session_state and st.session_state.found:
                     st.error(f"寫入失敗：{e}")
 
     st.markdown(styles.results_header_html(len(found)), unsafe_allow_html=True)
+    # 同意閘：歌單出現後才邀請記住回饋（登入＋DB可用＋未同意時）
+    _render_consent_banner()
     view_col, plat_col, slider_col = st.columns([2, 2, 3], vertical_alignment="center")
     with view_col:
         view_mode = st.radio(
