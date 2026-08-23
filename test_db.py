@@ -189,13 +189,34 @@ def test_set_consent_upsert():
     assert conn.commits == 1
 
 
-def test_delete_all_clears_three_tables():
+def test_delete_all_clears_every_table():
     conn = _Conn()
     db.delete_all(conn, "uk")
     tables = {c[0].lower().split("from ")[1].split(" ")[0] for c in conn.cur.calls}
-    assert tables == {"feedback", "history", "consent"}
+    assert tables == {"feedback", "history", "playlist_feedback", "consent"}
     assert all(c[1] == ("uk",) for c in conn.cur.calls)
     assert conn.commits == 1
+
+
+def test_upsert_playlist_feedback_rating():
+    conn = _Conn()
+    db.upsert_playlist_feedback(conn, "uk", "gen1", rating=3,
+                                num_songs=15, ctx={"lang": "華語"}, now=FIXED)
+    sql, params = _last(conn)
+    assert "insert into playlist_feedback" in sql.lower()
+    assert "on conflict (user_key, gen_id)" in sql.lower()
+    # (user_key, gen_id, rating, saved, copied, num_songs, ctx, created, updated)
+    assert params[0:6] == ("uk", "gen1", 3, False, False, 15)
+    assert json.loads(params[6]) == {"lang": "華語"}
+    assert params[7] == FIXED and params[8] == FIXED
+    assert conn.commits == 1
+
+
+def test_upsert_playlist_feedback_action_only():
+    conn = _Conn()
+    db.upsert_playlist_feedback(conn, "uk", "gen1", saved=True, now=FIXED)
+    _, params = _last(conn)
+    assert params[2] is None and params[3] is True   # rating None、saved True（純行為訊號）
 
 
 # ── 設定／連線（不碰 streamlit，monkeypatch _config）─────────

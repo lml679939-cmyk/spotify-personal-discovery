@@ -67,10 +67,55 @@ create table history (
   primary key (user_key, track_key)
 );
 create index history_user_time_idx on history (user_key, recommended_at desc);
+
+-- 歌單層級訊號（2026-08-23 加）：每次生成一列，gen_id 為鍵。見「回饋訊號設計」段
+create table playlist_feedback (
+  user_key   text not null,
+  gen_id     text not null,
+  rating     int,                          -- 3 段滿意度 1/2/3（看一眼就能答、不需聆聽）
+  saved      boolean not null default false, -- 點了「加入 Spotify」＝想收藏整份（行為訊號）
+  copied     boolean not null default false, -- 保留欄位（複製是 st.code 客戶端動作、目前抓不到）
+  num_songs  int,
+  ctx        jsonb,                         -- 意圖快照（同 feedback，供按意圖切片分析）
+  created_at timestamptz not null,
+  updated_at timestamptz not null,
+  primary key (user_key, gen_id)
+);
+create index playlist_fb_mine_idx on playlist_feedback (rating, saved);
 ```
 - **current-state（upsert）而非 append-only**：v1 夠用（涵蓋「重建＋基本聚合」）。要做時間序列
   深度分析再加一張 append-only events log（列在 Phase 5）。
 - ⚠️ **`ctx` 不存原始情境自由文字**（可能含個資）——只存**派生訊號**（語言/曲風/模式/fame）。資料最小化。
+- `playlist_feedback` 已由整合測試建好、上線驗過（coalesce/OR 累積、中文 jsonb、delete_all 清除）。
+
+## 回饋訊號設計（2026-08-23 研究後定案）
+**問題**：使用者拿到歌單 ≠ 已聆聽，所以逐首「喜歡/不喜歡」是**過早的訊號**，當下答得出的
+只有「聽過/沒聽過」。文獻佐證：Netflix 5 星→讚/倒讚評分量 +200%（粗粒度＋低成本＝更多回饋）；
+Spotify/Deezer 幾乎不靠明確評分，靠**行為訊號**（收藏→聽完→重聽→加入歌單，skip 當警報），
+且訊號要放在**意圖**脈絡讀。量表粒度研究：5–7 選項是甜蜜點，再細邊際遞減，且「粒度的好處會被
+填答率稍降就抵銷」——所以 **0–100 不用（極端值＋低填答），改粗粒度**。
+
+**本站的設計**（受限於「歌在外部播放、抓不到 skip/聽完」）：
+1. **主訊號＝歌單層級行為**：點「加入 Spotify」→ `_persist_playlist(saved=True)`（不管 403，
+   意圖已表達）。二元、無極端值、比嘴巴說可信。（複製走 st.code 客戶端複製鈕，抓不到，故只抓加入。）
+2. **主動打分＝3 段**（不是 0–100）：結果區「這份合你今天的味嗎？😕🙂😍」→ `rating` 1/2/3。
+   看一眼就能答、同意後才顯示（訪客無處可存）。
+3. **單曲層級**：🎧 保留（當下答得出＋出圈校準）；👍/👎 保留但**定位成「聽了再回來標」**
+   （文案已改）——稀疏但精準，不當主要滿意度指標。
+4. **分析用穩健統計＋按意圖切**（`ctx`）。範例查詢：
+```sql
+-- 3 段滿意度用中位數（不是平均，免得極端值主宰），並按意圖(探索度)切開
+select ctx->>'fame_mode' as mode,
+       count(*) n, percentile_cont(0.5) within group (order by rating) as median_rating,
+       avg(saved::int) as save_rate
+from playlist_feedback where rating is not null group by ctx->>'fame_mode';
+```
+```sql
+-- 收藏率 by 探索度/新藝人%——哪種意圖的歌單使用者最想收
+select ctx->>'fame_mode' as mode, ctx->>'new_ratio' as new_ratio,
+       count(*) n, round(100.0*avg(saved::int),1) as save_pct
+from playlist_feedback group by 1,2 order by save_pct desc nulls last;
+```
 
 ## 模組分層
 - 新增 `db.py`：所有 DB 呼叫集中在這（連線快取、upsert、讀取、刪除、trim）。**不 import streamlit

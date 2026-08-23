@@ -161,6 +161,34 @@ def trim_history(conn, uk, keep=HISTORY_KEEP) -> None:
     conn.commit()
 
 
+_PLAYLIST_FB_COLS = "user_key, gen_id, rating, saved, copied, num_songs, ctx, created_at, updated_at"
+
+
+def upsert_playlist_feedback(conn, uk, gen_id, *, rating=None, saved=False, copied=False,
+                             num_songs=None, ctx=None, now=None) -> None:
+    """歌單層級訊號（每次生成一列，gen_id 為鍵）。文獻依據見 FEEDBACK_PERSISTENCE.md：
+    拿到歌單當下使用者答得出的是「整份合不合味」與「想不想收」，不是逐首「喜不喜歡」。
+
+    - `rating` 3 段滿意度（1=不太合 / 2=還不錯 / 3=超合），看一眼就能答、不需聆聽。
+    - `saved`/`copied` 行為訊號（點了加入/複製）——比嘴巴說的更可信，且二元無極端值問題。
+    多次呼叫累積：rating 用 coalesce 保留已填的、saved/copied 用 OR 累加（同一份歌單先評分再收藏）。
+    """
+    ts = _now(now)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"insert into playlist_feedback ({_PLAYLIST_FB_COLS}) "
+            "values (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s) "
+            "on conflict (user_key, gen_id) do update set "
+            "rating = coalesce(excluded.rating, playlist_feedback.rating), "
+            "saved  = playlist_feedback.saved  or excluded.saved, "
+            "copied = playlist_feedback.copied or excluded.copied, "
+            "updated_at = excluded.updated_at",
+            (uk, gen_id, rating, saved, copied, num_songs,
+             json.dumps(ctx or {}, ensure_ascii=False), ts, ts),
+        )
+    conn.commit()
+
+
 def has_consent(conn, uk, version=CONSENT_VERSION) -> bool:
     """這位使用者是否已同意（且同意的版本 >= 目前條款版本）。未同意前一律不讀不寫其他表。"""
     with conn.cursor() as cur:
@@ -183,7 +211,7 @@ def set_consent(conn, uk, version=CONSENT_VERSION, now=None) -> None:
 def delete_all(conn, uk) -> None:
     """『刪除我在本站的所有資料』：清掉三張表裡這位使用者的列。"""
     with conn.cursor() as cur:
-        for tbl in ("feedback", "history", "consent"):
+        for tbl in ("feedback", "history", "playlist_feedback", "consent"):
             cur.execute(f"delete from {tbl} where user_key = %s", (uk,))
     conn.commit()
 

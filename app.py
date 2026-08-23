@@ -698,6 +698,51 @@ def _persist_history(found: list[dict]) -> None:
         _persist_fail()
 
 
+def _persist_playlist(*, rating: int | None = None, saved: bool = False,
+                      copied: bool = False) -> None:
+    """歌單層級訊號（每次生成一列，gen_id 為鍵）：3 段滿意度＋加入/複製行為。best-effort。"""
+    uk = _persist_uk()
+    gen_id = st.session_state.get("gen_id")
+    if not uk or not gen_id or st.session_state.get("persist_needs_consent"):
+        return
+    try:
+        conn = db.get_conn()
+        if conn is None:
+            return
+        db.upsert_playlist_feedback(
+            conn, uk, gen_id, rating=rating, saved=saved, copied=copied,
+            num_songs=len(st.session_state.get("found") or []),
+            ctx=st.session_state.get("last_gen_ctx") or {},
+        )
+    except Exception:
+        _persist_fail()
+
+
+# 歌單層級 3 段滿意度：文獻上「拿到歌單當下答得出的是整份合不合味、不是逐首喜不喜歡」
+# （見 FEEDBACK_PERSISTENCE.md 的研究段）。用 Material 情緒圖示、3 段（不要 0-100，避免極端值）。
+_PLAYLIST_RATING = {
+    ":material/sentiment_dissatisfied:": 1,
+    ":material/sentiment_neutral:": 2,
+    ":material/sentiment_very_satisfied:": 3,
+}
+
+
+def _render_playlist_rating() -> None:
+    """歌單出現後的一句 3 段滿意度——看一眼就能答、不需先聽。只給登入＋已同意者（訪客無處可存）。"""
+    uk = _persist_uk()
+    gen_id = st.session_state.get("gen_id")
+    if not uk or not gen_id or st.session_state.get("persist_needs_consent"):
+        return
+    st.caption("這份歌單合你今天的味嗎？（看一眼就好，不用先聽）")
+    wkey = f"w_rating_{gen_id}"
+    sel = st.pills("歌單滿意度", options=list(_PLAYLIST_RATING), selection_mode="single",
+                   key=wkey, label_visibility="collapsed")
+    rating = _PLAYLIST_RATING.get(sel or "")
+    if rating and rating != st.session_state.get(f"_rated_{gen_id}"):
+        st.session_state[f"_rated_{gen_id}"] = rating   # 這份已寫過就不重複寫
+        _persist_playlist(rating=rating)
+
+
 def _render_consent_banner() -> None:
     """登入未同意時，在**歌單出現後**（結果區頂端）邀請記住回饋——這時使用者剛好想對這份
     歌單按讚/倒讚，比一進站就用同意框擋在表單上方更貼切。
@@ -1540,6 +1585,8 @@ if _clicked:
                     "fame_mode": fame_mode if is_guest_mode() else None,
                     "new_ratio": None if is_guest_mode() else new_artist_ratio,
                 }
+                # 每次生成給一個 id，當歌單層級訊號（評分/加入）的鍵
+                st.session_state["gen_id"] = secrets.token_hex(8)
                 _persist_history(found)
 
                 status.update(label=f":material/check_circle: 完成！找到 {len(found)} 首推薦", state="complete")
@@ -1607,6 +1654,8 @@ if "found" in st.session_state and st.session_state.found:
                                      type="primary", width="stretch")
 
     if save_clicked:
+        # 記下「想收藏整份」的行為訊號——不管 Spotify 寫入成功或 403，意圖都已表達（比嘴巴說可信）
+        _persist_playlist(saved=True)
         with st.spinner("建立歌單並寫入 Spotify..."):
             try:
                 uris = [t["uri"] for t in found if t.get("uri")]
@@ -1649,6 +1698,8 @@ if "found" in st.session_state and st.session_state.found:
     st.markdown(styles.results_header_html(len(found)), unsafe_allow_html=True)
     # 同意閘：歌單出現後才邀請記住回饋（登入＋DB可用＋未同意時）
     _render_consent_banner()
+    # 歌單層級 3 段滿意度（同意後才顯示）——主動打分的低成本訊號
+    _render_playlist_rating()
     view_col, plat_col, slider_col = st.columns([2, 2, 3], vertical_alignment="center")
     with view_col:
         view_mode = st.radio(
@@ -1719,9 +1770,8 @@ if "found" in st.session_state and st.session_state.found:
     _fb_visible = view_mode != "網格" or cols_per_row <= 5
     if _fb_visible:
         st.caption(
-            "每首歌都可以回饋：:material/thumb_up: 喜歡（下次多推相鄰的）・"
-            ":material/thumb_down: 不合胃口（避開類似方向）・"
-            ":material/headphones: 早就聽過（下次推更新的）——下次生成會帶給 AI 參考"
+            "先標 :material/headphones: 早就聽過（幫我校準新鮮度）；等你真的去聽了、有感覺，"
+            "再回來標 :material/thumb_up: 喜歡 / :material/thumb_down: 不合——下次生成 AI 都會參考"
         )
 
     if view_mode == "網格":

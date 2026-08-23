@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（23，純邏輯＋假 conn，不需 DB），共 247 tests
+- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（25，純邏輯＋假 conn，不需 DB），共 249 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 247 tests，改任何 .py 都要跑
+python -m pytest -q                     # 249 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -1140,8 +1140,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
-| `test_*.py`（6 個） | `test_recommend`(125) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) / `test_db`(23) | 改對應模組時同步 |
-| `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋同意）。純邏輯可測、psycopg 延遲載入。**Phase 1+2 已寫並接上 `app.py`**（`_persist_*` helpers）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
+| `test_*.py`（6 個） | `test_recommend`(125) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) / `test_db`(25) | 改對應模組時同步 |
+| `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入。**Phase 1+2 已寫並接上 `app.py`**（`_persist_*` helpers）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
 | `FEEDBACK_PERSISTENCE.md` | 回饋＋歷史持久化（資料庫版）規格／計畫 | 動工前讀 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
 | `eval_bench.py` | 固定情境驗收跑分 CLI（訪客 S1–S5，見「驗收流程」） | 改演算法時跑 |
