@@ -1161,7 +1161,8 @@ elif _rl_left <= 5:
 if _total_hist_n > 0:
     _status_lines.append(f":material/history: 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
 if _status_lines:
-    generate_slot.caption("  \n".join(_status_lines))   # 兩空格+換行＝Markdown 硬換行
+    # keyed 容器：夾在生成按鈕與結果之間，上下間距靠 .st-key-gen_status 對稱化（先量再改）
+    generate_slot.container(key="gen_status").caption("  \n".join(_status_lines))  # 兩空格+換行＝硬換行
 
 if _clicked:
     # ⚠️ 先驗輸入、後扣額度：順序反過來的話，使用者什麼都沒填就按下去也會被扣一次，
