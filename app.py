@@ -866,6 +866,12 @@ start_geo_prefetch()
 # 聆聽資料（18 個 endpoint）同樣在背景先抓，按下生成時通常已經好了
 start_profile_prefetch()
 
+# 返回首頁：退出目前模式（訪客／登入）回到歡迎頁。放主頁面頂端而非收合的 sidebar
+# ——sidebar 藏得住（同意卡實測就找不到），返回入口一定要看得見。
+with st.container(key="back_home_row"):
+    if st.button("返回首頁", icon=":material/arrow_back:", key="back_home"):
+        logout()
+
 st.markdown(styles.form_hero_html(), unsafe_allow_html=True)
 
 # ══ 第一層：情境輸入（唯一必要的一區）═══════════════════
