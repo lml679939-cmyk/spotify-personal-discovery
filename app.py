@@ -700,11 +700,21 @@ def _persist_history(found: list[dict]) -> None:
 
 def _persist_playlist(*, rating: int | None = None, saved: bool = False,
                       copied: bool = False) -> None:
-    """歌單層級訊號（每次生成一列，gen_id 為鍵）：3 段滿意度＋加入/複製行為。best-effort。"""
-    uk = _persist_uk()
+    """歌單層級訊號（每次生成一列，gen_id 為鍵）：3 段滿意度＋加入/複製行為。best-effort。
+
+    訪客也收（滿意度）：用固定 user_key `"anon"`＋唯一 gen_id **匿名聚合**——無身分、不可回溯、
+    無跨 session 回讀/刪除，純供整體分析。方式一是主要模式、用量最大，不收等於放掉最多資料。
+    登入者維持「同意後才寫」＋真實雜湊 user_key。
+    """
     gen_id = st.session_state.get("gen_id")
-    if not uk or not gen_id or st.session_state.get("persist_needs_consent"):
+    if not gen_id or not db.is_enabled():
         return
+    if is_guest_mode():
+        uk = "anon"
+    else:
+        uk = _persist_uk()
+        if not uk or st.session_state.get("persist_needs_consent"):
+            return
     try:
         conn = db.get_conn()
         if conn is None:
@@ -729,15 +739,19 @@ _PLAYLIST_RATING = {
 
 
 def _render_playlist_rating() -> None:
-    """歌單出現後的一句 3 段滿意度——看一眼就能答、不需先聽。只給登入＋已同意者（訪客無處可存）。"""
-    uk = _persist_uk()
+    """歌曲清單之後的一句 3 段滿意度——看一眼就能答、不需先聽。
+    登入者要同意後才顯示；訪客也顯示但**匿名聚合**（無身分、只做整體統計，見 _persist_playlist）。"""
     gen_id = st.session_state.get("gen_id")
-    if not uk or not gen_id or st.session_state.get("persist_needs_consent"):
+    if not gen_id or not db.is_enabled():
         return
-    st.caption("這份歌單合你今天的味嗎？（看一眼就好，不用先聽）")
-    wkey = f"w_rating_{gen_id}"
-    sel = st.pills("歌單滿意度", options=list(_PLAYLIST_RATING), selection_mode="single",
-                   key=wkey, label_visibility="collapsed")
+    if not is_guest_mode() and (not _persist_uk() or st.session_state.get("persist_needs_consent")):
+        return   # 登入者未同意就不顯示（訪客不需同意、匿名收）
+    with st.container(key="playlist_rating"):   # keyed 容器：上下間距靠 styles 的 .st-key-playlist_rating 對稱化
+        st.caption("這份歌單合你今天的味嗎？（看一眼就好，不用先聽）"
+                   + ("　·　匿名統計" if is_guest_mode() else ""))
+        wkey = f"w_rating_{gen_id}"
+        sel = st.pills("歌單滿意度", options=list(_PLAYLIST_RATING), selection_mode="single",
+                       key=wkey, label_visibility="collapsed")
     rating = _PLAYLIST_RATING.get(sel or "")
     if rating and rating != st.session_state.get(f"_rated_{gen_id}"):
         st.session_state[f"_rated_{gen_id}"] = rating   # 這份已寫過就不重複寫
@@ -1131,17 +1145,23 @@ _clicked = generate_slot.button(
     key="btn_generate",
     disabled=_rl_exhausted,
 )
+# 冷卻/額度/歷史狀態合併成**一個** caption——多個 st.caption 之間的上下間距不一致
+# （各自帶 stMarkdownContainer 的 -16px 負邊界，兩兩相加不均），改用 Markdown 硬換行
+# 讓多行走同一元素的行高，間距才一致（見「版面幾何」）。
+_status_lines = []
 if _rl_exhausted:
-    generate_slot.caption(
+    _status_lines.append(
         ":material/traffic: 本站的 AI 由站方自備、所有人共用同一份免費配額，因此設有每日上限。"
         "額度會在 24 小時內逐步恢復。"
     )
 elif _rl_wait:
-    generate_slot.caption(f":material/hourglass_top: 剛生成過，約 {_rl_wait} 秒後可以再按一次。")
+    _status_lines.append(f":material/hourglass_top: 剛生成過，約 {_rl_wait} 秒後可以再按一次。")
 elif _rl_left <= 5:
-    generate_slot.caption(f":material/traffic: 今日還可以生成 {_rl_left} 次。")
+    _status_lines.append(f":material/traffic: 今日還可以生成 {_rl_left} 次。")
 if _total_hist_n > 0:
-    generate_slot.caption(f":material/history: 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
+    _status_lines.append(f":material/history: 已記住推薦過的 {_total_hist_n} 首歌，這次會自動避開。")
+if _status_lines:
+    generate_slot.caption("  \n".join(_status_lines))   # 兩空格+換行＝Markdown 硬換行
 
 if _clicked:
     # ⚠️ 先驗輸入、後扣額度：順序反過來的話，使用者什麼都沒填就按下去也會被扣一次，

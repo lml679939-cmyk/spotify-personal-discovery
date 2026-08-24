@@ -417,6 +417,9 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
     padding: 0.9rem 1.15rem;
     margin: 0.25rem 0 1rem;
 }}
+/* 歌單評分卡：上緣被 caption 的 -16px 負邊界吸近上方分隔線（實測 top gap 24 vs bottom 40），
+   補 16px 讓上下間距對稱（先量再改）。 */
+.st-key-playlist_rating {{ margin-top: 16px; }}
 /* hero 的 markdown container 帶 -16px 負邊界，會把下面的第一個元件吸上來 */
 [data-testid="stMarkdownContainer"]:has(.y2k-form-title) {{ margin-bottom: 0 !important; }}
 /* 登入 hero（Option C）：min-height 117 對齊表單 hero，但 stMarkdownContainer 的 -16px

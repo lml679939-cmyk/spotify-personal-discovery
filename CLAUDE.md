@@ -88,34 +88,34 @@ python -m pytest -q                     # 249 tests，改任何 .py 都要跑
 要在容器裡認真開發就先把 image 換成 3.12、拿掉那個 XSRF flag；只是隨手跑一下就
 知道上面兩件事即可。**別因為容器裡測試紅就去改測試或改 `_client_ip()` 的邏輯。**
 
-**接手後的第一件事**（2026-08-23 交接狀態，第 4 版）
+**接手後的第一件事**（2026-08-23 交接狀態，第 5 版）
 
-> ⚠️ **第 2 輪第 2 項尚未 push**（第 1 項「指定歌手保底」已 push＝commit `00afdaf`；工作區有
-> 第 2 項的改動、222 tests 全過）。顯示名稱 **SoundCurator**、網址 `soundcurator.streamlit.app`
-> （repo 仍 spotify-personal-discovery）。**第 2 輪兩項演算法都已做完並驗收**（數字進 `EVAL.md`
-> 第 2 輪兩節）。細節見「指定歌手保底」「訪客探索度」兩段。
+> **全部已 push＋上線＋驗過**。顯示名稱 **SoundCurator**、網址 `soundcurator.streamlit.app`
+> （repo 仍 spotify-personal-discovery）。這一版的大事：第 2 輪兩項演算法完成、幻覺補救線上實證、
+> **回饋＋歷史持久化（Supabase DB）從零建置並上線**。細節在對應段落與 `FEEDBACK_PERSISTENCE.md`。
 
-1. ✅ **①指定歌手保底佔比（已完成＋已 push `00afdaf`，2026-08-23）**——`recommend._apply_fav_floor`
-   用 `spotify_api.fav_artist_pool()` 從點名歌手真實目錄補深軌到 `FAV_MIN_SHARE=0.5`，零幻覺。
-   S4：3/15→8/15、fav_share 0.20→0.53。見「指定歌手保底」段。
-2. ✅ **②訪客「熟悉/均衡/探索」fame 選項（已完成，2026-08-23，未 push）**——訪客新增「探索度」三檔。
-   均衡＝改版前行為（預設）；探索才帶「至少一半 fame1-2」配額＋較嚴天花板（65）。**兩件綁一起做**
-   （疑點1：只調天花板 LLM 仍不自產 fame≤2）。探索的挖法綁「知名歌手的專輯深軌」才不會幻覺暴增。
-   S1 fame≤2 0.07→0.33、S3 0→0.27。見「訪客探索度」段。**下一步先 push**（跨模組、沒動
-   requirements.txt→雲端記得 Reboot）。
-3. **驗證幻覺補救真的在線上生效**（還沒做）：在 `soundcurator.streamlit.app` 生成一份，再到
-   Manage app 日誌撈 `[NOVELTY]`，看 `repaired` 有沒有上升、`spare_used`（死連結卡）有沒有下降。
-   這是 `5c70d25` 的驗收指標。（部署日誌已確認 `[GEO] 找不到 client IP`＝雲端拿不到位置，非 bug。）
+1. ✅ **第 2 輪演算法**（都線上驗過，數字進 `EVAL.md`）：① 指定歌手保底（`_apply_fav_floor`，
+   S4 指定歌手 3/15→8/15）② 訪客探索度（`fame_mode` 三檔，S1 fame≤2 0.07→0.33）。見兩同名段。
+2. ✅ **幻覺補救線上實證**：`[NOVELTY]` log 撈到 `repaired` 3→5、`spare_used=0`，真實使用者對
+   15 首「都沒聽過」（`known` 170 曲/171 歌手）。見 `EVAL.md`「線上實測」節。
+3. ✅ **回饋＋歷史持久化（Supabase Postgres，已上線）**：使用者已建 Supabase＋填 Secrets（Phase 0）；
+   `db.py`（Phase 1）＋`app.py` 的 `_persist_*`（Phase 2）都接好、**對真實 DB 跑過整合測試**。
+   4 張表 `consent / feedback / history / playlist_feedback`。**登入＋同意**才存逐首回饋(👍/👎/🎧)、
+   歷史（取代靠歌單名字找回、改名就失聯的舊機制）、歌單 3 段滿意度、加入 Spotify 行為；跨裝置；
+   sidebar 有刪除鍵。**訪客也收歌單滿意度、但匿名**（`user_key="anon"`＋唯一 gen_id，純聚合、不可回溯）。
+   為何這樣設計（歌單層級行為＋3 段滿意度為主、👍/👎 定位成「聽後再標」、不用 0-100）＝有文獻依據，
+   見 `FEEDBACK_PERSISTENCE.md`「回饋訊號設計」段。UI 位置見「結果區排序」。
 
-**還沒做的**（依價值排序，都不急）
-- **回饋持久化（登入版）＝進行中**：**已改走資料庫（Supabase Postgres），不是原本的「寫進
-  Spotify 歌單」**（使用者定調：資料要在自己手上、拿來優化演算法；且歌單靠名字找、被改名就失聯）。
-  `db.py`＋`app.py` 的 `_persist_*` 接線（Phase 1+2）**已寫並上線**，但 `db.is_enabled()` False
-  （Streamlit Secrets 未設 `SUPABASE_DB_URL`/`PERSIST_HMAC_SECRET`）→ **目前全 no-op、行為與改版前一致**。
-  規格與 Phase 0（建 Supabase＋填 Secrets，使用者的事）見 `FEEDBACK_PERSISTENCE.md`。
-  ⚠️ Secrets 一旦設好、DB 生效，**站方就開始留存資料**（雜湊 user_key＋回饋＋歷史）——那時登入頁
-  「Token 只存在記憶體」附近的敘述要補一句、揭露靠**結果區頂端的同意卡**（`_render_consent_banner`，
-  歌單出現後才顯示；刻意不放收合的 sidebar，實測會找不到），刪除鍵則在 sidebar（`_render_persist_sidebar`）。
+**還沒做的 / 下一步**（依價值排序，都不急）
+- **拿累積資料回頭調演算法（這才是持久化的目的）**：`feedback` / `playlist_feedback` 表用 SQL 分析
+  ——**中位數**（不是平均，免極端值）、按 `ctx` 意圖切（`ctx->>'fame_mode'`）。查詢範例在
+  `FEEDBACK_PERSISTENCE.md`「回饋訊號設計」段。等資料累積再做。
+- **訪客的 feedback/history 持久化**：目前訪客只有「匿名歌單滿意度」進 DB；逐首 👍/👎/🎧 與歷史仍
+  session 級（訪客無穩定身分可回讀）。要做得走 localStorage 自訂元件或匿名列，見規格 Phase 5。
+- **events-log 深度分析表**（時間序列），規格 Phase 5。
+- ⚠️ 隱私：站方**已開始留存資料**（雜湊 user_key＋回饋＋歷史）。揭露走**結果區頂端的同意卡**
+  （`_render_consent_banner`，歌單出現後才顯示；刻意不放收合的 sidebar，實測會找不到）＋sidebar 刪除鍵
+  （`_render_persist_sidebar`）＋訪客評分的「匿名統計」字樣。登入頁「Token 只存在記憶體」那句仍在、未改。
   訪客版持久化仍未做（要 localStorage 自訂元件，或存匿名列供聚合，見規格 Phase 5）。
 - **雲端的位置與天氣**：已確認 Streamlit Cloud 的代理鏈拿不到 client IP（見「位置偵測」），
   時區已改由瀏覽器提供、時間正確，但位置與天氣在雲端一律不顯示。
@@ -1173,7 +1173,9 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
-| _(未 push)_ | feat: **訪客探索度三檔**（第 2 輪演算法第 2 項）——訪客表單新增「熟悉/均衡/探索」radio → `fame_mode`。均衡＝改版前行為（預設，逐字不動）；探索才降天花板（`GUEST_POP_CEILING_DISCOVERY=65`）＋在 guest prompt 套「至少一半 fame1-2」配額（兩件綁一起做，疑點1）。探索的挖法綁「知名歌手的專輯深軌」而非小眾藝人（小眾→幻覺/搜不到暴增，三版迭代才收斂）。S1 華語 fame≤2 0.07→0.33、S3 健身 0→0.27（`EVAL.md` 第 2 輪第 2 節）。+8 tests（共 222）。見「訪客探索度」段 |
+| `5a3e83d`…`6d548c4` 等 | fix(ui): **回饋 UI 迭代**——結果區改「歌曲清單優先」（AI情境解讀/出圈摘要/加入Spotify 移到清單下方）、同意卡從 sidebar 搬到**主頁面結果區**（sidebar 收合藏不住、實測找不到）、歌單評分改 3 段**文字**「不太合/還可以/很對味」（sentiment 圖示使用者看不出意義）、生成按鈕移到表單最底（填完再送出）、單曲回饋文案改「聽了再回來標 👍/👎」、生成敘事行縮一行、評分卡上下間距對稱（`.st-key-playlist_rating`，先量再改：24/40→40/40） |
+| `09f9759`,`00d9f62`,`c68a404` 等 | feat: **回饋＋歷史持久化上線（Supabase Postgres）**——4 表 `consent/feedback/history/playlist_feedback`；`db.py`（Phase 1，psycopg 延遲載入、HMAC 假名 `user_key`、`reset_conn` 自癒）＋`app.py` `_persist_*`（Phase 2）。登入＋同意存逐首回饋/歷史（取代靠歌單名找、改名就失聯的舊機制）/歌單 3 段滿意度/加入行為，跨裝置，sidebar 刪除鍵；**訪客滿意度匿名**（`user_key="anon"`）。回饋訊號設計有文獻依據（歌單層級行為＋3 段滿意度為主、不用 0-100）。對真實 Supabase 跑過整合測試。見 `FEEDBACK_PERSISTENCE.md`。（共 249 tests）|
+| `8faa558` | feat: **訪客探索度三檔**（第 2 輪演算法第 2 項）——訪客表單新增「熟悉/均衡/探索」radio → `fame_mode`。均衡＝改版前行為（預設，逐字不動）；探索才降天花板（`GUEST_POP_CEILING_DISCOVERY=65`）＋在 guest prompt 套「至少一半 fame1-2」配額（兩件綁一起做，疑點1）。探索的挖法綁「知名歌手的專輯深軌」而非小眾藝人（小眾→幻覺/搜不到暴增，三版迭代才收斂）。S1 華語 fame≤2 0.07→0.33、S3 健身 0→0.27（`EVAL.md` 第 2 輪第 2 節）。+8 tests。見「訪客探索度」段 |
 | `00afdaf` | feat: **指定歌手保底佔比**（第 2 輪演算法第 1 項）——`recommend._apply_fav_floor` 在驗證鏈最後用真實深軌把清單補到至少 `FAV_MIN_SHARE=0.5` 來自點名歌手、放寬他們的同藝人上限、平均分配、零幻覺；`spotify_api.fav_artist_pool()` 重用 `_artist_catalog`；CJK 藝名（陳綺貞→Cheer Chen）走 `allow_top_result=True` 取搜尋第一筆（**只給保底、幻覺補救維持嚴格**，結果分開快取）。S4：指定歌手佔比 3/15→8/15、fav_share 0.20→0.53（`EVAL.md` 第 2 輪）。+15 tests。見「指定歌手保底」段 |
 | `0d86919` | feat: 表單 hero 改版——放大漸層標題（2.9rem）左對齊＋小圖示漂浮裝飾（黑膠/青星芒 absolute 漂左上、黃星芒/音符/紫星芒 inline 貼標題後收攏、手機 `.y2k-decor` 收掉），取代三大置中圖示。⚠️ 右裝飾別用 `absolute; right:` 貼右邊緣（hero 很寬→飄太遠、焦點拉散）、改 inline 貼標題後才收攏; docs: 主表單版面段重寫 |
 | `9b7455a`／`d83cbfa` | feat: 登入 hero Option C（黑膠當 Sound 的「o」＋tagline「不推弟，只推歌。還不快叫我乾歌」，取代三貼紙圖示＋漸層字）、高度對齊表單 hero（`min-height:117`＋`:has(.y2k-login-hero)` 歸零 -16px）；表單標題先 2.4→2.6rem 再改回 2.4rem（同字級會頭重、兩 hero 構圖不同故刻意不同字級——後於 0d86919 整個改版） |

@@ -100,7 +100,7 @@ Spotify/Deezer 幾乎不靠明確評分，靠**行為訊號**（收藏→聽完�
    意圖已表達）。二元、無極端值、比嘴巴說可信。（複製走 st.code 客戶端複製鈕，抓不到，故只抓加入。）
 2. **主動打分＝3 段**（不是 0–100）：歌曲清單之後「這份合你今天的味嗎？」→ 三顆**文字** pill
    「不太合／還可以／很對味」→ `rating` 1/2/3（⚠️ 用文字不用 sentiment 圖示——使用者反映圖示看不出意義）。
-   看一眼就能答、同意後才顯示（訪客無處可存）。
+   看一眼就能答。**登入者同意後才顯示；訪客也顯示但匿名收**（`user_key="anon"`，見「訪客資料」段）。
 3. **單曲層級**：🎧 保留（當下答得出＋出圈校準）；👍/👎 保留但**定位成「聽了再回來標」**
    （文案已改）——稀疏但精準，不當主要滿意度指標。
 4. **分析用穩健統計＋按意圖切**（`ctx`）。範例查詢：
@@ -163,9 +163,14 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
 - **歌單要不要繼續雙寫？** 兩個選項（實作時再定）：(a) 停掉歌單、DB 唯一真相；(b) 繼續雙寫歌單
   當「使用者看得到的探索歷史」便利品、但演算法只讀 DB。建議 (b)，成本低又保留使用者體驗。
 
-## 訪客資料（之後再說，Phase 5）
-訪客沒有穩定身分 → 無法跨 session 重建。但訪客回饋對**聚合探勘**仍有價值：可存成匿名列
-（無 user_key 或每 session 隨機 id）純供分析、不做個人化重建。需要自己的告知。**v1 不含**。
+## 訪客資料
+訪客沒有穩定身分 → 無法跨 session 重建個人化。但訪客是主要、不限人數的模式，用量最大，
+其滿意度對**聚合探勘**很有價值。
+- ✅ **訪客歌單滿意度＝已做（匿名）**：`_persist_playlist` 對訪客用固定 `user_key="anon"`＋唯一
+  `gen_id` 存一列，帶 `ctx` 意圖快照。無身分、不可回溯、無跨 session 回讀/刪除，純供整體分析；
+  評分區顯示「匿名統計」揭露。**分析時記得 `where user_key='anon'` 才是訪客資料。**
+- ⬜ **訪客的逐首 👍/👎/🎧 與歷史＝未做**（仍 session 級）。要做得走 localStorage 自訂元件（跨裝置）
+  或比照匿名列（僅聚合）。Phase 5。
 
 ## 測試
 - **純邏輯（pytest）**：rows ↔ `track_feedback`/history 的往返（`_track_key` 重建、單選覆蓋、trim 邊界）。
@@ -175,21 +180,22 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
 - **手動**：A 裝置給回饋＋同意 → B 裝置登入 → 回饋/歷史都在；按刪除 → 兩邊清空。
 
 ## 分階段落地
-- **Phase 0（你做，gating）**：建 Supabase 專案、跑上面的 DDL、把 pooler 連線字串與 `PERSIST_HMAC_SECRET`
-  填進 Streamlit Secrets（本機 `.env` 也放一份供開發）。
-- ✅ **Phase 1（`db.py`，已寫 2026-08-23）**：user_key 雜湊、key_str、feedback/history/consent 的
-  upsert/delete/load/trim/delete_all、`is_enabled`/`get_conn`/`reset_conn`（psycopg 延遲載入）。
-  **純邏輯＋假 conn 測試 21 條**（`test_db.py`，不需 Supabase）。
-- ✅ **Phase 2（`app.py` 接線，已寫 2026-08-23）**：`import db`；登入算 `persist_uk`（HMAC，快取）；
-  `_persist_login_sync`（同意閘＋讀回回饋/歷史 seed session）；`_render_persist_sidebar`（未同意→同意鈕、
-  已同意→刪除鈕）；`_render_feedback` 變動時 `_persist_feedback`（帶 `last_gen_ctx` 情境快照）；
-  生成時 `_persist_history`＋trim（與 Spotify 歌單**雙寫**）。全部 try/except 降級、死連線 `reset_conn()`
-  自癒。`psycopg[binary]==3.3.4` 進 requirements。**⚠️ 現在 `db.is_enabled()` False → 全 no-op、
-  行為與改版前一致；要等 Phase 0 填好 Secrets 才真的生效，屆時必做登入實測**（登入→同意→按讚→
-  換裝置/清 session 再登入看回饋在不在→按刪除→確認清空）。
-- **Phase 3（待實測後）**：登入頁文案微調（目前揭露靠同意閘，已可接受）＋（選）舊 Spotify 歷史一次性匯入。
-- **Phase 4（選）**：停掉或維持雙寫 Spotify 歷史歌單的決定。
-- **Phase 5（選，另案）**：訪客匿名探勘、events-log 深度分析表。
+- ✅ **Phase 0（已完成，使用者做）**：Supabase 專案建好、DDL 跑好（含後加的 `playlist_feedback`）、
+  pooler(Session,5432) 連線字串＋`PERSIST_HMAC_SECRET` 填進 Streamlit Secrets 與本機 `.env`。**DB 已生效**。
+- ✅ **Phase 1（`db.py`，已上線）**：user_key 雜湊、key_str、feedback/history/consent/**playlist_feedback**
+  的 upsert/delete/load/trim/delete_all、`is_enabled`/`get_conn`/`reset_conn`（psycopg 延遲載入）。
+  純邏輯＋假 conn 測試（`test_db.py`），且**對真實 Supabase 跑過整合測試**（連線/schema/中文 jsonb/
+  coalesce+OR 累積/delete_all 全對）。
+- ✅ **Phase 2（`app.py` 接線，已上線並實測）**：登入算 `persist_uk`（HMAC）；`_persist_login_sync`
+  （同意閘＋讀回回饋/歷史 seed session）；**同意卡 `_render_consent_banner`（結果區頂端，粉底卡）**＋
+  刪除鍵 `_render_persist_sidebar`（sidebar）；`_render_feedback` 變動→`_persist_feedback`（帶 `ctx`）；
+  生成→`_persist_history`＋trim（與 Spotify 歌單雙寫）；**歌單層級 `_persist_playlist`（滿意度/加入行為）
+  ＋`_render_playlist_rating`（3 段文字，清單之後）**。**訪客滿意度匿名收**（`user_key="anon"`）。全部
+  try/except 降級、死連線 `reset_conn()` 自癒。`psycopg[binary]==3.3.4` 進 requirements。已對真實 DB 驗過。
+- **Phase 3（待資料累積，下一步）**：拿 `feedback`/`playlist_feedback` 回頭**調演算法**（中位數、按 `ctx`
+  意圖切）——這才是持久化的目的。查詢範例見「回饋訊號設計」段。
+- **Phase 4（選）**：停掉或維持雙寫 Spotify 歷史歌單的決定；登入頁文案（目前揭露靠同意卡，可接受）。
+- **Phase 5（選，另案）**：訪客的**逐首回饋/歷史**持久化（目前訪客只有匿名滿意度）、events-log 深度分析表。
 
 ## 工作量粗估
 Phase 1–3 約 1–2 天含測試（多數複雜度在同意閘與降級路徑，DB CRUD 本身不難）。**前提是 Phase 0
