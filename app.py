@@ -606,6 +606,28 @@ def fetch_auto_context() -> str:
 
 # ── UI ────────────────────────────────────────────────────
 st.set_page_config(page_title="SoundCurator", page_icon="🎵", layout="wide")
+
+# ── [TEMP SPIKE — Phase 5 雲端驗，驗完整段移除] ─────────────────
+# 只有帶 ?spike=guestid 才進來，一般使用者碰不到。驗自建 localStorage 元件在
+# 雲端巢狀 iframe 能否來回傳 id、重整不變、無痕回 null。
+if st.query_params.get("spike") == "guestid":
+    import os as _os
+    import streamlit.components.v1 as _components
+    _gid_comp = _components.declare_component(
+        "sc_guest_id",
+        path=_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "guest_id_component"),
+    )
+    st.title("Phase 5 spike（雲端）：guest local id")
+    _gid = _gid_comp(default=None)
+    st.write("元件回傳：", repr(_gid))
+    if _gid and not st.session_state.get("_spike_first"):
+        st.session_state["_spike_first"] = _gid
+    st.write("本 session 第一次看到：", repr(st.session_state.get("_spike_first")))
+    st.write("相同？", _gid is not None and _gid == st.session_state.get("_spike_first"))
+    if st.button("Rerun（同 session）"):
+        st.rerun()
+    st.stop()
+
 styles.inject_global_css()
 
 

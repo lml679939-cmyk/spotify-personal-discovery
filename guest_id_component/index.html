@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>sc_guest_id</title>
+<script>
+// 極簡 Streamlit 雙向元件：讀/生成 localStorage 的訪客匿名代號並回傳 Python。
+// 刻意不引 streamlit-component-lib（免 Node build、免第三方相依），手刻 postMessage 協定。
+// 讀不到 localStorage（無痕/被擋）→ 回 null → Python 端降級成 session 級，絕不共用固定值。
+(function () {
+  "use strict";
+  var KEY = "sc_guest_id";
+  function post(type, extra) {
+    var msg = { isStreamlitMessage: true, type: type };
+    if (extra) { for (var k in extra) { msg[k] = extra[k]; } }
+    window.parent.postMessage(msg, "*");
+  }
+  function readOrCreate() {
+    try {
+      var id = window.localStorage.getItem(KEY);
+      if (!id) {
+        id = (window.crypto && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
+        window.localStorage.setItem(KEY, id);
+      }
+      return id;
+    } catch (e) {
+      return null;
+    }
+  }
+  var delivered = false;
+  window.addEventListener("message", function (e) {
+    if (!e.data || e.data.type !== "streamlit:render") { return; }
+    if (delivered) { return; }          // 只回一次，避免每次 render 都觸發 rerun
+    delivered = true;
+    post("streamlit:setComponentValue", { value: readOrCreate(), dataType: "json" });
+  });
+  // 握手：先宣告 ready（Streamlit 收到才會發 render），並把 iframe 高度設 0（隱形）。
+  post("streamlit:componentReady", { apiVersion: 1 });
+  post("streamlit:setFrameHeight", { height: 0 });
+})();
+</script>
