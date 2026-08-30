@@ -795,9 +795,17 @@ UUID**，同意後就能跨 session 記住訪客的回饋/歷史/歌單評分。
   ⚠️ 讀不到 id（無痕）**不退固定字串**、只降 session 級（同 `_rate_key()` 那課）。
 - **統一路徑**：`_effective_uk()`＝登入 `persist_uk` 或訪客 `guest_uk`；登入的 `_persist_feedback/_persist_history/
   _persist_playlist/_persist_sync/_render_consent_banner/_render_persist_sidebar` 全改吃它，訪客自動沿用同一套。
-- **同意閘**：訪客同意卡走同一個 `_render_consent_banner`（訪客版文案：「記住我，這台瀏覽器、不跨裝置、
-  不含個資、可刪除」）。**同意→記名**（逐首/歷史/評分寫 `guest_uk`、跨 session 讀回）；**未同意→**
-  逐首/歷史留 session、歌單評分走**匿名 `anon` 聚合**（維持改版前，評分區標「匿名統計」）。
+- **同意閘**：訪客同意卡走同一個 `_render_consent_banner`。文案**以好處領頭**（「要不要讓推薦越用越準？
+  記住你按過的 👍/👎…下次不再推你看過的」），隱私事實（雜湊、不是帳號、不跨裝置、可刪）仍完整揭露、不藏
+  ——不是暗黑模式，是把價值講清楚。**同意→記名**（逐首/歷史/評分寫 `guest_uk`、跨 session 讀回）。
+- **未同意訪客也照收「匿名聚合」（不用同意、不綁身分，這是刻意的資料策略）**：
+  - **逐首 👍/👎/🎧** → `feedback` 表、`user_key = "anon:"+gen_id`。⚠️ **gen_id 一定要進 key**：feedback 主鍵是
+    (user_key, track_key)，用固定 `"anon"` 會讓不同訪客/生成對同一首歌的回饋互撞、被 upsert 蓋成一列；
+    加 gen_id 就各自成列可計數，同份歌單內仍唯一（切換讚/倒讚正確覆蓋）。分析走 `where user_key like 'anon:%'`。
+  - **歌單評分** → `playlist_feedback`、`user_key = "anon"`（主鍵已含 gen_id，不需再加），評分區標「匿名統計」。
+  - **歷史**仍 session 級（整份聆聽史綁 id 較具識別性，未匿名化）。
+  - 法理：匿名、不可回溯的聚合**不需要同意**（ePrivacy/GDPR 的同意是針對「在裝置存持久 id 追蹤個人」）；
+    要「跨 session 記住這個人」才需同意卡。所以「想要資料」用匿名收即可，別默認追蹤。
 - **⚠️ 呼叫順序**：`_ensure_guest_uk()` 必須在 `_persist_sync()` **之前**（先解析出 `guest_uk` 才查得到同意）。
 - **待辦**：push 正式站；「忘記我」目前刪 DB 資料但沒清瀏覽器 uuid（要給元件加 reset 指令才算真正輪替）。
 

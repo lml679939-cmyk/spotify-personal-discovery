@@ -714,11 +714,23 @@ def _persist_sync() -> None:
 
 
 def _persist_feedback(track: dict, state: str | None) -> None:
-    """回饋變動時同步寫 DB（登入或已同意的訪客，best-effort）；state=None ＝取消。
-    未同意/無身分則跳過（維持 session 級）。"""
+    """回饋變動時同步寫 DB（best-effort）；state=None ＝取消。
+
+    - 登入或**已同意的訪客** → 記名寫 `_effective_uk()`（可回讀/刪除）。
+    - **未同意的訪客** → **匿名逐首聚合**：`user_key = "anon:"+gen_id`（不綁瀏覽器、不用同意，純供整體分析）。
+      gen_id 進 key 是關鍵——feedback 表主鍵是 (user_key, track_key)，若用固定 "anon" 會讓不同訪客/生成
+      對同一首歌的回饋在 (anon, track_key) 互撞、被 upsert 蓋成一列。加 gen_id 就各自成列、可聚合計數，
+      且同一份歌單內 (anon:gen_id, track_key) 仍唯一＝同首歌切換讚/倒讚會正確覆蓋。分析走 `user_key like 'anon:%'`。
+    - 登入未同意 → 跳過（session 級）。
+    """
     uk = _effective_uk()
     if not uk or st.session_state.get("persist_needs_consent"):
-        return
+        if not is_guest_mode():
+            return                               # 登入未同意 → 不寫
+        gen_id = st.session_state.get("gen_id")
+        if not gen_id or not db.is_enabled():
+            return
+        uk = "anon:" + gen_id                     # 訪客未同意 → 匿名逐首聚合
     title = track.get("name") or track.get("title", "")
     artist = track.get("artist", "")
     try:
@@ -831,21 +843,22 @@ def _render_consent_banner() -> None:
     if not uk or not st.session_state.get("persist_needs_consent"):
         return
     with st.container(key="consent_banner"):
+        # 文案以「好處」領頭（越用越準／不再推你看過的／更懂你口味），隱私事實仍完整揭露、不藏——
+        # 不是暗黑模式，是把價值講清楚讓人願意選。訪客＝這台瀏覽器不跨裝置；登入＝跨裝置。
         if is_guest_mode():
-            # 訪客＝per-browser、不跨裝置，文案要誠實講清楚（見 FEEDBACK_PERSISTENCE.md「Phase 5」隱私段）
             st.markdown(
-                ":material/database: **想讓推薦記住你嗎？** 同意後，你在**這台瀏覽器**的 :material/thumb_up: / "
-                ":material/thumb_down: / :material/headphones: 與推薦歷史會以「雜湊後、看不出是誰」的形式存在本站，"
-                "用來讓推薦更準。**這不是帳號、不跨裝置、不含個資**，可隨時刪除。"
+                ":material/auto_awesome: **要不要讓推薦越用越準？** 記住你按過的 :material/thumb_up: / "
+                ":material/thumb_down: 和聽過的歌，下次就**不再推你已經看過的**、更貼你的口味。資料只以"
+                "「雜湊後、看不出是誰」的形式留存——**不是帳號、不跨裝置、可隨時一鍵刪除**。"
             )
-            btn_label = "同意，記住我（這台瀏覽器）"
+            btn_label = "好，開始記住我的口味"
         else:
             st.markdown(
-                ":material/database: **想讓推薦越用越準嗎？** 同意後，你的 :material/thumb_up: / "
-                ":material/thumb_down: / :material/headphones: 與推薦歷史會以「雜湊後、看不出是誰」"
-                "的形式存在本站，用來改善推薦、並跨裝置同步。"
+                ":material/auto_awesome: **要不要讓推薦越用越準？** 記住你按過的 :material/thumb_up: / "
+                ":material/thumb_down: 和聽過的歌，下次就**不再推你已經看過的**、**跨裝置**都更懂你的口味。"
+                "資料只以「雜湊後、看不出是誰」的形式留存，**可隨時一鍵刪除**。"
             )
-            btn_label = "同意並開始記住回饋"
+            btn_label = "好，讓推薦更懂我"
         if st.button(btn_label, icon=":material/check_circle:", key="consent_btn"):
             uk2 = _effective_uk()
             try:

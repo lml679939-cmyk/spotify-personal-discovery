@@ -166,12 +166,19 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
 ## 訪客資料
 訪客沒有穩定身分 → 無法跨 session 重建個人化。但訪客是主要、不限人數的模式，用量最大，
 其滿意度對**聚合探勘**很有價值。
-- ✅ **訪客歌單滿意度＝已做（匿名）**：`_persist_playlist` 對訪客用固定 `user_key="anon"`＋唯一
-  `gen_id` 存一列，帶 `ctx` 意圖快照。無身分、不可回溯、無跨 session 回讀/刪除，純供整體分析；
-  評分區顯示「匿名統計」揭露。**分析時記得 `where user_key='anon'` 才是訪客資料。**
-- ✅ **訪客的逐首 👍/👎/🎧 與歷史＝Phase 5 已做（同意後）**：走**自建 localStorage 元件**給「每瀏覽器」
-  一個匿名代號（`guest_uk`，**不跨裝置**），同意後逐首回饋/歷史/歌單評分都記名持久化、跨 session 讀回；
-  未同意維持 session 級＋匿名歌單聚合。**尚未 push 到正式站**。詳見文末「Phase 5」段。
+**核心原則：想要「資料」用匿名收（不需同意）；想「跨 session 記住這個人」才需要同意卡。**
+匿名、不可回溯的聚合在 ePrivacy/GDPR 下不需同意（同意是針對「在裝置存持久 id 追蹤個人」）。所以未同意的
+訪客也照收匿名聚合、不默認追蹤——別因為「我出了 API 錢」就想默默記住訪客，那在法律與本站姿態上都站不住。
+
+- ✅ **訪客歌單滿意度（匿名）**：`_persist_playlist` 對未同意訪客用固定 `user_key="anon"`＋唯一 `gen_id`，
+  帶 `ctx` 意圖快照。分析走 `where user_key='anon'`。
+- ✅ **訪客逐首 👍/👎/🎧（匿名聚合，不需同意）**：未同意訪客的逐首回饋寫 `feedback` 表、`user_key="anon:"+gen_id`。
+  ⚠️ **gen_id 必須進 key**：feedback 主鍵是 (user_key, track_key)，用固定 `"anon"` 會讓不同訪客/生成對同一首歌
+  互撞成一列；加 gen_id 各自成列可計數、同份歌單內仍唯一。分析走 `where user_key like 'anon:%'`
+  （＝哪些歌/歌手在哪種 `ctx` 意圖下被讚/倒讚，調**選歌**用）。歷史仍 session 級（整份聆聽史綁 id 較具識別性）。
+- ✅ **同意後升級為記名（Phase 5，per-browser）**：自建 localStorage 元件給「每瀏覽器」一個匿名代號 `guest_uk`
+  （**不跨裝置**），同意後逐首回饋/歷史/歌單評分都記名持久化、跨 session 讀回。**同意卡文案以好處領頭**
+  （越用越準、不再推你看過的），隱私事實仍完整揭露。詳見文末「Phase 5」段。
 
 ## 測試
 - **純邏輯（pytest）**：rows ↔ `track_feedback`/history 的往返（`_track_key` 重建、單選覆蓋、trim 邊界）。
