@@ -41,6 +41,17 @@ def user_key(spotify_user_id: str, secret: str) -> str:
     ).hexdigest()
 
 
+def guest_user_key(local_id: str, secret: str) -> str:
+    """訪客的**每瀏覽器**假名鍵＝ HMAC(secret, "guest:"+localStorage UUID)。見 FEEDBACK_PERSISTENCE.md「Phase 5」。
+
+    - 加 `guest:` 前綴命名空間，保證與登入的 user_key（HMAC(spotify_id)）**不可能相撞**。
+    - 只到「瀏覽器」層級、不跨裝置；DB 只存這個雜湊，原始 UUID 只活在瀏覽器 localStorage。
+    - ⚠️ 呼叫端拿不到 local_id（無痕/尚未回傳）時**不要**用固定字串補（那會把所有這類訪客算成同一人、
+      互相污染），一律降級成 session 級——這裡對空字串仍會回一個穩定雜湊，判斷「有沒有 id」是呼叫端的責任。
+    """
+    return user_key("guest:" + (local_id or ""), secret)
+
+
 def key_str(title: str, artist: str) -> str:
     """曲目在 DB 的主鍵字串＝ recommend 正規化後的 (歌名, 主藝人)，以 US(\\x1f) 分隔。
 

@@ -423,6 +423,10 @@ span:not(.material-symbols-rounded):not(.material-symbols-outlined):not([class*=
 /* 生成按鈕下的狀態行（剛生成過/已記住）：夾在按鈕與結果標題間，上 gap 16 vs 下 gap 39
    （caption 負邊界把上緣吸近按鈕），補 23px 讓上下對稱（先量再改）。 */
 .st-key-gen_status {{ margin-top: 23px; }}
+/* 訪客 per-browser 身分元件（Phase 5）：隱形、零版面 footprint。
+   iframe 本身高度 0，但 Streamlit 的 element container 仍佔 ~26px＋一道 flex gap，會把表單頂推下去。
+   用 position:absolute 移出 flex 流（消掉那道 gap），iframe 仍會載入執行（不像 display:none 有停跑風險）。 */
+.st-key-guest_id_probe {{ position: absolute !important; height: 0 !important; overflow: hidden !important; margin: 0 !important; }}
 /* hero 的 markdown container 帶 -16px 負邊界，會把下面的第一個元件吸上來 */
 [data-testid="stMarkdownContainer"]:has(.y2k-form-title) {{ margin-bottom: 0 !important; }}
 /* 登入 hero（Option C）：min-height 117 對齊表單 hero，但 stMarkdownContainer 的 -16px

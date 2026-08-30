@@ -63,6 +63,24 @@ def test_user_key_does_not_leak_plain_id():
     assert "spotify_abc" not in db.user_key("spotify_abc", "s")
 
 
+# ── 純邏輯：訪客 per-browser 身分（Phase 5）──────────────────
+def test_guest_user_key_stable_and_secret_sensitive():
+    a = db.guest_user_key("uuid-1", "sek")
+    assert a == db.guest_user_key("uuid-1", "sek")      # 同瀏覽器同祕密＝穩定
+    assert a != db.guest_user_key("uuid-2", "sek")      # 換瀏覽器就變
+    assert a != db.guest_user_key("uuid-1", "sek2")     # 換祕密就變
+    assert len(a) == 64 and all(c in "0123456789abcdef" for c in a)
+
+
+def test_guest_user_key_namespaced_off_login():
+    # 加 "guest:" 前綴 → 不可能與登入 user_key（同一個 uuid 當 spotify_id）相撞
+    assert db.guest_user_key("uuid-1", "sek") != db.user_key("uuid-1", "sek")
+
+
+def test_guest_user_key_does_not_leak_local_id():
+    assert "uuid-secret-123" not in db.guest_user_key("uuid-secret-123", "s")
+
+
 def test_key_str_uses_track_key_from():
     nt, na = _track_key_from("Song (Remastered 2011)", "Artist X")
     assert db.key_str("Song (Remastered 2011)", "Artist X") == f"{nt}\x1f{na}"

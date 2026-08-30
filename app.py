@@ -3,6 +3,7 @@ SoundCurator - Web UI
 """
 
 import ipaddress
+import os
 import random
 import secrets
 import sys
@@ -12,6 +13,7 @@ from urllib.parse import quote
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 import spotipy
 import ratelimit
@@ -59,6 +61,46 @@ from spotify_api import (
 )
 
 load_dotenv()
+
+
+# ── 訪客 per-browser 身分（Phase 5）──────────────────────────
+# 自建 localStorage 元件：讀/生成瀏覽器端匿名 UUID 並回傳。見 FEEDBACK_PERSISTENCE.md「Phase 5」。
+_GUEST_ID_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_id_component")
+_guest_id_component = components.declare_component("sc_guest_id", path=_GUEST_ID_DIR)
+
+
+def _guest_local_id() -> str | None:
+    """訪客瀏覽器 localStorage 的匿名 UUID；讀不到／尚未回傳／無痕 → None。
+
+    ⚠️ 回傳是**非同步**（見 5.0 spike）：首次 render 元件回 None，元件 postback 觸發 rerun 後才有值。
+    ⚠️ 這會在呼叫處渲染一個高度 0 的隱形 iframe，所以只在訪客流程裡呼叫。
+    """
+    try:
+        # key＝讓 styles 用 .st-key-guest_id_probe 把它移出版面流（隱形、零 footprint）
+        return _guest_id_component(default=None, key="guest_id_probe") or None
+    except Exception:
+        return None
+
+
+def _ensure_guest_uk() -> None:
+    """訪客模式下解析 per-browser 假名鍵、快取進 `st.session_state["guest_uk"]`。
+
+    非訪客／DB 未啟用 → no-op。讀不到 id（無痕／尚未回傳）→ **不設 guest_uk**，
+    呼叫端據此降級成 session 級——**絕不退回固定字串**（否則全體訪客共用一個 key、互相污染）。
+    """
+    if not is_guest_mode() or not db.is_enabled():
+        return
+    if st.session_state.get("guest_uk"):
+        return
+    lid = _guest_local_id()
+    if not lid:
+        return
+    try:
+        uk = db.guest_user_key(lid, db.hmac_secret())
+    except Exception:
+        return
+    st.session_state["guest_uk"] = uk
+    print(f"[GUEST] per-browser key resolved: {uk[:8]}…", file=sys.stderr)  # 驗收用，非可逆雜湊前綴
 
 
 def _rate_key() -> str:
@@ -857,6 +899,9 @@ else:
 # 訪客或 DB 未啟用時兩者皆 no-op。
 _persist_login_sync()
 _render_persist_sidebar()
+# 訪客 per-browser 身分（Phase 5，5.1）：解析 localStorage 匿名代號、算出 guest_uk 快取進 session。
+# 目前只建立身分（inert）；5.2 起才把訪客逐首回饋/歷史接到這個 key。
+_ensure_guest_uk()
 
 
 # 時區直接向瀏覽器要，不依賴 IP（雲端的代理鏈拿不到 client IP，見 _client_ip）
