@@ -1194,6 +1194,7 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
 | `eval_bench.py` | 固定情境驗收跑分 CLI（訪客 S1–S5，見「驗收流程」） | 改演算法時跑 |
 | `EVAL.md` | 驗收紀錄（每輪一節，含人工三題） | 改演算法時填 |
+| `analyze_backend.py` | **後台累積資料唯讀分析 CLI**（本機工具，連同一個 Supabase）：滿意度**中位數**（免極端值）、按 `ctx` 意圖切（fame_mode/語言/曲風/心情雙軸）、逐首回饋（出圈/fame 按讚率、top 歌手）。`--min-n`／`--top` 可調。查詢原則見 `FEEDBACK_PERSISTENCE.md`「回饋訊號設計」段。**等真實流量累積才有得看** | 資料夠了跑 |
 | `eval_runs/` | 驗收的 JSON 明細（要進版控，是歷史資料） | 自動產生 |
 | `.streamlit/config.toml` | Streamlit 主題 + toolbarMode | 偶爾 |
 | `requirements.txt` | pip 依賴——**直接依賴一律精確釘版（`==`）**，理由與升級流程寫在檔案開頭的註解，加新套件前先讀（用 `>=` 會讓 Dependabot 失效，且雲端裝到的永遠不是你測過的版本） | 偶爾 |

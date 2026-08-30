@@ -106,7 +106,9 @@ Spotify/Deezer 幾乎不靠明確評分，靠**行為訊號**（收藏→聽完�
    看一眼就能答。**登入者同意後才顯示；訪客也顯示但匿名收**（`user_key="anon"`，見「訪客資料」段）。
 3. **單曲層級**：🎧 保留（當下答得出＋出圈校準）；👍/👎 保留但**定位成「聽了再回來標」**
    （文案已改）——稀疏但精準，不當主要滿意度指標。
-4. **分析用穩健統計＋按意圖切**（`ctx`）。範例查詢：
+4. **分析用穩健統計＋按意圖切**（`ctx`）。**已包成 `analyze_backend.py`**（唯讀 CLI，本機連同一個 DB
+   跑 `python analyze_backend.py`）——自動印滿意度中位數、按 fame_mode/語言/曲風/心情雙軸切、逐首回饋
+   （出圈/fame 按讚率、top 歌手）；`--min-n` 濾掉小樣本。下面是它內含查詢的骨架：
 ```sql
 -- 3 段滿意度用中位數（不是平均，免得極端值主宰），並按意圖(探索度)切開
 select ctx->>'fame_mode' as mode,
@@ -204,7 +206,8 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
   ＋`_render_playlist_rating`（3 段文字，清單之後）**。**訪客滿意度匿名收**（`user_key="anon"`）。全部
   try/except 降級、死連線 `reset_conn()` 自癒。`psycopg[binary]==3.3.4` 進 requirements。已對真實 DB 驗過。
 - **Phase 3（待資料累積，下一步）**：拿 `feedback`/`playlist_feedback` 回頭**調演算法**（中位數、按 `ctx`
-  意圖切）——這才是持久化的目的。查詢範例見「回饋訊號設計」段。
+  意圖切）——這才是持久化的目的。**分析工具已就緒＝`analyze_backend.py`**（`python analyze_backend.py`），
+  等真實流量累積直接跑。查詢原則見「回饋訊號設計」段。
 - **Phase 4（選）**：停掉或維持雙寫 Spotify 歷史歌單的決定；登入頁文案（目前揭露靠同意卡，可接受）。
 - ✅ **Phase 5（全部完成、已上線）**：訪客的**逐首回饋/歷史/歌單評分**持久化——**每瀏覽器**匿名代號
   （localStorage 自建元件、**不跨裝置**、同意後記名；未同意走匿名聚合）。push＋Reboot＋正式站驗過。詳見文末「Phase 5」段。
