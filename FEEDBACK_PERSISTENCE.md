@@ -203,8 +203,8 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
 - **Phase 3（待資料累積，下一步）**：拿 `feedback`/`playlist_feedback` 回頭**調演算法**（中位數、按 `ctx`
   意圖切）——這才是持久化的目的。查詢範例見「回饋訊號設計」段。
 - **Phase 4（選）**：停掉或維持雙寫 Spotify 歷史歌單的決定；登入頁文案（目前揭露靠同意卡，可接受）。
-- ✅ **Phase 5（5.0–5.3 完成、5.4 收尾）**：訪客的**逐首回饋/歷史/歌單評分**持久化——**每瀏覽器**匿名代號
-  （localStorage 自建元件、**不跨裝置**、同意後記名）。對真實 DB 驗過，**尚未 push 正式站**。詳見文末「Phase 5」段。
+- ✅ **Phase 5（全部完成、已上線）**：訪客的**逐首回饋/歷史/歌單評分**持久化——**每瀏覽器**匿名代號
+  （localStorage 自建元件、**不跨裝置**、同意後記名；未同意走匿名聚合）。push＋Reboot＋正式站驗過。詳見文末「Phase 5」段。
   （events-log 深度分析表仍另案。）
 
 ## 工作量粗估
@@ -215,7 +215,9 @@ Phase 1–3 約 1–2 天含測試（多數複雜度在同意閘與降級路徑�
 
 # Phase 5：訪客跨 session 持久化（per-browser localStorage id）
 
-> 狀態：**5.0–5.3 已完成並對真實 DB 驗過（2026-08-30），5.4 文件/測試收尾中；尚未 push 到正式站。**
+> 狀態：**全部完成並已上線正式站（2026-08-30，push＋Reboot＋真實 DB 驗過）。** 未同意訪客的逐首回饋
+> 後來也加了匿名聚合（`anon:"+gen_id`）＋同意卡文案改「賣好處」（commit `cc7cc13`）。「忘記我」localStorage
+> 輪替＝使用者拍板**不做**。
 > 決策已定：**只到「每瀏覽器」、不跨裝置**（取捨見下段）；DB 只存 `HMAC(guest_local_id)`；**先同意才寫**；
 > 元件**自建**（vanilla JS、零第三方）。維護前先讀 CLAUDE.md「OAuth state」（`_browser_secret` 為何不夠）、
 > 「播放點擊計數」（iframe sandbox 的教訓）、「濫用防護」（`_rate_key` 不可退回固定字串那課）。
@@ -264,10 +266,13 @@ vs 50 個人各評 1 次」（現況見上方「訪客資料」段與 CLAUDE.md 
 現況承諾「純聚合、不可回溯」→ Phase 5 後訪客資料**可回溯到那個瀏覽器**（非到人、不跨裝置）。因此：
 - **訪客揭露同意卡**（首次要寫入前才出現）：誠實文案——「我們用一個存在你**這台瀏覽器**的隨機代號
   記住你的回饋與歷史，好讓推薦更準。這**不是帳號、不跨裝置、不含個資**，可隨時一鍵清除。」
-  同意前維持今天行為（session 級 ＋ 可選的純匿名 `anon` 聚合）。
-- **「清除本機資料並忘記我」**控制：清掉 localStorage 的 `sc_guest_id` ＋ `db.delete_all(guest_user_key)`。
-- **文案要一起改**：訪客評分的「匿名統計」四個字、登入頁「Token 只存記憶體」那段隱私敘述，
-  都要更新成**反映 localStorage 代號的存在**（別再宣稱訪客零留存）。
+  同意前維持今天行為（session 級 ＋ 匿名 `anon` 聚合）。**實作後改成「賣好處」文案**（好處領頭、
+  隱私事實仍完整揭露），見「訪客資料」段與 `_render_consent_banner`。
+- **刪除控制**：sidebar 的「刪除我在本站的所有資料」對訪客走 `db.delete_all(guest_user_key)`（清 DB 資料）。
+  ⚠️ **不清 localStorage 的 `sc_guest_id`**——localStorage 輪替**決定不做**（見「子階段」末列），所以同瀏覽器
+  再訪是同一個空身分、需重新同意。資料已可刪＝隱私責任已盡。
+- **文案已改**：未同意訪客評分標「匿名統計」；同意卡揭露 localStorage 代號的存在。登入頁「Token 只存記憶體」
+  未改（那是講 Spotify token、與 DB 持久化無關，不誤導）。
 
 ## 紅線（綁既有教訓）
 - **讀不到 id → 只降級成 session 級，絕不退回固定字串**（否則全體共用一個 id、互相污染，
@@ -285,13 +290,16 @@ vs 50 個人各評 1 次」（現況見上方「訪客資料」段與 CLAUDE.md 
   **未同意→匿名 `anon`**（維持改版前）；訪客版同意卡文案（per-browser、不跨裝置）；跨 session 同意載回。
   **對真實 DB 驗過**（同意→逐首/歷史/評分全寫 guest_uk、重整不重問）。
 - ✅ **5.3（併入 5.2）**：訪客 `playlist_feedback` 已同意走 `guest_uk`、未同意走 `anon`，舊 anon 列相容保留。
-- 🚧 **5.4**：測試（`guest_user_key` 已測；路由是 Streamlit glue，走真實 DB 整合驗證）＋ 文件（CLAUDE.md、
+- ✅ **5.4**：測試（`guest_user_key` 已測；路由是 Streamlit glue，走真實 DB 整合驗證）＋ 文件（CLAUDE.md、
   README、本檔）＋ 文案定稿。
-- ⬜ **延後**：「忘記我」的 localStorage **輪替**（目前刪除鍵清 DB 資料，但沒清瀏覽器 uuid＝同瀏覽器再訪是
-  同一個空身分、需重新同意；要真正輪替得給元件加 reset 指令）。資料已可刪，此為體驗收尾。
+- ✅ **後續（commit `cc7cc13`）**：未同意訪客的逐首回饋也走**匿名聚合**（`anon:"+gen_id`，見「訪客資料」段）；
+  同意卡文案改「賣好處」（好處領頭、隱私事實仍完整揭露）。
+- ❌ **決定不做**：「忘記我」的 localStorage **輪替**（刪除鍵已清 DB 資料＝隱私責任已盡，只差沒清瀏覽器 uuid；
+  輪替純體驗、價值不足，使用者拍板不做）。要做得給 `guest_id_component` 加 reset 指令。**別再當待辦重提。**
 
-## 測試策略
-- **純邏輯（pytest）**：元件邊界 mock 掉（Python 端只拿到「一個字串或 None」），測 `guest_user_key`
-  雜湊穩定性、同意閘、**null→session 級降級路由（不可退固定字串）**。
-- **手動**：同瀏覽器重整 → 回饋/歷史還在；換瀏覽器 → 是新身分；無痕 → 降級 session 級不報錯；
-  按「忘記我」→ localStorage 清掉且 DB 該 key 列刪光。
+## 測試策略（實際採用）
+- **純邏輯（pytest）**：`guest_user_key` 雜湊穩定性/命名空間/不洩漏（`test_db.py` +3）。路由是 Streamlit glue，
+  不硬做單元測試（比照 app.py 慣例）。
+- **真實 DB 整合驗證**（本機 app 連同一個 Supabase，已跑過）：未同意訪客 👍 → `anon:gen_id` 記入；同意卡出現
+  → 同意 → 逐首/歷史/評分全寫 `guest_uk`（非 anon）；重整/重啟 → 同一把 key、同意不重問；刪除鍵 → DB 該 key 列清光。
+- **雲端**：正式站 `?spike=guestid` 探針驗過元件在雲端 iframe 可行（探針已移除）；上線後訪客同意卡實地出現。

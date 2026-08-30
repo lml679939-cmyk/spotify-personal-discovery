@@ -314,10 +314,10 @@ Remove-Item ".cache" -ErrorAction SilentlyContinue
 
 ## 已知未實作的方向
 
-- ~~**回饋的跨 session 持久化**~~ **已做（Supabase DB）**：登入版把 👍/👎/🎧＋歷史＋歌單評分
-  存進 DB（同意後、雜湊假名、跨裝置）——已上線。**訪客版走 per-browser localStorage 匿名代號**
-  （Phase 5，自建前端元件、不跨裝置、同意後記名）——**本機驗過、尚未 push 正式站**。見
-  [`FEEDBACK_PERSISTENCE.md`](FEEDBACK_PERSISTENCE.md)。待辦：push、「忘記我」的 localStorage 輪替。
+- ~~**回饋的跨 session 持久化**~~ **已做並上線（Supabase DB）**：登入版把 👍/👎/🎧＋歷史＋歌單評分
+  存進 DB（同意後、雜湊假名、跨裝置）。**訪客版走 per-browser localStorage 匿名代號**（Phase 5，自建前端
+  元件、不跨裝置、同意後記名；未同意也照收匿名聚合）。都已上線。見
+  [`FEEDBACK_PERSISTENCE.md`](FEEDBACK_PERSISTENCE.md)。（「忘記我」的 localStorage 輪替＝決定不做。）
 - **演算法驗收第 1 輪**：`eval_bench.py` 已就緒但基準還沒跑，見 [`EVAL.md`](EVAL.md)
 - 定時自動推薦（Windows Task Scheduler 或 GitHub Actions）
 - Spotify 歌單寫入（卡在 Extended Quota Mode，個人開發者申請不到）
