@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（25，純邏輯＋假 conn，不需 DB），共 249 tests
+- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（28，純邏輯＋假 conn，不需 DB），共 252 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 249 tests，改任何 .py 都要跑
+python -m pytest -q                     # 252 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -110,13 +110,16 @@ python -m pytest -q                     # 249 tests，改任何 .py 都要跑
 - **拿累積資料回頭調演算法（這才是持久化的目的）**：`feedback` / `playlist_feedback` 表用 SQL 分析
   ——**中位數**（不是平均，免極端值）、按 `ctx` 意圖切（`ctx->>'fame_mode'`）。查詢範例在
   `FEEDBACK_PERSISTENCE.md`「回饋訊號設計」段。等資料累積再做。
-- **訪客的 feedback/history 持久化**：目前訪客只有「匿名歌單滿意度」進 DB；逐首 👍/👎/🎧 與歷史仍
-  session 級（訪客無穩定身分可回讀）。要做得走 localStorage 自訂元件或匿名列，見規格 Phase 5。
+- ✅ **訪客的 feedback/history 持久化＝Phase 5 已做（本機驗過、尚未 push 正式站）**：走自建 localStorage
+  元件（`guest_id_component/`）給「每瀏覽器」一個匿名代號 `guest_uk`（**不跨裝置**）。**同意後**逐首 👍/👎/🎧＋
+  歷史＋歌單評分都記名持久化、跨 session 讀回；**未同意**維持 session 級＋匿名歌單聚合（`anon`）。見「訪客
+  per-browser 持久化」段與 `FEEDBACK_PERSISTENCE.md`「Phase 5」。**待辦**：push 正式站；「忘記我」的
+  localStorage 輪替（目前刪除鍵清 DB 資料、但沒清瀏覽器 uuid）。
 - **events-log 深度分析表**（時間序列），規格 Phase 5。
 - ⚠️ 隱私：站方**已開始留存資料**（雜湊 user_key＋回饋＋歷史）。揭露走**結果區頂端的同意卡**
   （`_render_consent_banner`，歌單出現後才顯示；刻意不放收合的 sidebar，實測會找不到）＋sidebar 刪除鍵
-  （`_render_persist_sidebar`）＋訪客評分的「匿名統計」字樣。登入頁「Token 只存在記憶體」那句仍在、未改。
-  訪客版持久化仍未做（要 localStorage 自訂元件，或存匿名列供聚合，見規格 Phase 5）。
+  （`_render_persist_sidebar`）＋未同意訪客評分的「匿名統計」字樣。登入頁「Token 只存在記憶體」那句仍在、未改。
+  訪客版持久化（Phase 5）走同一張同意卡（訪客版 per-browser 文案），已做、尚未 push。
 - **雲端的位置與天氣**：已確認 Streamlit Cloud 的代理鏈拿不到 client IP（見「位置偵測」），
   時區已改由瀏覽器提供、時間正確，但位置與天氣在雲端一律不顯示。
   要恢復得走前端（Geolocation API 或前端打 IP API），成本不低，目前判斷可以不做。
@@ -782,6 +785,22 @@ maxUploadSize = 10        # 不設的話上傳區會顯示預設「200MB per fil
 - ⚠️ 若未來重做，白名單防 open redirect 的教訓要帶上（`?goto=` 是攻擊者可控參數）；
   當時的實作（含網域字尾偽裝測試）在 git 歷史 `5f2db78`。
 
+### 訪客 per-browser 持久化（Phase 5，2026-08-30；本機驗過、尚未 push 正式站）
+訪客沒有 Spotify 帳號＝沒有跨裝置身分，但用量最大。Phase 5 給每個瀏覽器一個**存在 localStorage 的匿名
+UUID**，同意後就能跨 session 記住訪客的回饋/歷史/歌單評分。**只到「瀏覽器」層級、刻意不跨裝置**
+（跨裝置匿名＝指紋＝不準又侵隱私，取捨全文見 `FEEDBACK_PERSISTENCE.md`「Phase 5」）。
+- **身分**：自建雙向元件 `guest_id_component/`（見檔案表）讀/生成 localStorage UUID → `_guest_local_id()`
+  → `_ensure_guest_uk()` 算 `db.guest_user_key(uuid)=HMAC(secret,"guest:"+uuid)`，快取進 `st.session_state["guest_uk"]`。
+  DB 只存雜湊，原始 UUID 只在瀏覽器。⚠️ 元件回傳**非同步**（首輪 None、postback 後 rerun 才有值）。
+  ⚠️ 讀不到 id（無痕）**不退固定字串**、只降 session 級（同 `_rate_key()` 那課）。
+- **統一路徑**：`_effective_uk()`＝登入 `persist_uk` 或訪客 `guest_uk`；登入的 `_persist_feedback/_persist_history/
+  _persist_playlist/_persist_sync/_render_consent_banner/_render_persist_sidebar` 全改吃它，訪客自動沿用同一套。
+- **同意閘**：訪客同意卡走同一個 `_render_consent_banner`（訪客版文案：「記住我，這台瀏覽器、不跨裝置、
+  不含個資、可刪除」）。**同意→記名**（逐首/歷史/評分寫 `guest_uk`、跨 session 讀回）；**未同意→**
+  逐首/歷史留 session、歌單評分走**匿名 `anon` 聚合**（維持改版前，評分區標「匿名統計」）。
+- **⚠️ 呼叫順序**：`_ensure_guest_uk()` 必須在 `_persist_sync()` **之前**（先解析出 `guest_uk` 才查得到同意）。
+- **待辦**：push 正式站；「忘記我」目前刪 DB 資料但沒清瀏覽器 uuid（要給元件加 reset 指令才算真正輪替）。
+
 ### 使用者回饋（👍/👎/🎧，2026-08，兩種模式都有）
 - 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：喜歡／不合／早就聽過
   （標籤是 `:material/thumb_up:` 等，對照表 `_FB_STATE_BY_LABEL`，見「圖示系統」）。
@@ -1151,8 +1170,9 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
 | `test_*.py`（6 個） | `test_recommend`(125) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) / `test_db`(25) | 改對應模組時同步 |
-| `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入。**Phase 1+2 已寫並接上 `app.py`**（`_persist_*` helpers）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
-| `FEEDBACK_PERSISTENCE.md` | 回饋＋歷史持久化（資料庫版）規格／計畫 | 動工前讀 |
+| `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入。**Phase 1+2 已上線**（`_persist_*` helpers）；**Phase 5 加 `guest_user_key()`**（訪客 per-browser 假名鍵）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
+| `guest_id_component/` | **Phase 5 自建 Streamlit 雙向元件**（vanilla JS、零第三方）：讀/生成瀏覽器 localStorage 匿名 UUID 回傳 Python，撐訪客 per-browser 身分。keyed＋`position:absolute` 隱形（仍執行、零版面）。⚠️ 回傳非同步（首輪 None）；⚠️ 雲端巢狀 iframe 已驗可行（見 `FEEDBACK_PERSISTENCE.md` Phase 5 spike） | 否 |
+| `FEEDBACK_PERSISTENCE.md` | 回饋＋歷史持久化（資料庫版）規格／計畫（含 **Phase 5 訪客 per-browser** 段） | 動工前讀 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |
 | `eval_bench.py` | 固定情境驗收跑分 CLI（訪客 S1–S5，見「驗收流程」） | 改演算法時跑 |
 | `EVAL.md` | 驗收紀錄（每輪一節，含人工三題） | 改演算法時填 |
@@ -1173,6 +1193,7 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
+| `bc134e1`,`3d99c8a` 等 | feat(phase5): **訪客 per-browser 持久化**（本機驗過、**尚未 push 正式站**）——自建 localStorage 雙向元件 `guest_id_component/`（vanilla JS、零第三方、隱形 `position:absolute`）給每瀏覽器一個匿名 UUID；`db.guest_user_key()=HMAC(secret,"guest:"+uuid)`；`_effective_uk()` 把登入的 `_persist_*`/同意卡/sidebar 一般化到訪客。**同意→記名** `guest_uk`（逐首/歷史/歌單評分跨 session）、**未同意→匿名 `anon`**（維持改版前）。**只到瀏覽器、不跨裝置**（跨裝置匿名＝指紋＝不準又侵隱私）。雲端 iframe＋本機真實 DB 都驗過（同意卡出現→同意→全寫 guest_uk、重整不重問）。（+3 tests＝252）待辦：push、「忘記我」localStorage 輪替。見「訪客 per-browser 持久化」段＋`FEEDBACK_PERSISTENCE.md` Phase 5 |
 | `5a3e83d`…`6d548c4` 等 | fix(ui): **回饋 UI 迭代**——結果區改「歌曲清單優先」（AI情境解讀/出圈摘要/加入Spotify 移到清單下方）、同意卡從 sidebar 搬到**主頁面結果區**（sidebar 收合藏不住、實測找不到）、歌單評分改 3 段**文字**「不太合/還可以/很對味」（sentiment 圖示使用者看不出意義）、生成按鈕移到表單最底（填完再送出）、單曲回饋文案改「聽了再回來標 👍/👎」、生成敘事行縮一行、評分卡上下間距對稱（`.st-key-playlist_rating`，先量再改：24/40→40/40） |
 | `09f9759`,`00d9f62`,`c68a404` 等 | feat: **回饋＋歷史持久化上線（Supabase Postgres）**——4 表 `consent/feedback/history/playlist_feedback`；`db.py`（Phase 1，psycopg 延遲載入、HMAC 假名 `user_key`、`reset_conn` 自癒）＋`app.py` `_persist_*`（Phase 2）。登入＋同意存逐首回饋/歷史（取代靠歌單名找、改名就失聯的舊機制）/歌單 3 段滿意度/加入行為，跨裝置，sidebar 刪除鍵；**訪客滿意度匿名**（`user_key="anon"`）。回饋訊號設計有文獻依據（歌單層級行為＋3 段滿意度為主、不用 0-100）。對真實 Supabase 跑過整合測試。見 `FEEDBACK_PERSISTENCE.md`。（共 249 tests）|
 | `8faa558` | feat: **訪客探索度三檔**（第 2 輪演算法第 2 項）——訪客表單新增「熟悉/均衡/探索」radio → `fame_mode`。均衡＝改版前行為（預設，逐字不動）；探索才降天花板（`GUEST_POP_CEILING_DISCOVERY=65`）＋在 guest prompt 套「至少一半 fame1-2」配額（兩件綁一起做，疑點1）。探索的挖法綁「知名歌手的專輯深軌」而非小眾藝人（小眾→幻覺/搜不到暴增，三版迭代才收斂）。S1 華語 fame≤2 0.07→0.33、S3 健身 0→0.27（`EVAL.md` 第 2 輪第 2 節）。+8 tests。見「訪客探索度」段 |

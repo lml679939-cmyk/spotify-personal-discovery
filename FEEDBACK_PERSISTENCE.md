@@ -169,8 +169,9 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
 - ✅ **訪客歌單滿意度＝已做（匿名）**：`_persist_playlist` 對訪客用固定 `user_key="anon"`＋唯一
   `gen_id` 存一列，帶 `ctx` 意圖快照。無身分、不可回溯、無跨 session 回讀/刪除，純供整體分析；
   評分區顯示「匿名統計」揭露。**分析時記得 `where user_key='anon'` 才是訪客資料。**
-- 🚧 **訪客的逐首 👍/👎/🎧 與歷史＝Phase 5 實作中**（目前仍 session 級）。走**自建 localStorage 元件**
-  給「每瀏覽器」一個匿名代號（**不跨裝置**，取捨見文末「Phase 5」段）。**5.0 spike 已在本機＋雲端驗過**。
+- ✅ **訪客的逐首 👍/👎/🎧 與歷史＝Phase 5 已做（同意後）**：走**自建 localStorage 元件**給「每瀏覽器」
+  一個匿名代號（`guest_uk`，**不跨裝置**），同意後逐首回饋/歷史/歌單評分都記名持久化、跨 session 讀回；
+  未同意維持 session 級＋匿名歌單聚合。**尚未 push 到正式站**。詳見文末「Phase 5」段。
 
 ## 測試
 - **純邏輯（pytest）**：rows ↔ `track_feedback`/history 的往返（`_track_key` 重建、單選覆蓋、trim 邊界）。
@@ -195,8 +196,9 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
 - **Phase 3（待資料累積，下一步）**：拿 `feedback`/`playlist_feedback` 回頭**調演算法**（中位數、按 `ctx`
   意圖切）——這才是持久化的目的。查詢範例見「回饋訊號設計」段。
 - **Phase 4（選）**：停掉或維持雙寫 Spotify 歷史歌單的決定；登入頁文案（目前揭露靠同意卡，可接受）。
-- 🚧 **Phase 5（進行中）**：訪客的**逐首回饋/歷史**持久化——**每瀏覽器**匿名代號（localStorage 自建元件、
-  **不跨裝置**）。**5.0 spike 已驗（本機＋雲端）**，5.1 起實作。詳見文末「Phase 5」段。（events-log 深度分析表仍另案。）
+- ✅ **Phase 5（5.0–5.3 完成、5.4 收尾）**：訪客的**逐首回饋/歷史/歌單評分**持久化——**每瀏覽器**匿名代號
+  （localStorage 自建元件、**不跨裝置**、同意後記名）。對真實 DB 驗過，**尚未 push 正式站**。詳見文末「Phase 5」段。
+  （events-log 深度分析表仍另案。）
 
 ## 工作量粗估
 Phase 1–3 約 1–2 天含測試（多數複雜度在同意閘與降級路徑，DB CRUD 本身不難）。**前提是 Phase 0
@@ -206,9 +208,9 @@ Phase 1–3 約 1–2 天含測試（多數複雜度在同意閘與降級路徑�
 
 # Phase 5：訪客跨 session 持久化（per-browser localStorage id）
 
-> 狀態：**5.0 spike 已驗證（2026-08-28，本機＋雲端都過），5.1 起實作中。**
-> 決策已定：**只到「每瀏覽器」、不跨裝置**；DB 只存 `HMAC(guest_local_id)`；**先同意才寫**；
-> 元件**自建**（vanilla JS、零第三方）。動工前先讀 CLAUDE.md「OAuth state」（`_browser_secret` 為何不夠）、
+> 狀態：**5.0–5.3 已完成並對真實 DB 驗過（2026-08-30），5.4 文件/測試收尾中；尚未 push 到正式站。**
+> 決策已定：**只到「每瀏覽器」、不跨裝置**（取捨見下段）；DB 只存 `HMAC(guest_local_id)`；**先同意才寫**；
+> 元件**自建**（vanilla JS、零第三方）。維護前先讀 CLAUDE.md「OAuth state」（`_browser_secret` 為何不夠）、
 > 「播放點擊計數」（iframe sandbox 的教訓）、「濫用防護」（`_rate_key` 不可退回固定字串那課）。
 
 ## 目標
@@ -267,13 +269,19 @@ vs 50 個人各評 1 次」（現況見上方「訪客資料」段與 CLAUDE.md 
 - 元件回傳**非同步** → 接線要容忍第一輪 None（見 5.0 spike 記錄）。
 
 ## 子階段
-- ✅ **5.0 Spike**（gate，已過）：`guest_id_component/` 自建元件 ＋ 本機/雲端驗證。
-- ⬜ **5.1**：`db.guest_user_key()` 雜湊 helper；`guest_local_id()` 包住元件並吃「非同步 None→id」；
-  訪客揭露同意卡 ＋「忘記我」控制；相關文案改。
-- ⬜ **5.2**：訪客逐首回饋（👍/👎/🎧）＋歷史改走 `guest_user_key`（寫入 ＋ 進站時讀回 seed session，
-  比照登入版 `_persist_login_sync`）。
-- ⬜ **5.3**：訪客 `playlist_feedback` 從 `anon` 遷到 `guest_user_key`（相容舊 anon 列）。
-- ⬜ **5.4**：測試 ＋ 文件（CLAUDE.md、README）＋ 文案定稿。
+- ✅ **5.0 Spike**（gate）：`guest_id_component/` 自建元件 ＋ 本機/雲端驗證（重整 id 不變、不需 Reboot）。
+- ✅ **5.1**（inert）：`db.guest_user_key()`＝`HMAC(secret,"guest:"+uuid)`（+3 tests）；`_guest_local_id()`
+  包住元件並吃「非同步首輪 None」；`_ensure_guest_uk()` 解析並快取 `guest_uk`（讀不到→不設、降 session，
+  絕不退固定字串）；元件 keyed＋`position:absolute` 隱形（零版面 footprint、仍執行）。
+- ✅ **5.2**：把登入持久化路徑一般化到訪客——`_effective_uk()`（登入 persist_uk／訪客 guest_uk）、
+  `_persist_login_sync`→`_persist_sync`；逐首👍/👎/🎧＋歷史＋歌單評分**已同意→記名 `guest_uk`**、
+  **未同意→匿名 `anon`**（維持改版前）；訪客版同意卡文案（per-browser、不跨裝置）；跨 session 同意載回。
+  **對真實 DB 驗過**（同意→逐首/歷史/評分全寫 guest_uk、重整不重問）。
+- ✅ **5.3（併入 5.2）**：訪客 `playlist_feedback` 已同意走 `guest_uk`、未同意走 `anon`，舊 anon 列相容保留。
+- 🚧 **5.4**：測試（`guest_user_key` 已測；路由是 Streamlit glue，走真實 DB 整合驗證）＋ 文件（CLAUDE.md、
+  README、本檔）＋ 文案定稿。
+- ⬜ **延後**：「忘記我」的 localStorage **輪替**（目前刪除鍵清 DB 資料，但沒清瀏覽器 uuid＝同瀏覽器再訪是
+  同一個空身分、需重新同意；要真正輪替得給元件加 reset 指令）。資料已可刪，此為體驗收尾。
 
 ## 測試策略
 - **純邏輯（pytest）**：元件邊界 mock 掉（Python 端只拿到「一個字串或 None」），測 `guest_user_key`
