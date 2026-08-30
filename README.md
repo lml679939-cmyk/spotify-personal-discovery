@@ -179,8 +179,8 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ├── m4_contextual_recommend.py   ← CLI：情境化推薦（文字/圖片/auto-context）
 ├── debug_api.py                 ← 診斷工具：測試 Spotify 寫入 API
 ├── check_models.py              ← 列出可用的 Gemini 模型
-├── fonts/                       ← ⚠️ 已無程式使用（13.6 MB，原為 IG 分享圖卡渲染中文用，
-│                                   該功能 2026-08-21 移除）——確認不需要就可以刪
+├── share_card.py                ← IG 限動分享圖卡（1080×1920，三種樣式，Pillow 純邏輯）
+├── fonts/                       ← share_card.py 的中文字型（NotoSansTC Bold/Regular，13.6 MB）
 ├── requirements.txt             ← 依賴清單
 ├── .streamlit/config.toml       ← 主題色 + toolbarMode + maxUploadSize（要進版控）
 ├── .env                         ← API Keys（不要進版控）
@@ -206,7 +206,7 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
    新穎度重排 → 湊不滿時補生成一輪（詳見 `CLAUDE.md`「出圈演算法」）
 8. **顯示**：條列式或網格卡片（同列等高），含播放連結與 👍/👎/🎧 回饋鈕；
    回饋會進下一次生成的 prompt，並在程式端保證不再推薦同一首
-9. **分享**：純文字複製（含所選平台的播放連結）
+9. **分享**：純文字複製（含所選平台的播放連結）＋ IG 限動分享圖卡（`share_card.py`）
 
 推薦品質的核心問題是「使用者選 100% 新藝人，卻還是拿到聽過的歌」——
 解法與量測結果都寫在 `CLAUDE.md`。
@@ -283,6 +283,8 @@ UI 在 403 時會顯示解決方向，並建議使用「在 Spotify 開啟」手
 
 ### 分享
 - **複製歌單**：純文字，含所選播放平台（Spotify / YouTube / Apple Music）的連結
+- **IG 限動分享圖卡**：1080×1920 PNG（專輯封面牆＋歌單標題＋出圈徽章），
+  三種樣式可選（糖果貼紙牆／午夜霓虹／全出血拼貼），生成後直接下載
 
 ---
 

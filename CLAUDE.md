@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（28，純邏輯＋假 conn，不需 DB），共 252 tests
+- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（28，純邏輯＋假 conn，不需 DB）+ `test_share_card.py`（23，純邏輯＋Pillow 渲染，不發網路），共 275 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 252 tests，改任何 .py 都要跑
+python -m pytest -q                     # 275 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -854,6 +854,40 @@ UUID**，同意後就能跨 session 記住訪客的回饋/歷史/歌單評分。
   `(bool(_no_spotify), 原始索引)`）。實測 15 首裡 3 首搜不到剛好都被 LLM 排在最前面，
   沒有封面、只有搜尋按鈕，第一眼看起來像整個功能壞掉。
 
+### IG 限動分享圖卡（share_card.py，2026-08-30 重做回歸）
+
+> 舊版（隨機色盤、四張一組）於 `72bf444` 移除；這是照 Claude Design 設計稿重做的新版，
+> 與舊版**只有檔名相同**。設計稿（含三樣式並排與規格便利貼）：
+> `https://claude.ai/code/artifact/d387af5f-9562-4176-8258-6f1733ef3d46`。
+
+結果區最底「分享到 IG 限動」：radio 選樣式（**三種都開放**，使用者拍板不收斂）→ 按鈕生成
+1080×1920 PNG → `st.image` 預覽＋`st.download_button` 下載。**下載在 Streamlit Cloud 可行**
+（iframe sandbox 有 `allow-downloads`）——當年死掉的「播放點擊中繼」是**轉導**被擋，不是下載，
+別把那份驗屍報告誤讀成「圖卡也做不了」。
+
+- **三種樣式**（`STYLE_ORDER`／`STYLES`，label+caption 供 UI 直接吃）：
+  `sticker` 糖果貼紙牆（奶油粉漸層＋深紫貼紙框）、`midnight` 午夜霓虹（深紫夜色＋青色光暈框）、
+  `fullbleed` 全出血拼貼（封面邊到邊、stats.fm 風）。
+- **版面硬規則**（跟設計稿便利貼一致）：內容 y=200 起、y≈1665 前收尾（IG 上下遮擋區）；
+  標題 `_fit_title()` clamp 兩行（縮字級 60→52→46、再截斷加 …）；
+  格數 5–9→3 欄、10–16→4、17–25→5、26–30→6，不整除時**品牌磚固定右下角**、
+  其餘空格放彩色星芒磚（`grid_columns()`／`plan_cells()`，有測試釘住）。
+- **紀律同 recommend.py**：不 import streamlit（docstring 提到這句話會讓子字串檢查誤中，
+  測試改用 AST 查真正的 import）；**時間由參數傳入**（app 傳 `_local_now()`，別在模組裡
+  `datetime.now()`）。
+- **封面走圖片 CDN（i.scdn.co）不吃 API 配額**：`fetch_covers()` 8 workers 平行抓、
+  跨使用者快取（`_COVER_CACHE`，上限 400、成功才進快取）；抓不到／`_no_spotify` 畫
+  「深紫底＋黑膠」佔位磚，壞 bytes 也只是變佔位磚不中斷。
+- ⚠️ **Pillow 沒有 emoji 字型**：出圈徽章的 🧭 會變豆腐字，指南針是向量畫的
+  （`_draw_compass`）。徽章維持語意色（青底紫字）。`discovery_count=0`（訪客）整顆不畫。
+- **訪客的標題是 fallback**：`playlist_title` 只有登入版 `build_prompt` 會要求 Gemini 生成，
+  訪客拿到「我的專屬歌單 MM/DD」。要讓訪客也有 vibe 標題得動 `build_guest_prompt` 的 JSON
+  範本＝prompt 改動，**照驗收紀律先跑 `eval_bench.py` 對照**（目前判斷可以不做）。
+- **圖卡快取鍵是 `(gen_id, style)`**（`st.session_state["share_card_png"]`）：按下載鈕的
+  rerun 直接沿用、換樣式或重新生成才重畫。
+- 字型 `fonts/` 的 NotoSansTC（Bold/Regular，CJK＋拉丁都覆蓋）→ Windows 系統字型 → PIL 預設，
+  `lru_cache` 快取。**fonts/ 因此不再是孤兒，別刪。**
+
 ### 搜尋結果快取
 - `search_track()` 的結果跨使用者快取在 `_SEARCH_CACHE`（key 是 `_track_key()`，
   所以 `Song` 與 `Song (Remastered 2011)` 共用一筆）。LLM 推薦重複性很高，
@@ -1076,7 +1110,8 @@ The Dalles 是 Google 機房所在地——ipwho.is 定位到的是**伺服器�
 - 「推薦歌曲數」是第一個摺疊區（在生成按鈕**上方**了，2026-08-23 生成按鈕下移後）。
   清除推薦歷史收在這一區內（罕用且不可逆）；歷史筆數／冷卻狀態顯示在生成按鈕**下方**（跟著 `generate_slot`）。
 - **結果區排序（2026-08-23 定案，「歌曲清單優先」）**：`標題 → 同意卡 → view/平台切換 → 回饋說明
-  → 歌曲清單`，然後**清單之後**才是 `AI情境解讀 → 出圈摘要 → 加入 Spotify → 整體評分 → 複製歌單`。
+  → 歌曲清單`，然後**清單之後**才是 `AI情境解讀 → 出圈摘要 → 加入 Spotify → 整體評分 → 複製歌單
+  → IG 限動分享圖卡`（2026-08-30 加在最後）。
   ⚠️ 加入 Spotify 那整塊（含 403 說明）跟出圈摘要原本在清單**上方**，2026-08-23 一起搬到清單下方
   （使用者要先看歌、meta 與動作擺後面）。同意卡（`_render_consent_banner`，一次性的閘）與回饋說明**留在清單上方**。
 - **歌單整體評分**：3 顆**文字** pill「不太合／還可以／很對味」（`_render_playlist_rating`，`_PLAYLIST_RATING`）
@@ -1187,7 +1222,8 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
-| `test_*.py`（6 個） | `test_recommend`(125) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) / `test_db`(25) | 改對應模組時同步 |
+| `test_*.py`（7 個） | `test_recommend`(125) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) / `test_db`(28) / `test_share_card`(23) | 改對應模組時同步 |
+| `share_card.py` | **IG 限動分享圖卡**（1080×1920 PNG，三種樣式）：純邏輯、不 import streamlit、時間由參數傳入。見「IG 限動分享圖卡」段 | 偶爾 |
 | `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入。**Phase 1+2 已上線**（`_persist_*` helpers）；**Phase 5 加 `guest_user_key()`**（訪客 per-browser 假名鍵）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
 | `guest_id_component/` | **Phase 5 自建 Streamlit 雙向元件**（vanilla JS、零第三方）：讀/生成瀏覽器 localStorage 匿名 UUID 回傳 Python，撐訪客 per-browser 身分。keyed＋`position:absolute` 隱形（仍執行、零版面）。⚠️ 回傳非同步（首輪 None）；⚠️ 雲端巢狀 iframe 已驗可行（見 `FEEDBACK_PERSISTENCE.md` Phase 5 spike） | 否 |
 | `FEEDBACK_PERSISTENCE.md` | 回饋＋歷史持久化（資料庫版）規格／計畫（含 **Phase 5 訪客 per-browser** 段） | 動工前讀 |
@@ -1205,14 +1241,15 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `CLAUDE.md` | 這份交接文件——**改了行為就順手更新這裡** | 是 |
 | `README.md` | 對使用者/其他開發者的說明（部署、限制、功能總覽） | 偶爾 |
 | `m1~m4_*.py` | CLI 測試腳本（非主程式） | 否 |
-| `fonts/` | ⚠️ **孤兒**：13.6 MB 的中文字型，原為 IG 分享圖卡渲染用，該功能已於 `72bf444` 移除，現在沒有任何程式碼引用——確認不需要就可以 `git rm -r fonts/` | 否 |
-| `.claude/worktrees/` | ⚠️ **搜尋時的假訊號**：裡面有舊版 `app.py` / `README.md` / **`share_card.py`**（早就刪掉的 IG 圖卡）。它被 gitignore 所以 `git status` 看不到，但**全庫 grep 會撈到**——看到 `share_card` 之類的東西先確認路徑，別以為功能還在 | 否 |
+| `fonts/` | `share_card.py` 的中文字型（NotoSansTC Bold/Regular，13.6 MB）。曾在 `72bf444`～2026-08-30 之間是孤兒，圖卡功能回歸後又用上了——**別刪** | 否 |
+| `.claude/worktrees/` | ⚠️ **搜尋時的假訊號**：裡面有舊版 `app.py` / `README.md` / **舊版 `share_card.py`**（隨機色盤、四張一組的 2026-08-21 前版本，與現行三樣式版**不是同一份**）。它被 gitignore 所以 `git status` 看不到，但**全庫 grep 會撈到**——看到路徑在 worktrees 底下的先確認，別拿舊版當現行程式改 | 否 |
 
 ## 近期修改紀錄（最新在上）
 
 | Commit | 說明 |
 |---|---|
-| （本次）| feat: **心情雙軸加進 `ctx`**（`mood_energy`/`mood_valence`，1-10）——回饋/歷史/歌單評分的情境快照現在多帶當下心情。它是唯一「結構化＋對品味有效度＋識別風險低」的表單訊號，才收；**星座/血型/自由文字/投射答案仍不存**（準識別碼或含個資、零效度）。真實 DB 驗過（生成→👍 的 anon:gen_id 列 ctx 含 mood）。app.py-only |
+| （本次）| feat: **IG 限動分享圖卡回歸（share_card.py 重做，三種樣式）**——結果區最底新增「分享到 IG 限動」：糖果貼紙牆／午夜霓虹／全出血拼貼三選一 → 1080×1920 PNG 預覽＋下載。純邏輯模組（不 import streamlit、時間參數傳入）、封面走 CDN 不吃配額、佔位磚／標題兩行 clamp／品牌磚右下角、fonts/ 復用（不再是孤兒）。設計稿 artifact d387af5f（三張並排＋規格便利貼）。+23 tests＝275。本機真跑驗過（訪客生成→兩種樣式→下載鈕）。見「IG 限動分享圖卡」段 |
+| （前次）| feat: **心情雙軸加進 `ctx`**（`mood_energy`/`mood_valence`，1-10）——回饋/歷史/歌單評分的情境快照現在多帶當下心情。它是唯一「結構化＋對品味有效度＋識別風險低」的表單訊號，才收；**星座/血型/自由文字/投射答案仍不存**（準識別碼或含個資、零效度）。真實 DB 驗過（生成→👍 的 anon:gen_id 列 ctx 含 mood）。app.py-only |
 | `cc7cc13` | feat: **未同意訪客的逐首回饋也走匿名聚合＋同意卡文案「賣好處」**（已上線）——未同意訪客 👍/👎/🎧 寫 `feedback` 表、`user_key="anon:"+gen_id`（⚠️ gen_id 進 key 才不會在 (user_key,track_key) 互撞成一列；分析走 `where user_key like 'anon:%'`）。**資料策略定調：想要資料→匿名收（免同意）；想記住某人→才需同意卡**（ePrivacy/GDPR：匿名聚合免同意，別默認追蹤）。同意卡改以好處領頭（「要不要讓推薦越用越準？…不再推你看過的」），隱私事實仍完整揭露、非暗黑模式；按鈕「好，開始記住我的口味」。app.py-only、push 免 Reboot |
 | `bc134e1`,`3d99c8a`,`53c9dc2` 等 | feat(phase5): **訪客 per-browser 持久化（已上線正式站）**——自建 localStorage 雙向元件 `guest_id_component/`（vanilla JS、零第三方、隱形 `position:absolute`）給每瀏覽器一個匿名 UUID；`db.guest_user_key()=HMAC(secret,"guest:"+uuid)`；`_effective_uk()` 把登入的 `_persist_*`/同意卡/sidebar 一般化到訪客。**同意→記名** `guest_uk`（逐首/歷史/歌單評分跨 session）、**未同意→匿名**（歌單 `anon`、逐首 `anon:gen_id`，見上列）。**只到瀏覽器、不跨裝置**（跨裝置匿名＝指紋＝不準又侵隱私）。雲端 iframe＋本機真實 DB 都驗過。（+3 tests＝252）**「忘記我」localStorage 輪替＝決定不做**。見「訪客 per-browser 持久化」段＋`FEEDBACK_PERSISTENCE.md` Phase 5 |
 | `5a3e83d`…`6d548c4` 等 | fix(ui): **回饋 UI 迭代**——結果區改「歌曲清單優先」（AI情境解讀/出圈摘要/加入Spotify 移到清單下方）、同意卡從 sidebar 搬到**主頁面結果區**（sidebar 收合藏不住、實測找不到）、歌單評分改 3 段**文字**「不太合/還可以/很對味」（sentiment 圖示使用者看不出意義）、生成按鈕移到表單最底（填完再送出）、單曲回饋文案改「聽了再回來標 👍/👎」、生成敘事行縮一行、評分卡上下間距對稱（`.st-key-playlist_rating`，先量再改：24/40→40/40） |

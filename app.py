@@ -19,6 +19,7 @@ import spotipy
 import ratelimit
 import styles
 import db
+import share_card
 
 from recommend import (
     GUEST_OVERGEN_FACTOR,
@@ -1949,3 +1950,42 @@ if "found" in st.session_state and st.session_state.found:
     st.markdown(styles.section_header_html("複製歌單", icon="clipboard"), unsafe_allow_html=True)
     st.caption(f"點擊右上角複製圖示即可一鍵複製（含 {play_platform} 連結）")
     st.code(_share_text, language=None)
+
+    # ── IG 限動分享圖卡（三種樣式都開放選；設計稿：Claude Design artifact d387af5f）──
+    st.divider()
+    st.markdown(styles.section_header_html("分享到 IG 限動", icon="vinyl"),
+                unsafe_allow_html=True)
+    st.caption("生成 1080×1920 的限時動態圖卡（封面牆＋歌單標題），下載後直接發限動")
+    _style_code = st.radio(
+        "圖卡樣式",
+        share_card.STYLE_ORDER,
+        format_func=lambda c: share_card.STYLES[c]["label"],
+        captions=[share_card.STYLES[c]["caption"] for c in share_card.STYLE_ORDER],
+        horizontal=True, key="share_card_style", label_visibility="collapsed",
+    )
+    # 圖卡跟著 (這份歌單, 樣式) 走：換樣式或重新生成才重畫，其餘 rerun（含按下載鈕）沿用
+    _card_key = (st.session_state.get("gen_id"), _style_code)
+    _card = st.session_state.get("share_card_png")
+    if st.button("生成分享圖卡", icon=":material/image:", key="btn_share_card"):
+        with st.spinner("抓封面、畫圖卡中..."):
+            # 封面走 Spotify 圖片 CDN（i.scdn.co），不吃 API 配額；搜不到的曲目畫佔位磚
+            _covers = share_card.fetch_covers([t.get("cover") or "" for t in found])
+            _card = {"key": _card_key, "png": share_card.render_story_png(
+                found, _covers, style=_style_code,
+                playlist_title=st.session_state.get("playlist_title", "").strip()
+                or f"我的專屬歌單 {_local_now().strftime('%m/%d')}",
+                discovery_count=sum(1 for t in found if t.get("_discovery")),
+                when=_local_now(),
+            )}
+            st.session_state["share_card_png"] = _card
+    if _card and _card.get("key") == _card_key:
+        _img_col, _dl_col = st.columns([1, 2], vertical_alignment="center")
+        with _img_col:
+            st.image(_card["png"], width=260)
+        with _dl_col:
+            st.download_button(
+                "下載圖卡 PNG", data=_card["png"],
+                file_name="soundcurator_story.png", mime="image/png",
+                type="primary", icon=":material/download:", key="btn_share_card_dl",
+            )
+            st.caption("IG 限動開相簿選這張就能發；排版已避開上下的 IG 介面遮擋區")
