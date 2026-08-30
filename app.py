@@ -1697,6 +1697,10 @@ if _clicked:
                     "genre": genres or None,
                     "fame_mode": fame_mode if is_guest_mode() else None,
                     "new_ratio": None if is_guest_mode() else new_artist_ratio,
+                    # 心情雙軸（1-10）——唯一「結構化＋對品味有效度＋識別風險低」的表單訊號，
+                    # 刻意只收這兩個數字（星座/血型/自由文字仍不存，見 FEEDBACK_PERSISTENCE.md「訪客資料」）
+                    "mood_energy": mood_energy,
+                    "mood_valence": mood_valence,
                 }
                 # 每次生成給一個 id，當歌單層級訊號（評分/加入）的鍵
                 st.session_state["gen_id"] = secrets.token_hex(8)

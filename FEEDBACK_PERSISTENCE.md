@@ -52,7 +52,7 @@ create table feedback (
   fame        int,
   is_discovery boolean,
   reason      text,                       -- 橋接理由
-  ctx         jsonb,                      -- {lang, genre, mode/new_ratio, traits 派生訊號…}
+  ctx         jsonb,                      -- {guest, lang, genre, fame_mode, new_ratio, mood_energy, mood_valence}
   updated_at  timestamptz not null,
   primary key (user_key, track_key)
 );
@@ -85,7 +85,10 @@ create index playlist_fb_mine_idx on playlist_feedback (rating, saved);
 ```
 - **current-state（upsert）而非 append-only**：v1 夠用（涵蓋「重建＋基本聚合」）。要做時間序列
   深度分析再加一張 append-only events log（列在 Phase 5）。
-- ⚠️ **`ctx` 不存原始情境自由文字**（可能含個資）——只存**派生訊號**（語言/曲風/模式/fame）。資料最小化。
+- ⚠️ **`ctx` 只存結構化派生訊號**：語言、曲風、探索度(`fame_mode`)/新藝人%(`new_ratio`)、**心情雙軸
+  (`mood_energy`/`mood_valence`，1-10)**。**刻意不存**原始情境自由文字、投射答案、MBTI/星座/血型
+  ——自由文字可能含個資、星座血型是準識別碼且對品味零效度。心情雙軸是唯一「結構化＋有效度＋識別風險低」
+  才收的表單訊號（2026-08-30 加，commit 見 changelog）。資料最小化。
 - `playlist_feedback` 已由整合測試建好、上線驗過（coalesce/OR 累積、中文 jsonb、delete_all 清除）。
 
 ## 回饋訊號設計（2026-08-23 研究後定案）

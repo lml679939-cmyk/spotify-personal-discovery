@@ -1211,6 +1211,7 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 
 | Commit | 說明 |
 |---|---|
+| （本次）| feat: **心情雙軸加進 `ctx`**（`mood_energy`/`mood_valence`，1-10）——回饋/歷史/歌單評分的情境快照現在多帶當下心情。它是唯一「結構化＋對品味有效度＋識別風險低」的表單訊號，才收；**星座/血型/自由文字/投射答案仍不存**（準識別碼或含個資、零效度）。真實 DB 驗過（生成→👍 的 anon:gen_id 列 ctx 含 mood）。app.py-only |
 | `cc7cc13` | feat: **未同意訪客的逐首回饋也走匿名聚合＋同意卡文案「賣好處」**（已上線）——未同意訪客 👍/👎/🎧 寫 `feedback` 表、`user_key="anon:"+gen_id`（⚠️ gen_id 進 key 才不會在 (user_key,track_key) 互撞成一列；分析走 `where user_key like 'anon:%'`）。**資料策略定調：想要資料→匿名收（免同意）；想記住某人→才需同意卡**（ePrivacy/GDPR：匿名聚合免同意，別默認追蹤）。同意卡改以好處領頭（「要不要讓推薦越用越準？…不再推你看過的」），隱私事實仍完整揭露、非暗黑模式；按鈕「好，開始記住我的口味」。app.py-only、push 免 Reboot |
 | `bc134e1`,`3d99c8a`,`53c9dc2` 等 | feat(phase5): **訪客 per-browser 持久化（已上線正式站）**——自建 localStorage 雙向元件 `guest_id_component/`（vanilla JS、零第三方、隱形 `position:absolute`）給每瀏覽器一個匿名 UUID；`db.guest_user_key()=HMAC(secret,"guest:"+uuid)`；`_effective_uk()` 把登入的 `_persist_*`/同意卡/sidebar 一般化到訪客。**同意→記名** `guest_uk`（逐首/歷史/歌單評分跨 session）、**未同意→匿名**（歌單 `anon`、逐首 `anon:gen_id`，見上列）。**只到瀏覽器、不跨裝置**（跨裝置匿名＝指紋＝不準又侵隱私）。雲端 iframe＋本機真實 DB 都驗過。（+3 tests＝252）**「忘記我」localStorage 輪替＝決定不做**。見「訪客 per-browser 持久化」段＋`FEEDBACK_PERSISTENCE.md` Phase 5 |
 | `5a3e83d`…`6d548c4` 等 | fix(ui): **回饋 UI 迭代**——結果區改「歌曲清單優先」（AI情境解讀/出圈摘要/加入Spotify 移到清單下方）、同意卡從 sidebar 搬到**主頁面結果區**（sidebar 收合藏不住、實測找不到）、歌單評分改 3 段**文字**「不太合/還可以/很對味」（sentiment 圖示使用者看不出意義）、生成按鈕移到表單最底（填完再送出）、單曲回饋文案改「聽了再回來標 👍/👎」、生成敘事行縮一行、評分卡上下間距對稱（`.st-key-playlist_rating`，先量再改：24/40→40/40） |
