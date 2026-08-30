@@ -666,13 +666,29 @@ def _persist_uk() -> str | None:
     return st.session_state.get("persist_uk")
 
 
+def _effective_uk() -> str | None:
+    """目前身分的持久化鍵：登入→persist_uk；訪客→guest_uk（Phase 5，per-browser）；都沒有→None。
+
+    訪客的 guest_uk 由 _ensure_guest_uk() 從 localStorage 匿名代號算出（**非同步、首輪可能還沒好**）。
+    回 None 代表「這個身分還不能記名持久化」——呼叫端據此降級（訪客歌單改匿名、逐首/歷史留 session）。
+    """
+    if not db.is_enabled():
+        return None
+    if is_guest_mode():
+        return st.session_state.get("guest_uk")
+    return st.session_state.get("persist_uk")
+
+
 def _persist_fail() -> None:
     db.reset_conn()   # 死連線自癒：下次 get_conn 會重連
 
 
-def _persist_login_sync() -> None:
-    """登入後跑一次：查同意；已同意就把回饋＋歷史從 DB 讀回 session。失敗靜默降級。"""
-    uk = _persist_uk()
+def _persist_sync() -> None:
+    """登入或訪客（guest_uk 已解析）後跑一次：查同意；已同意就把回饋＋歷史從 DB 讀回 session。
+
+    未同意 → 標記 persist_needs_consent（顯示同意卡；訪客的逐首/歷史維持 session 級、歌單改匿名聚合）。
+    訪客首輪 guest_uk 還沒好時 uk=None、直接返回，等元件 postback 觸發 rerun 後的下一輪再跑。失敗靜默降級。"""
+    uk = _effective_uk()
     if not uk or st.session_state.get("persist_synced"):
         return
     try:
@@ -698,8 +714,9 @@ def _persist_login_sync() -> None:
 
 
 def _persist_feedback(track: dict, state: str | None) -> None:
-    """回饋變動時同步寫 DB（best-effort）；state=None ＝取消。未同意/未啟用則跳過。"""
-    uk = _persist_uk()
+    """回饋變動時同步寫 DB（登入或已同意的訪客，best-effort）；state=None ＝取消。
+    未同意/無身分則跳過（維持 session 級）。"""
+    uk = _effective_uk()
     if not uk or st.session_state.get("persist_needs_consent"):
         return
     title = track.get("name") or track.get("title", "")
@@ -724,7 +741,7 @@ def _persist_feedback(track: dict, state: str | None) -> None:
 
 
 def _persist_history(found: list[dict]) -> None:
-    uk = _persist_uk()
+    uk = _effective_uk()   # 登入或已同意的訪客才寫；未同意/無身分跳過
     if not uk or st.session_state.get("persist_needs_consent"):
         return
     try:
@@ -744,19 +761,18 @@ def _persist_playlist(*, rating: int | None = None, saved: bool = False,
                       copied: bool = False) -> None:
     """歌單層級訊號（每次生成一列，gen_id 為鍵）：3 段滿意度＋加入/複製行為。best-effort。
 
-    訪客也收（滿意度）：用固定 user_key `"anon"`＋唯一 gen_id **匿名聚合**——無身分、不可回溯、
-    無跨 session 回讀/刪除，純供整體分析。方式一是主要模式、用量最大，不收等於放掉最多資料。
-    登入者維持「同意後才寫」＋真實雜湊 user_key。
+    訪客（Phase 5）：**已同意→記名**（`guest_uk`，per-browser、可跨 session 回讀/刪除）；
+    **未同意或 guest_uk 還沒好→匿名聚合**（固定 `"anon"`＋唯一 gen_id，無身分、不可回溯，維持改版前行為）。
+    方式一是主要模式、用量最大，未同意也照收匿名滿意度不放掉資料。登入者維持「同意後才寫」＋雜湊 user_key。
     """
     gen_id = st.session_state.get("gen_id")
     if not gen_id or not db.is_enabled():
         return
-    if is_guest_mode():
-        uk = "anon"
-    else:
-        uk = _persist_uk()
-        if not uk or st.session_state.get("persist_needs_consent"):
-            return
+    uk = _effective_uk()
+    if not uk or st.session_state.get("persist_needs_consent"):
+        if not is_guest_mode():
+            return          # 登入未同意 → 不寫
+        uk = "anon"         # 訪客未同意（或 id 未解析）→ 匿名聚合
     try:
         conn = db.get_conn()
         if conn is None:
@@ -782,15 +798,17 @@ _PLAYLIST_RATING = {
 
 def _render_playlist_rating() -> None:
     """歌曲清單之後的一句 3 段滿意度——看一眼就能答、不需先聽。
-    登入者要同意後才顯示；訪客也顯示但**匿名聚合**（無身分、只做整體統計，見 _persist_playlist）。"""
+    登入者要同意後才顯示；訪客一律顯示——已同意＝記名收，未同意＝匿名聚合（見 _persist_playlist）。"""
     gen_id = st.session_state.get("gen_id")
     if not gen_id or not db.is_enabled():
         return
     if not is_guest_mode() and (not _persist_uk() or st.session_state.get("persist_needs_consent")):
-        return   # 登入者未同意就不顯示（訪客不需同意、匿名收）
+        return   # 登入者未同意就不顯示
+    # 訪客未同意（或 id 未解析）→ 匿名收、標「匿名統計」；已同意→記名、不標
+    anon = is_guest_mode() and (not _effective_uk() or st.session_state.get("persist_needs_consent"))
     with st.container(key="playlist_rating"):   # keyed 容器：上下間距靠 styles 的 .st-key-playlist_rating 對稱化
         st.caption("這份歌單合你今天的味嗎？（看一眼就好，不用先聽）"
-                   + ("　·　匿名統計" if is_guest_mode() else ""))
+                   + ("　·　匿名統計" if anon else ""))
         wkey = f"w_rating_{gen_id}"
         sel = st.pills("歌單滿意度", options=list(_PLAYLIST_RATING), selection_mode="single",
                        key=wkey, label_visibility="collapsed")
@@ -809,17 +827,27 @@ def _render_consent_banner() -> None:
     st.info 的圖示與文字各自一欄，文字沒跟圖示上下對齊，且那個藍色與 Y2K 主題不搭。
     卡片外觀由 styles.py 的 .st-key-consent_banner 上色。
     """
-    uk = _persist_uk()
+    uk = _effective_uk()
     if not uk or not st.session_state.get("persist_needs_consent"):
         return
     with st.container(key="consent_banner"):
-        st.markdown(
-            ":material/database: **想讓推薦越用越準嗎？** 同意後，你的 :material/thumb_up: / "
-            ":material/thumb_down: / :material/headphones: 與推薦歷史會以「雜湊後、看不出是誰」"
-            "的形式存在本站，用來改善推薦、並跨裝置同步。"
-        )
-        if st.button("同意並開始記住回饋", icon=":material/check_circle:", key="consent_btn"):
-            uk2 = _persist_uk()
+        if is_guest_mode():
+            # 訪客＝per-browser、不跨裝置，文案要誠實講清楚（見 FEEDBACK_PERSISTENCE.md「Phase 5」隱私段）
+            st.markdown(
+                ":material/database: **想讓推薦記住你嗎？** 同意後，你在**這台瀏覽器**的 :material/thumb_up: / "
+                ":material/thumb_down: / :material/headphones: 與推薦歷史會以「雜湊後、看不出是誰」的形式存在本站，"
+                "用來讓推薦更準。**這不是帳號、不跨裝置、不含個資**，可隨時刪除。"
+            )
+            btn_label = "同意，記住我（這台瀏覽器）"
+        else:
+            st.markdown(
+                ":material/database: **想讓推薦越用越準嗎？** 同意後，你的 :material/thumb_up: / "
+                ":material/thumb_down: / :material/headphones: 與推薦歷史會以「雜湊後、看不出是誰」"
+                "的形式存在本站，用來改善推薦、並跨裝置同步。"
+            )
+            btn_label = "同意並開始記住回饋"
+        if st.button(btn_label, icon=":material/check_circle:", key="consent_btn"):
+            uk2 = _effective_uk()
             try:
                 conn = db.get_conn()
                 if conn is not None and uk2:
@@ -834,14 +862,17 @@ def _render_consent_banner() -> None:
 def _render_persist_sidebar() -> None:
     """**已同意後**才在 sidebar 顯示「已記住」狀態＋刪除鍵——刪除是設定類、偶爾才用，
     放收合的 sidebar 剛好；同意閘則走 _render_consent_banner 放主頁面。"""
-    uk = _persist_uk()
+    uk = _effective_uk()
     if not uk or st.session_state.get("persist_needs_consent"):
         return
     with st.sidebar:
         st.markdown("---")
-        st.caption(":material/database: 回饋與歷史已跨裝置記住（雜湊儲存）。")
+        if is_guest_mode():
+            st.caption(":material/database: 回饋與歷史已記在**這台瀏覽器**（雜湊儲存、不跨裝置）。")
+        else:
+            st.caption(":material/database: 回饋與歷史已跨裝置記住（雜湊儲存）。")
         if st.button("刪除我在本站的所有資料", icon=":material/delete:", width="stretch"):
-            uk2 = _persist_uk()
+            uk2 = _effective_uk()
             try:
                 conn = db.get_conn()
                 if conn is not None and uk2:
@@ -895,13 +926,12 @@ else:
         st.error(f"Spotify 連線異常：{e}")
         st.stop()
 
-# 跨 session 持久化：登入且已同意 → 把回饋＋歷史讀回 session；sidebar 顯示同意/刪除鈕。
-# 訪客或 DB 未啟用時兩者皆 no-op。
-_persist_login_sync()
-_render_persist_sidebar()
-# 訪客 per-browser 身分（Phase 5，5.1）：解析 localStorage 匿名代號、算出 guest_uk 快取進 session。
-# 目前只建立身分（inert）；5.2 起才把訪客逐首回饋/歷史接到這個 key。
+# 跨 session 持久化：登入或（已同意的）訪客 → 把回饋＋歷史讀回 session；sidebar 顯示刪除鈕。
+# ⚠️ 順序：先 _ensure_guest_uk() 解析訪客 guest_uk（登入時 no-op），_persist_sync() 才拿得到訪客身分。
+# DB 未啟用時全部 no-op。
 _ensure_guest_uk()
+_persist_sync()
+_render_persist_sidebar()
 
 
 # 時區直接向瀏覽器要，不依賴 IP（雲端的代理鏈拿不到 client IP，見 _client_ip）
