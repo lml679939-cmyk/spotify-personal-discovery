@@ -1046,6 +1046,12 @@ select grantee, table_name, privilege_type from information_schema.role_table_gr
   「深紫底＋黑膠」佔位磚，壞 bytes 也只是變佔位磚不中斷。
 - ⚠️ **Pillow 沒有 emoji 字型**：出圈徽章的 🧭 會變豆腐字，指南針是向量畫的
   （`_draw_compass`）。徽章維持語意色（青底紫字）。`discovery_count=0`（訪客）整顆不畫。
+- ⚠️ **wordmark 黑膠 o 的置中要向字型量，不能用固定係數**（2026-08-31 修，使用者在正式站
+  一眼看出 o 浮起來）：NotoSansTC 的 ascent 偏高（68/58@58px），舊寫法 `0.62×size` 讓黑膠
+  中心落在 36、大寫墨水中心其實在 46——偏高 10px。現在 `_draw_wordmark` 用
+  `textbbox("S")` 的 `(y0+y1)/2` 當黑膠中心，換字型／字級都不會再歪。
+  量法：`_load_font(58)` 後印 `textbbox` 的 centerY 對照黑膠 cy（跟 CSS 版 hero 的
+  「先量再改」同一課——瀏覽器的 translateY 校準值搬到 Pillow 不適用，字型 metrics 不同）。
 - **訪客的標題是 fallback**：`playlist_title` 只有登入版 `build_prompt` 會要求 Gemini 生成，
   訪客拿到「我的專屬歌單 MM/DD」。要讓訪客也有 vibe 標題得動 `build_guest_prompt` 的 JSON
   範本＝prompt 改動，**照驗收紀律先跑 `eval_bench.py` 對照**（目前判斷可以不做）。

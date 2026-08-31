@@ -277,9 +277,14 @@ def _draw_wordmark(canvas: Image.Image, x: int, y: int, size: int, *,
     font = _load_font(size, bold=True)
     xc = float(x)
     d.text((xc, y), "S", font=font, fill=main)
+    # 黑膠中心對齊大寫字母的**墨水中心**——用 textbbox 向實際字型量，不用固定係數。
+    # NotoSansTC 的 ascent 很高（68/58），舊的 0.62×size 實測偏高 10px（@58px），
+    # 正式站一眼就看得出 o 浮起來。量法：textbbox("S") 的 (y0+y1)/2 = 46.0 vs 36.0。
+    cap_bb = d.textbbox((xc, y), "S", font=font)
+    cap_cy = (cap_bb[1] + cap_bb[3]) / 2
     xc += d.textlength("S", font=font) + size * 0.04
     vr = size * 0.4
-    _draw_vinyl(canvas, xc + vr, y + size * 0.62, vr, disc=disc, outer=outer)
+    _draw_vinyl(canvas, xc + vr, cap_cy, vr, disc=disc, outer=outer)
     xc += vr * 2 + size * 0.04
     d.text((xc, y), "und", font=font, fill=main)
     xc += d.textlength("und", font=font)
