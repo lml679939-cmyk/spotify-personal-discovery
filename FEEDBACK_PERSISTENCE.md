@@ -82,6 +82,17 @@ create table playlist_feedback (
   primary key (user_key, gen_id)
 );
 create index playlist_fb_mine_idx on playlist_feedback (rating, saved);
+
+-- ⚠️ 每張表都要做，加新表時**一定要一起加進來**（2026-08-31 稽核發現 playlist_feedback
+-- 就是後來才加、開 RLS 時被漏掉的那張）。Supabase 會把 public schema 的表透過
+-- PostgREST 對外開放給 anon/authenticated，這兩句是把那條路徑關掉。
+-- app 以 owner 身分連線、owner 預設 bypass RLS，所以加了不影響現有功能（已量測驗證）。
+alter table consent           enable row level security;
+alter table feedback          enable row level security;
+alter table history           enable row level security;
+alter table playlist_feedback enable row level security;
+
+revoke all on consent, feedback, history, playlist_feedback from anon, authenticated;
 ```
 - **current-state（upsert）而非 append-only**：v1 夠用（涵蓋「重建＋基本聚合」）。要做時間序列
   深度分析再加一張 append-only events log（列在 Phase 5）。

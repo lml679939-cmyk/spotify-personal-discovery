@@ -911,6 +911,31 @@ with db.connection() as conn:
 - db.* 那些函式仍收 `conn` 參數、自己 `commit()`（28 條假 conn 測試靠這個），沒有改。
 - 區塊內提早 `return` 會被當成例外路徑而 rollback，但那時該寫的已經 commit 了。
 
+### DB 端的權限姿態：加新表就要一起開 RLS（2026-08-31 稽核）
+
+Supabase 會把 `public` schema 的表透過 PostgREST 對外開放給 `anon` / `authenticated`，
+而 anon key 在 Supabase 的設計裡本來就是「要發給瀏覽器」的公開值。本站完全不用 PostgREST
+（走直連 Postgres），所以那條路徑應該整個關掉。
+
+**現況（2026-08-31 實測後補齊）**：四張表 RLS 全開、`anon`/`authenticated` 的授權筆數 0。
+
+- ⚠️ **加新表時一定要一起 `enable row level security` 並 revoke**——`playlist_feedback`
+  就是 2026-08-23 才加、開 RLS 時被漏掉的那張。DDL 已併進 `FEEDBACK_PERSISTENCE.md`
+  的 schema 區塊，照那份建表就不會漏。
+- ⚠️ **`TRUNCATE` 不受 RLS 約束**：所以光開 RLS 不夠，一定要連權限一起 revoke。
+  稽核當時 anon 沒有 SELECT/INSERT/UPDATE/DELETE（讀寫路徑本來就是斷的），卻仍握有
+  `REFERENCES, TRIGGER, TRUNCATE`——RLS 擋不住其中的 TRUNCATE。
+- app 以 **owner**（`postgres`）連線，owner 預設 bypass RLS，所以這些設定**不影響現有功能**。
+  這是量出來的不是假設：改動前後用 `db.connection()`（正式站同一條路）數同樣四張表，
+  `consent=2 feedback=10 history=125 playlist_feedback=3` 前後完全一致。
+- 查現況（唯讀）：
+
+```sql
+select tablename, rowsecurity from pg_tables where schemaname = 'public';
+select grantee, table_name, privilege_type from information_schema.role_table_grants
+ where table_schema = 'public' and grantee in ('anon', 'authenticated');
+```
+
 ### 使用者回饋（👍/👎/🎧，2026-08，兩種模式都有）
 - 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：喜歡／不合／早就聽過
   （標籤是 `:material/thumb_up:` 等，對照表 `_FB_STATE_BY_LABEL`，見「圖示系統」）。
