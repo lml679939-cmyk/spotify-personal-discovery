@@ -223,34 +223,73 @@ def test_rate_limit_warning_says_something_different_for_each_cause():
 # 所以 Python 這一關才是真正的邊界。
 
 _GOOD_UUID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
-
-
-@pytest.mark.parametrize("bad", [
-    None,                                        # 首輪元件還沒回傳
+_TAMPERED = [
     "",
     "lqk2j3-a8f7d2b1",                           # 舊版 Date.now()+Math.random() 的格式
     "3F2504E0-4F89-41D3-9A0C-0305E82C3301",      # 大寫：同一個 id 會算出兩把 user_key
     "3f2504e0-4f89-41d3-9a0c-0305e82c330",       # 少一碼
     "3f2504e04f8941d39a0c0305e82c3301",          # 沒有連字號
-    _GOOD_UUID + "\ninjected",                   # ⚠️ 尾端換行：用 $ 而非 \Z 就會放行
+    _GOOD_UUID + chr(10) + "injected",                   # ⚠️ 尾端換行：用 $ 而非 \Z 就會放行
     "x" * 10_000,                                # 塞超長字串，每次 render 都往伺服器送
     {"not": "a string"},
     12345,
-])
-def test_guest_local_id_rejects_anything_but_a_canonical_uuid(monkeypatch, bad):
-    monkeypatch.setattr(app, "_guest_id_component", lambda **kw: bad)
-    assert app._guest_local_id() is None, "形式不對就該當作沒有 id（降級 session 級）"
+]
 
 
-def test_guest_local_id_accepts_a_canonical_uuid(monkeypatch):
-    monkeypatch.setattr(app, "_guest_id_component", lambda **kw: _GOOD_UUID)
+@pytest.fixture
+def browser_id(monkeypatch):
+    """把元件換成回傳指定值的假物件，跑一次 _resolve_browser_id()，回傳解析結果。"""
+    app.st.session_state.pop("browser_id", None)
+
+    def _resolve(value, *, raises=False):
+        if raises:
+            def _boom(**kw):
+                raise RuntimeError("component died")
+            monkeypatch.setattr(app, "_guest_id_component", _boom)
+        else:
+            monkeypatch.setattr(app, "_guest_id_component", lambda **kw: value)
+        app._resolve_browser_id()
+        return app._browser_id()
+
+    yield _resolve
+    app.st.session_state.pop("browser_id", None)
+
+
+def test_resolve_keeps_pending_apart_from_unavailable(browser_id):
+    """⚠️ 這個差別是 OAuth 綁定的關鍵：None＝再等一輪，unavailable＝直接判失敗。
+    兩者混為一談的話，正常使用者會在首輪就被誤判成攻擊、登入永遠完不成。"""
+    assert browser_id(None) is None, "元件還沒回傳＝pending，不能當成失敗"
+    assert browser_id("unavailable") == app._BROWSER_ID_UNAVAILABLE
+
+
+def test_resolve_accepts_a_canonical_uuid(browser_id):
+    assert browser_id(_GOOD_UUID) == _GOOD_UUID
     assert app._guest_local_id() == _GOOD_UUID
 
 
-def test_guest_local_id_survives_a_broken_component(monkeypatch):
-    def _boom(**kw):
-        raise RuntimeError("component died")
-    monkeypatch.setattr(app, "_guest_id_component", _boom)
+@pytest.mark.parametrize("bad", _TAMPERED)
+def test_resolve_treats_tampered_values_as_unavailable(browser_id, bad):
+    """形式不對＝被竄改，當作這個瀏覽器給不了代號——不要拿去 HMAC，
+    那等於讓人自訂身分命名空間。"""
+    assert browser_id(bad) == app._BROWSER_ID_UNAVAILABLE
+    assert app._guest_local_id() is None
+
+
+def test_resolve_survives_a_broken_component(browser_id):
+    assert browser_id(None, raises=True) == app._BROWSER_ID_UNAVAILABLE
+    assert app._guest_local_id() is None
+
+
+def test_pending_does_not_clobber_an_already_resolved_id(browser_id):
+    """元件在後續 rerun 回 None 時，不能把已經解析好的代號洗掉——
+    洗掉的話 OAuth 驗證會在來回途中失去綁定對象。"""
+    assert browser_id(_GOOD_UUID) == _GOOD_UUID
+    assert browser_id(None) == _GOOD_UUID
+
+
+def test_guest_local_id_rejects_unavailable(browser_id):
+    """拿不到代號時訪客降級成 session 級——**絕不退回固定字串**。"""
+    browser_id("unavailable")
     assert app._guest_local_id() is None
 
 

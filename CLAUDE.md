@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（36）+ `test_styles.py`（14）+ `test_app.py`（55）+ `test_ratelimit.py`（24）+ `test_db.py`（31，純邏輯＋假 conn/假池子，不需 DB）+ `test_share_card.py`（23，純邏輯＋Pillow 渲染，不發網路），共 308 tests
+- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（43）+ `test_styles.py`（14）+ `test_app.py`（57）+ `test_ratelimit.py`（24）+ `test_db.py`（31，純邏輯＋假 conn/假池子，不需 DB）+ `test_share_card.py`（23，純邏輯＋Pillow 渲染，不發網路），共 317 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 308 tests，改任何 .py 都要跑
+python -m pytest -q                     # 317 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -83,7 +83,7 @@ python -m pytest -q                     # 308 tests，改任何 .py 都要跑
 | 設定 | 衝突 | 症狀 |
 |---|---|---|
 | `image: …python:1-3.11-bookworm` | 專案要求 **Python 3.12+** | `test_app.py` 有幾條測試依賴 3.12 才把 `203.0.113.x` / `2001:db8::` 算成 private，在 3.11 上會失敗——乾淨的 checkout 卻看到紅色測試 |
-| `postAttachCommand` 帶 `--server.enableXsrfProtection false` | 關掉 XSRF＝拿不到 `_streamlit_xsrf` cookie | `_browser_secret()` 回空字串 → **Spotify 登入直接被擋下**（2026-08-31 起 fail closed，會顯示「無法建立安全的登入連線」；舊版是靜默失去綁定效果）＋**節流桶退回 per-session 隨機 id**（重整就能洗掉額度，這條仍是靜默降級）。容器裡想測方式二登入就得拿掉那個 flag |
+| `postAttachCommand` 帶 `--server.enableXsrfProtection false` | 關掉 XSRF＝拿不到 `_streamlit_xsrf` cookie | `_xsrf_secret()` 回空字串。2026-08-31 之後這**不再影響登入**——`_browser_secret()` 會改用 localStorage 代號（正式站本來就走這條）。**這個 flag 現在反而是重現雲端條件的工具**，見「OAuth state」段 |
 
 要在容器裡認真開發就先把 image 換成 3.12、拿掉那個 XSRF flag；只是隨手跑一下就
 知道上面兩件事即可。**別因為容器裡測試紅就去改測試或改 `_client_ip()` 的邏輯。**
@@ -202,7 +202,31 @@ Spotify 帳號，之後生成的歌單與推薦歷史全寫進攻擊者帳號（
 state = 時間戳.nonce.HMAC-SHA256(瀏覽器祕密, "時間戳.nonce")
 ```
 
-- 「瀏覽器祕密」＝ `_browser_secret()`，取自 Streamlit 的 `_streamlit_xsrf` cookie。
+- 「瀏覽器祕密」＝ `_browser_secret()`，**兩個來源、順序固定**：
+  ① `_streamlit_xsrf` cookie（`_xsrf_secret()`）② localStorage 代號（`_browser_id_secret()`）。
+  ⚠️⚠️ **Streamlit Cloud 的 websocket 握手標頭裡沒有 `Cookie`**（`[GEO]` 那行印出的標頭清單
+  就是證據，本機有 `Cookie`、雲端沒有）——所以 ① 在正式站**永遠是空的**，只剩 ②。
+  2026-08-31 踩過這個坑：MED-6 把「拿不到祕密」改成 fail closed 之後，正式站的
+  Spotify 登入**整個掛掉**（日誌狂洗 `[AUTH] 拿不到 _streamlit_xsrf cookie`）。
+  更嚴重的是它反過來證明：在加 ② 之前，雲端一直用空金鑰簽 state ＝ 零綁定效果，
+  授權碼注入在線上是可利用的，不是理論風險。
+  **教訓：跟部署環境有關的假設，一定要在部署環境上量過再寫進註解。**
+  重現雲端條件的方法（本機就能測）：
+  `streamlit run app.py --server.port 8599 --server.enableXsrfProtection false`，
+  再到瀏覽器把 `_streamlit_xsrf` cookie 刪掉（cookie 不分 port，別的 port 留下的會干擾）。
+- ⚠️ **`_resolve_browser_id()` 必須在 `consume_oauth_callback()` 之前**（app.py 模組層），
+  否則回呼時拿不到綁定對象。⚠️ 它**一次 script run 只能呼叫一次**——同一個 widget key
+  渲染兩次會 DuplicateWidgetID，所以全專案只有這一個 `_guest_id_component(...)` 呼叫點，
+  其他地方一律讀 `_browser_id()`。
+- ⚠️ **「還沒回傳」(None) 與「這個瀏覽器給不了」(`"unavailable"` 哨符) 一定要分開**：
+  元件首輪 render 必定回 None，把它當成失敗的話**每個正常使用者都會在首輪被誤判成攻擊**。
+  所以元件在 localStorage 被擋時回字串 `"unavailable"`（終局，直接判失敗），
+  首輪則是 None（pending，`consume_oauth_callback()` 會保留 `?code=` 不處理、等下一輪，
+  最多等 `_OAUTH_WAIT_MAX=3` 輪）。`browser_id_pending()` 就是給呼叫端問這個差別的。
+- 簽章金鑰走 `_state_key()`（`PERSIST_HMAC_SECRET`）推導成 `HMAC(secret, "oauth:"+代號)`，
+  讓**簽章金鑰不等於訪客身分代號本身**。⚠️ 不能改用「每個行程隨機」的金鑰——重啟後
+  所有還在 TTL 內的 state 會全部驗不過。
+- 舊來源（cookie）的細節：
   ⚠️ 這個 cookie 是 Tornado 的 `2|<mask>|<masked token>|<ts>` 格式，**每次送出都換一組
   mask**，不能直接拿字串當祕密（值會變、比對必失敗）；要解遮罩還原成底層 raw token，
   那個才穩定（實測兩次載入都是 `682ffabc…`）。有測試釘住這條。
@@ -1339,7 +1363,7 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
-| `test_*.py`（7 個） | `test_recommend`(125) / `test_spotify_api`(36) / `test_styles`(14) / `test_app`(55) / `test_ratelimit`(24) / `test_db`(31) / `test_share_card`(23) | 改對應模組時同步 |
+| `test_*.py`（7 個） | `test_recommend`(125) / `test_spotify_api`(43) / `test_styles`(14) / `test_app`(57) / `test_ratelimit`(24) / `test_db`(31) / `test_share_card`(23) | 改對應模組時同步 |
 | `share_card.py` | **IG 限動分享圖卡**（1080×1920 PNG，三種樣式）：純邏輯、不 import streamlit、時間由參數傳入。見「IG 限動分享圖卡」段 | 偶爾 |
 | `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入、**連線池**（`get_pool`/`connection()`，見「DB 連線」段）。**Phase 1+2 已上線**（`_persist_*` helpers）；**Phase 5 加 `guest_user_key()`**（訪客 per-browser 假名鍵）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
 | `guest_id_component/` | **Phase 5 自建 Streamlit 雙向元件**（vanilla JS、零第三方）：讀/生成瀏覽器 localStorage 匿名 UUID 回傳 Python，撐訪客 per-browser 身分。keyed＋`position:absolute` 隱形（仍執行、零版面）。⚠️ 回傳非同步（首輪 None）；⚠️ 雲端巢狀 iframe 已驗可行（見 `FEEDBACK_PERSISTENCE.md` Phase 5 spike） | 否 |

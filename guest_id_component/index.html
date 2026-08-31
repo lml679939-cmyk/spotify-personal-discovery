@@ -11,6 +11,10 @@
   // 只接受 crypto.randomUUID() 的正規形式（小寫 v4）。Python 端會用同一條規則再驗一次
   // ——這裡驗是為了「自我修復」（舊值/被改過的值換成新的），那裡驗才是真正的信任邊界。
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  // ⚠️ 拿不到代號時回這個哨符、**不要回 null**：Streamlit 的 default 也是 null，
+  // Python 端會分不出「首輪還沒回傳」與「這個瀏覽器根本給不了」。OAuth 綁定靠這個
+  // 差別決定要「再等一輪」還是「直接判定失敗」。
+  var UNAVAILABLE = "unavailable";
   function post(type, extra) {
     var msg = { isStreamlitMessage: true, type: type };
     if (extra) { for (var k in extra) { msg[k] = extra[k]; } }
@@ -46,10 +50,11 @@
       // 這會讓極少數持有舊格式 id 的瀏覽器「重置一次」訪客身分，是刻意的取捨：
       // 繼續沿用一個可預測的 id 比重置一次糟糕得多。
       id = newId();
-      if (id) { window.localStorage.setItem(KEY, id); }
+      if (!id) { return UNAVAILABLE; }          // 沒有 CSPRNG
+      window.localStorage.setItem(KEY, id);
       return id;
     } catch (e) {
-      return null;
+      return UNAVAILABLE;                       // localStorage 被擋（無痕／瀏覽器設定）
     }
   }
   var delivered = false;

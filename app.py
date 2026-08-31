@@ -50,6 +50,7 @@ from spotify_api import (
     repair_hallucinated_track,
     append_to_persistent_history,
     clear_persistent_history,
+    browser_id_pending,
     consume_oauth_callback,
     create_playlist_with_tracks,
     fav_artist_pool,
@@ -84,20 +85,47 @@ _GUEST_ID_RE = re.compile(
 )
 
 
-def _guest_local_id() -> str | None:
-    """訪客瀏覽器 localStorage 的匿名 UUID；讀不到／尚未回傳／無痕／**形式不合法** → None。
+# 元件說「這個瀏覽器給不了代號」的哨符（無痕／localStorage 被擋／沒有 CSPRNG）。
+# ⚠️ 一定要跟「首輪還沒回傳」（None）分開：前者是終局、可以直接判失敗，
+#    後者只是還沒好、必須再等一輪。OAuth 綁定就靠這個差別決定要等還是要放棄。
+_BROWSER_ID_UNAVAILABLE = "unavailable"
 
-    ⚠️ 回傳是**非同步**（見 5.0 spike）：首次 render 元件回 None，元件 postback 觸發 rerun 後才有值。
-    ⚠️ 這會在呼叫處渲染一個高度 0 的隱形 iframe，所以只在訪客流程裡呼叫。
+
+def _resolve_browser_id() -> None:
+    """渲染隱形元件、把瀏覽器代號寫進 `st.session_state["browser_id"]`。
+
+    ⚠️ **一次 script run 只能呼叫一次**——同一個 widget key 渲染兩次會 DuplicateWidgetID。
+    所以只在頁面最上方呼叫，其他地方一律讀 `_browser_id()`。
+    ⚠️ 必須在 `consume_oauth_callback()` **之前**：OAuth state 的綁定要靠這個代號
+    （Streamlit Cloud 的 websocket 標頭沒有 Cookie，拿不到 XSRF token，見 spotify_api._browser_secret）。
+    ⚠️ 回傳是非同步的：首輪 render 回 None，元件 postback 觸發 rerun 後才有值。
     """
     try:
         # key＝讓 styles 用 .st-key-guest_id_probe 把它移出版面流（隱形、零 footprint）
         raw = _guest_id_component(default=None, key="guest_id_probe")
     except Exception:
-        return None
-    if not isinstance(raw, str) or not _GUEST_ID_RE.match(raw):
-        return None      # 含 None（首輪還沒回來）與任何被竄改過的值
-    return raw
+        st.session_state["browser_id"] = _BROWSER_ID_UNAVAILABLE
+        return
+    if raw is None:
+        return                                   # 首輪還沒回傳，保留既有值（若有）
+    if not isinstance(raw, str) or (
+        raw != _BROWSER_ID_UNAVAILABLE and not _GUEST_ID_RE.match(raw)
+    ):
+        raw = _BROWSER_ID_UNAVAILABLE            # 形式不對＝被竄改，當作拿不到
+    st.session_state["browser_id"] = raw
+
+
+def _browser_id() -> str | None:
+    """已解析的瀏覽器代號：合格 UUID ／ `_BROWSER_ID_UNAVAILABLE` ／ None（還沒好）。"""
+    return st.session_state.get("browser_id")
+
+
+def _guest_local_id() -> str | None:
+    """訪客身分用的匿名 UUID；還沒好／拿不到／形式不合法 → None。"""
+    bid = _browser_id()
+    if not isinstance(bid, str) or not _GUEST_ID_RE.match(bid):
+        return None      # 含 None、_BROWSER_ID_UNAVAILABLE 與任何被竄改過的值
+    return bid
 
 
 def _ensure_guest_uk() -> None:
@@ -281,6 +309,12 @@ AUTH_ERROR_MESSAGES = {
     "token_exchange_failed":
         "⚠️ 與 Spotify 交換憑證時失敗。本站的 Spotify 登入有人數上限，"
         "你的帳號可能還沒被加入授權名單——" + _AUTH_ERR_ALLOWLIST_HINT,
+    # localStorage 被擋（無痕／封鎖網站資料）＝沒有可綁定的瀏覽器識別，state 驗不了。
+    # 講「無痕模式」比講「localStorage」有用得多——使用者知道怎麼處理前者。
+    "browser_unverified":
+        "無法完成登入：這個瀏覽器不讓本站保存識別資料，因此無法確認這次授權是你發起的。"
+        "請改用一般視窗（非無痕）、或允許本站的網站資料後再試一次，"
+        "也可以直接使用不需登入的訪客模式。",
     "unknown_error":
         "⚠️ Spotify 授權失敗。本站的 Spotify 登入有人數上限，"
         "你的帳號可能還沒被加入授權名單——" + _AUTH_ERR_ALLOWLIST_HINT,
@@ -379,11 +413,16 @@ def show_login_required() -> None:
                 width="stretch",
             )
             st.caption(":material/lock: Token 只存在瀏覽器分頁記憶體，關掉就消失。")
+        elif browser_id_pending():
+            # 綁定用的瀏覽器代號來自 localStorage 元件，首輪 render 還沒回傳。
+            # ⚠️ 這一瞬間**不要**顯示錯誤——正常使用者每次載入都會經過這裡。
+            st.caption(":material/lock: 正在準備安全的登入連線…")
         else:
             st.warning(
-                "無法建立安全的登入連線——瀏覽器沒有回傳本站需要的 Cookie。"
-                "請允許本站的 Cookie（或關閉會擋 Cookie 的擴充功能）後重新整理，"
-                "或直接使用上方的訪客模式。",
+                "無法建立安全的登入連線——這個瀏覽器不讓本站保存識別資料"
+                "（無痕模式或封鎖網站資料時會這樣），因此無法把登入請求綁定到你的瀏覽器。"
+                "請改用一般視窗、或允許本站的網站資料後重新整理，"
+                "也可以直接使用上方的訪客模式。",
                 icon=":material/lock:",
             )
 
@@ -703,10 +742,19 @@ def fetch_auto_context() -> str:
 st.set_page_config(page_title="SoundCurator", page_icon="🎵", layout="wide")
 styles.inject_global_css()
 
+# ⚠️ 一定要在 consume_oauth_callback() 之前：OAuth state 綁的就是這個代號。
+# 這行會渲染一個高度 0 的隱形元件（CSS 已在上面注入，所以不佔版面）。
+_resolve_browser_id()
 
 
 # ── OAuth callback 處理 + 登入閘門 ─────────────────────
 consume_oauth_callback()
+
+# 元件首輪還沒回傳時，consume_oauth_callback() 會刻意不處理 ?code=（驗不了就別驗，
+# 更不能清掉參數）。這裡把頁面停在一句說明上，等元件 postback 觸發的下一輪再處理。
+if st.session_state.pop("oauth_waiting", False):
+    st.info("正在完成登入…", icon=":material/lock:")
+    st.stop()
 
 # ── 跨 session 持久化（Supabase，見 db.py / FEEDBACK_PERSISTENCE.md）───────
 # ⚠️ Secrets 沒設好時 db.is_enabled() 為 False → 以下全部是 no-op，安靜降級成 session 級，

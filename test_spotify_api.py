@@ -192,6 +192,8 @@ def browser(monkeypatch):
             monkeypatch.setattr(spotify_api.st, "context", _Boom())
         else:
             monkeypatch.setattr(spotify_api.st, "context", _FakeContext(cookies))
+        # 兩個來源會互相影響，測 cookie 路徑時一定要清掉 localStorage 代號
+        spotify_api.st.session_state.pop(spotify_api._BROWSER_ID_KEY, None)
     return _use
 
 
@@ -460,3 +462,85 @@ def test_get_login_url_still_carries_state_in_the_normal_case(browser, monkeypat
     browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
     url = spotify_api.get_login_url()
     assert url and "state=" in url
+
+
+# ── 雲端路徑：沒有 Cookie，只有 localStorage 代號 ─────────
+# ⚠️ Streamlit Cloud 的 websocket 握手標頭裡**沒有 Cookie**（實測，見 CLAUDE.md 的
+# [GEO] 標頭清單），所以 _xsrf_secret() 在正式站永遠是空的。舊版只有 cookie 一條路，
+# 於是雲端的 state 一直用空金鑰簽＝零綁定效果；MED-6 fail closed 之後就變成登入全掛。
+# 以下這幾條測的就是正式站實際會跑的那條路。
+
+_BID_A = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+_BID_B = "9c8e77a2-1b4d-4f60-8a3e-5d2c1b0a9f88"
+
+
+@pytest.fixture
+def cloud(monkeypatch):
+    """模擬 Streamlit Cloud：context 有、但 cookies 是空的。"""
+    monkeypatch.setattr(spotify_api.st, "context", _FakeContext({}))
+
+    def _use(browser_id):
+        if browser_id is None:
+            spotify_api.st.session_state.pop(spotify_api._BROWSER_ID_KEY, None)
+        else:
+            spotify_api.st.session_state[spotify_api._BROWSER_ID_KEY] = browser_id
+
+    _use(None)
+    yield _use
+    _use(None)
+
+
+def test_state_round_trips_on_cloud_with_no_cookie_at_all(cloud):
+    """正式站的主要路徑：綁定全靠 localStorage 代號。"""
+    cloud(_BID_A)
+    state = spotify_api._make_oauth_state()
+    assert spotify_api._verify_oauth_state(state) is True
+
+
+def test_state_from_another_browser_id_is_rejected(cloud):
+    """核心防護在雲端一樣要成立：攻擊者的 state 到受害者瀏覽器要驗不過。"""
+    cloud(_BID_A)
+    attacker_state = spotify_api._make_oauth_state()
+    cloud(_BID_B)
+    assert spotify_api._verify_oauth_state(attacker_state) is False
+
+
+def test_pending_browser_id_is_not_a_failure(cloud):
+    """⚠️ 元件還沒回傳時**不能**當成失敗——那會把每個正常使用者在首輪誤判成攻擊。"""
+    cloud(None)
+    assert spotify_api.browser_id_pending() is True
+    assert spotify_api._browser_secret() == ""
+
+
+def test_unavailable_browser_id_is_terminal_not_pending(cloud):
+    """localStorage 被擋是終局，該直接判失敗，不是無限等下去。"""
+    cloud(spotify_api._BROWSER_ID_UNAVAILABLE)
+    assert spotify_api.browser_id_pending() is False
+    assert spotify_api._browser_secret() == ""
+    assert spotify_api.get_login_url() is None
+
+
+def test_cookie_short_circuits_the_pending_wait(browser):
+    """本機直連有 cookie，就不必等元件。"""
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    assert spotify_api.browser_id_pending() is False
+    assert spotify_api._browser_secret() != ""
+
+
+def test_get_login_url_carries_state_on_cloud(cloud, monkeypatch):
+    monkeypatch.setattr(spotify_api, "_get_credential", lambda k: {
+        "SPOTIFY_CLIENT_ID": "cid",
+        "SPOTIFY_CLIENT_SECRET": "csec",
+        "SPOTIFY_REDIRECT_URI": "https://example.test/",
+    }[k])
+    cloud(_BID_A)
+    url = spotify_api.get_login_url()
+    assert url and "state=" in url
+
+
+def test_browser_id_secret_is_not_the_raw_id_when_a_server_secret_exists(cloud, monkeypatch):
+    """簽章金鑰不該等於訪客身分代號本身——兩者用途分開，其一外洩不波及另一個。"""
+    monkeypatch.setattr(spotify_api, "_state_key", lambda: "server-side-secret")
+    cloud(_BID_A)
+    secret = spotify_api._browser_secret()
+    assert secret and secret != _BID_A

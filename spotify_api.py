@@ -159,14 +159,84 @@ HISTORY_PLAYLIST_NAME = "🤖 AI Discovery History (請勿手動刪除)"
 # 而且是逐瀏覽器獨立的。攻擊者拿到的 state 是用**攻擊者的**瀏覽器祕密簽的，
 # 到了受害者的瀏覽器就驗不過，攻擊即失效。伺服器端不需要存任何東西。
 _OAUTH_STATE_TTL = 600   # 授權來回的有效秒數（Spotify 的 code 本身也只有 ~10 分鐘）
+_OAUTH_WAIT_MAX = 3      # 等 localStorage 元件回傳的最多輪數（正常一輪就好）
+
+
+# app.py 把 localStorage 代號放進 session_state 的這個鍵（見 app._resolve_browser_id）
+_BROWSER_ID_KEY = "browser_id"
+_BROWSER_ID_UNAVAILABLE = "unavailable"
+_STATE_KEY: str | None = None
+
+
+def _state_key() -> str:
+    """推導簽章金鑰用的站方祕密；沒設定回空字串。
+
+    有 `PERSIST_HMAC_SECRET` 時用它推導，好處是**簽章金鑰永遠不等於訪客身分代號本身**
+    ——兩者用途分開，其一外洩不會直接波及另一個。
+    ⚠️ 不能改用「每個行程隨機產生」的金鑰：那樣重啟後所有還在 TTL 內的 state 會全部驗不過。
+    """
+    global _STATE_KEY
+    if _STATE_KEY is None:
+        try:
+            import db          # 延遲載入；db 只 import recommend，無循環相依
+            _STATE_KEY = db.hmac_secret() or ""
+        except Exception:
+            _STATE_KEY = ""
+    return _STATE_KEY
+
+
+def _browser_id_secret() -> str:
+    """由 localStorage 代號推導的瀏覽器祕密；代號還沒回傳／拿不到時回空字串。"""
+    try:
+        bid = st.session_state.get(_BROWSER_ID_KEY)
+    except Exception:
+        return ""
+    if not bid or bid == _BROWSER_ID_UNAVAILABLE:
+        return ""
+    key = _state_key()
+    if not key:
+        # 沒設站方祕密時直接用代號本身：v4 UUID 有 122 bits 亂度，當 HMAC 金鑰夠用
+        return str(bid)
+    return hmac.new(key.encode(), f"oauth:{bid}".encode(), hashlib.sha256).hexdigest()
+
+
+def browser_id_pending() -> bool:
+    """「現在拿不到祕密，但可能只是元件還沒回傳」＝呼叫端該再等一輪，別急著判失敗。
+
+    ⚠️ 這跟「這個瀏覽器根本給不了」(`_BROWSER_ID_UNAVAILABLE`) 是兩回事：後者是終局，
+    直接失敗才對；前者若也當成失敗，正常使用者會在首輪就被誤判成攻擊。
+    """
+    if _xsrf_secret():
+        return False
+    try:
+        return st.session_state.get(_BROWSER_ID_KEY) is None
+    except Exception:
+        return False
 
 
 def _browser_secret() -> str:
     """逐瀏覽器獨立、且能撐過整頁導向的祕密值。取不到時回空字串。
 
-    ⚠️ Tornado 的 XSRF cookie 是 `2|<mask>|<masked token>|<timestamp>`，**每次送出都會
-    換一組 mask**，所以不能直接拿 cookie 字串當祕密（值會變、比對必失敗）。
-    要先解遮罩還原成底層 raw token，那個才是穩定的（實測兩次載入都是 682ffabc…）。
+    **兩個來源，順序固定**（不能反過來，否則同一次流程中值會跳動、state 必然驗不過）：
+      ① `_streamlit_xsrf` cookie——本機直連拿得到，同步、零額外往返。
+      ② localStorage 代號——⚠️ **Streamlit Cloud 的 websocket 握手標頭裡沒有 `Cookie`**
+         （實測；`[GEO]` 日誌印出的標頭清單可佐證），所以雲端只剩這條。
+         舊版只有 ①，於是**雲端一直回空字串**＝state 完全沒有綁定效果，而且無聲。
+
+    同一個部署環境裡兩者的有無是固定的（雲端永遠沒 cookie、本機直連永遠有），所以不會跳動。
+    """
+    xsrf = _xsrf_secret()
+    if xsrf:
+        return xsrf
+    return _browser_id_secret()
+
+
+def _xsrf_secret() -> str:
+    """從 Tornado 的 XSRF cookie 解出穩定的 raw token；拿不到回空字串。
+
+    ⚠️ 那個 cookie 是 `2|<mask>|<masked token>|<timestamp>`，**每次送出都會換一組 mask**，
+    所以不能直接拿 cookie 字串當祕密（值會變、比對必失敗）。要先解遮罩還原成底層
+    raw token，那個才是穩定的（實測兩次載入都是 682ffabc…）。
     """
     try:
         raw = st.context.cookies.get("_streamlit_xsrf", "") or ""
@@ -281,7 +351,7 @@ _ALLOWED_OAUTH_ERRORS = frozenset({
     "unauthorized_client", "unsupported_response_type", "server_error",
     "temporarily_unavailable",
     # 本站自己產生的
-    "state_mismatch", "token_exchange_failed", "unknown_error",
+    "state_mismatch", "token_exchange_failed", "browser_unverified", "unknown_error",
 })
 
 
@@ -316,6 +386,20 @@ def consume_oauth_callback() -> None:
     code = st.query_params.get("code")
     if not code:
         return
+
+    # ⚠️ 綁定用的瀏覽器代號來自 localStorage 元件，**首輪 render 還沒回傳**。
+    # 這時既不能驗（會把正常使用者誤判成攻擊），也**不能清掉 ?code=**——要原封不動
+    # 留到元件 postback 觸發的下一輪。等太多輪還是沒有就放棄，避免無限等待。
+    if browser_id_pending():
+        n = st.session_state.get("oauth_wait_n", 0) + 1
+        st.session_state["oauth_wait_n"] = n
+        if n <= _OAUTH_WAIT_MAX:
+            st.session_state["oauth_waiting"] = True
+            return
+        _set_auth_error("browser_unverified")
+        _clear_qp()
+        return
+    st.session_state.pop("oauth_wait_n", None)
 
     # ⚠️ 一定要在換 token「之前」驗 state：驗不過就代表這個 code 不是這個瀏覽器
     # 自己發起的授權（多半是別人塞過來的），照換就等於把 session 綁到對方的帳號。
