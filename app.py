@@ -2109,11 +2109,12 @@ if "found" in st.session_state and st.session_state.found:
     st.markdown(styles.section_header_html("分享到 IG 限動", icon="vinyl"),
                 unsafe_allow_html=True)
     st.caption("生成 1080×1920 的限時動態圖卡（封面牆＋歌單標題），下載後直接發限動")
+    # 只顯示樣式名稱，不放 caption 副標（使用者嫌那行字多餘，2026-08-31 拿掉；
+    # STYLES 的 "caption" 欄位保留當模組內說明，UI 不再吃）
     _style_code = st.radio(
         "圖卡樣式",
         share_card.STYLE_ORDER,
         format_func=lambda c: share_card.STYLES[c]["label"],
-        captions=[share_card.STYLES[c]["caption"] for c in share_card.STYLE_ORDER],
         horizontal=True, key="share_card_style", label_visibility="collapsed",
     )
     # 圖卡跟著 (這份歌單, 樣式) 走：換樣式或重新生成才重畫，其餘 rerun（含按下載鈕）沿用

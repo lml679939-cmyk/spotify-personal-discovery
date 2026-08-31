@@ -1031,7 +1031,8 @@ select grantee, table_name, privilege_type from information_schema.role_table_gr
 （iframe sandbox 有 `allow-downloads`）——當年死掉的「播放點擊中繼」是**轉導**被擋，不是下載，
 別把那份驗屍報告誤讀成「圖卡也做不了」。
 
-- **三種樣式**（`STYLE_ORDER`／`STYLES`，label+caption 供 UI 直接吃）：
+- **三種樣式**（`STYLE_ORDER`／`STYLES`；UI 只吃 label——caption 副標 2026-08-31 依使用者要求
+  從 radio 拿掉、欄位留在模組當說明）：
   `sticker` 糖果貼紙牆（奶油粉漸層＋深紫貼紙框）、`midnight` 午夜霓虹（深紫夜色＋青色光暈框）、
   `fullbleed` 全出血拼貼（封面邊到邊、stats.fm 風）。
 - **版面硬規則**（跟設計稿便利貼一致）：內容 y=200 起、y≈1665 前收尾（IG 上下遮擋區）；
