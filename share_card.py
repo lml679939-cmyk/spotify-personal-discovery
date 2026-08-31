@@ -23,6 +23,7 @@ import io
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -155,14 +156,37 @@ _COVER_CACHE: dict[str, bytes] = {}   # url → 原始 bytes。跨使用者共�
 _COVER_CACHE_MAX = 400
 
 
+_CDN_SUFFIX = ".scdn.co"     # Spotify 圖片 CDN：i.scdn.co、mosaic.scdn.co…
+
+
+def _is_spotify_cdn(url: str) -> bool:
+    """只放行 Spotify 圖片 CDN 的 https 網址；其餘一律不抓（畫佔位磚）。
+
+    封面網址目前只可能來自 Spotify 的 API 回應，所以這是縱深防禦——但成本近乎零：
+    這個函式是唯一會對「資料裡帶來的網址」發請求的地方，鎖住它就沒有 SSRF 的餘地。
+
+    ⚠️ 不能寫成 `endswith("scdn.co")`——`evil-scdn.co` 會過關。要比對**帶點的字尾**
+    `.scdn.co`（或整串等於 `scdn.co`），網域字尾偽裝才擋得住。
+    """
+    if not url:
+        return False
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    host = (u.hostname or "").lower()
+    return u.scheme == "https" and (host == "scdn.co" or host.endswith(_CDN_SUFFIX))
+
+
 def fetch_covers(urls: list[str], timeout: float = 6.0) -> dict[str, bytes | None]:
     """平行抓封面 → {url: bytes|None}。失敗回 None（畫佔位磚）、不進快取（下次再試）。
     走 Spotify 的圖片 CDN（i.scdn.co），不吃 API 配額。"""
-    todo = sorted({u for u in urls if u and u not in _COVER_CACHE})
+    todo = sorted({u for u in urls if _is_spotify_cdn(u) and u not in _COVER_CACHE})
     if todo:
         def _one(url):
             try:
-                r = requests.get(url, timeout=timeout)
+                # ⚠️ allow_redirects=False：白名單只驗第一個網址，跟著轉址走等於白驗
+                r = requests.get(url, timeout=timeout, allow_redirects=False)
                 r.raise_for_status()
                 return url, r.content
             except Exception:

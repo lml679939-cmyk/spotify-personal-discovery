@@ -137,9 +137,13 @@ def _get_credential(key: str) -> str | None:
         return custom.strip()
     return _get_env(key)
 
+# ⚠️ 最小權限：**不要**加回 `playlist-modify-public`。本站建立的歌單一律 `public: False`
+# （見 create_playlist_with_tracks），那個 scope 一次都沒用到，卻會讓使用者在授權頁看到
+# 「修改你的公開歌單」，徒增疑慮。2026-08-31 移除（LOW-7）。
+# 舊 token 仍帶著舊 scope，不影響現有使用者；重新登入後才會收斂。
 SCOPES = (
     "user-top-read user-read-recently-played user-library-read user-follow-read "
-    "playlist-read-private playlist-modify-public playlist-modify-private"
+    "playlist-read-private playlist-modify-private"
 )
 
 # 跨 session 歷史（存在 Spotify 私人歌單裡）

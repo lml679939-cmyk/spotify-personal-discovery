@@ -1,37 +1,122 @@
 # Security Policy
 
-## Supported Versions
+> **Reporting in English?** Please open a
+> [private security advisory](../../security/advisories/new) or email
+> lml679939@gmail.com. Do **not** open a public issue. Initial response within 7 days.
 
-This is a personal project. Only the latest version on the `main` branch is actively maintained.
+本文件有兩個用途：① 給回報者的揭露政策 ② **給資安掃描工具（含 AI）的檢查依據**。
+第二點是重點——掃描工具讀得懂程式碼，但不知道本站的規矩，所以下面把資產、角色、
+信任邊界與「絕對不能被打破的鐵律」寫清楚。**改了行為就要同步更新這份文件**，
+否則掃描會照著過時的假設跑，剛好略過最敏感的部分。
 
-| Version | Supported |
-| ------- | --------- |
-| latest (main) | Yes |
-| older commits | No |
+## 回報漏洞
 
-## Reporting a Vulnerability
+請**不要**開公開的 GitHub Issue。改用以下任一方式：
 
-Please **do not** open a public GitHub Issue for security vulnerabilities.
+- **GitHub 私人通報**：[Security → Report a vulnerability](../../security/advisories/new)
+- **Email**：lml679939@gmail.com
 
-Instead, report them via one of the following:
+請盡量附上：漏洞描述、重現步驟、可能影響、建議修法（選填）。**7 天內**會有初步回覆。
 
-- **GitHub Private Advisory**: [Security → Report a vulnerability](../../security/advisories/new)
-- **Email**: lml679939@gmail.com
+| 版本 | 是否維護 |
+| --- | --- |
+| `main` 最新版 | 是 |
+| 較舊的 commit | 否 |
 
-Include as much detail as possible:
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (optional)
+---
 
-You can expect an initial response within **7 days**.
+## 資產（外洩或被竄改會出大事的東西）
 
-## Scope
+| 資產 | 存放位置 | 外洩的後果 |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Streamlit Secrets / `.env` | **站方自備、所有使用者共用同一份配額**，被盜用等於全站生成停擺 |
+| `SPOTIFY_CLIENT_ID` / `SECRET` | 同上 | 全站共用同一份速率限制；secret 外洩可冒充本站的 OAuth 客戶端 |
+| `SUPABASE_DB_URL` | 同上 | 直連 Postgres 的完整權限（app 以 owner 身分連線） |
+| `PERSIST_HMAC_SECRET` | 同上 | **最容易被低估的一個**：它一旦外洩，配上資料庫就能拿已知的 Spotify ID 逐一比對，反推出某筆假名資料屬於誰——假名保護等於失效 |
+| 使用者回饋與聆聽歷史 | Supabase（4 張表） | 音樂品味具一定識別性；靠「資料最小化＋可刪除」把風險壓到最低 |
+| 訪客的 localStorage UUID | 只在使用者瀏覽器 | 它是**訪客的身分憑證**（誰持有誰就是他），可預測或外洩即可讀取他人的回饋與歷史 |
+| 使用者 Spotify token | **只在記憶體**，不落地 | 可讀取該使用者的聆聽資料與私人歌單 |
 
-This app handles:
-- Spotify OAuth tokens (stored in memory only, never persisted to disk)
-- Gemini API key (loaded from environment variables / Streamlit secrets)
-- User-uploaded images (processed in-memory, sent to Google Gemini)
-- IP-based geolocation (sent to ip-api.com when auto-detect is enabled)
+## 角色與可觸及的資產
 
-Out of scope: vulnerabilities in third-party services (Spotify, Google, Streamlit Cloud).
+本站**沒有後台管理介面、沒有管理員角色**，也不處理任何金流。
+
+| 角色 | 可觸及 |
+| --- | --- |
+| 未同意的訪客 | 產生歌單；回饋只以**匿名聚合**形式留存（`user_key = "anon"` / `"anon:"+gen_id`），不綁身分、不可回溯 |
+| 已同意的訪客 | 加上「這台瀏覽器」的跨 session 回饋／歷史／評分（假名 `guest_uk`，**刻意不跨裝置**） |
+| 登入未同意 | 讀取自己的 Spotify 資料做個人化推薦；不寫入資料庫 |
+| 登入已同意 | 加上跨裝置的回饋／歷史／評分（假名 `user_key`），可一鍵刪除全部 |
+
+## 信任邊界
+
+```
+瀏覽器（完全不可信）→ Streamlit 伺服器（可信）→ Supabase / Gemini / Spotify
+```
+
+由瀏覽器帶進來、**必須當成可疑輸入**的東西：網址參數（`?code=` / `?error=`）、
+localStorage 的訪客代號、上傳的圖片、所有表單欄位、`X-Forwarded-For` 等代理標頭。
+
+⚠️ **Streamlit Cloud 的 websocket 握手標頭裡沒有 `Cookie`**，也拿不到真實 client IP。
+任何依賴 cookie 或 IP 的安全機制在正式站上都不會生效——這點必須在雲端量過再下結論。
+
+## 外部資料流（使用者資料會離開本站到哪裡）
+
+| 送出的內容 | 目的地 | 何時 |
+| --- | --- | --- |
+| 情境文字、投射問題回答、心情雙軸、上傳的圖片 | Google Gemini | 每次生成 |
+| 曲名／歌手（搜尋字串） | Spotify Web API | 每次生成 |
+| 回饋、歷史、歌單評分（**假名化後**） | Supabase（站方自有專案） | 同意後 |
+| 使用者的公開 IP | ipwho.is → 再以座標查 api.open-meteo.com | **僅當**使用者開啟「自動偵測」**且**代理鏈裡挑得出公開 IP |
+
+⚠️ 最後一列在 Streamlit Cloud 上**實際不會發生**——代理鏈裡拿不到 client IP，
+此時一律直接略過、不發任何請求（不能改成不帶 IP 去查，那會定位到伺服器機房）。
+
+⚠️ **`ctx` 只存結構化的派生訊號**（語言、曲風、探索度、心情雙軸）。原始情境自由文字、
+投射問題回答、MBTI／星座／血型**刻意不入庫**——自由文字可能含個資，星座血型是準識別碼
+且對推薦品質零效度。
+
+## 安全不變條件（最高鐵律）
+
+**掃描時請直接拿這幾條去對程式碼找違反的地方。**
+
+1. **身分只能由伺服器端決定。** 任何資料庫查詢都必須帶伺服器端算出的 `user_key`；
+   前端不得以任何方式指定要讀寫誰的資料。
+2. **未同意者不得寫入可回溯到個人的列。** 只允許匿名聚合（不綁瀏覽器身分、不可回溯）。
+3. **生成一律走 `ratelimit.acquire()`。** 全站閘門與 per-browser 額度必須在同一個鎖內
+   判定，且先檢查全站、通過才扣個人額度——「有扣就一定有生成」。
+4. **OAuth `state` 必須綁定到發起的瀏覽器。** 綁不了就不發登入網址（fail closed），
+   **絕不**退而發一個沒帶 state 的網址。**絕不**用空金鑰簽章。
+5. **所有使用者或 LLM 產生的字串進 HTML 前必須 `html.escape`**；`?error=` 一律走白名單，
+   不得把原始值或例外訊息回顯到畫面。
+6. **日誌不得含機密。** 不記錄原始 Spotify ID、cookie／標頭的值、例外訊息內容
+   （只記型別）、或訪客的原始 UUID。
+7. **只對 Spotify 圖片 CDN 發出「資料帶來的網址」請求**，且不跟隨轉址。
+8. **圖片格式以檔頭判定**，不採信副檔名或瀏覽器宣告的 MIME。
+9. **Token 只存在記憶體**，不得寫入 `.cache` 或任何檔案。
+10. **資料庫連線一律從連線池借用**（`db.connection()`），不得跨使用者共用單一連線
+    ——交易邊界是連線層級的，共用會讓不同使用者的交易互相污染。
+
+## 攻擊面與現有防線
+
+| 入口 | 防線 |
+| --- | --- |
+| 生成按鈕（吃 Gemini／Spotify 配額） | 20 秒冷卻＋每瀏覽器每日 40 次＋**全站每小時／每日上限**（不看身分，繞不掉） |
+| 圖片上傳 | 10 MB 上限、副檔名限制、**檔頭嗅探**、Pillow 釘版 |
+| `?code=` / `?error=` | HMAC 綁定瀏覽器的 `state`（fail closed）＋錯誤代碼白名單 |
+| localStorage 訪客代號 | 產生端用 CSPRNG；接收端只收正規小寫 v4 UUID |
+| 曲目回饋、歌單評分 | 一律寫伺服器端算出的 `user_key`；未同意者走匿名聚合 |
+| 資料庫 | 四張表皆啟用 RLS，`anon` / `authenticated` 無任何授權（本站不使用 PostgREST） |
+
+**沒有註冊流程**，所以不適用「批量註冊」那類威脅；也沒有金流。
+
+## 已知限制（刻意接受的取捨）
+
+- **per-browser 節流擋得住隨手亂點，擋不住有決心的攻擊者**（清 cookie／無痕／腳本都能繞）。
+  最壞情況由全站閘門兜底。真正擋得住的手段（WAF、IP 信譽）Streamlit Cloud 免費方案沒有。
+- **訪客身分是 bearer token**：持有那個 UUID 就是那個訪客。它不跨裝置，且可一鍵刪除資料。
+- **OAuth `state` 在 TTL（10 分鐘）內可重放**（未記錄 nonce）。判斷影響有限：攻擊者看不到
+  受害者送往 Spotify 的 state，且重放 state 還需要一個沒用過的 `code`。
+- **Spotify 登入受 Development Mode 的授權名單人數限制**，不是漏洞。
+
+不在範圍內：第三方服務（Spotify、Google、Supabase、Streamlit Cloud）本身的漏洞。

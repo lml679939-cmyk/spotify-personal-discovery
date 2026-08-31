@@ -544,3 +544,10 @@ def test_browser_id_secret_is_not_the_raw_id_when_a_server_secret_exists(cloud, 
     cloud(_BID_A)
     secret = spotify_api._browser_secret()
     assert secret and secret != _BID_A
+
+
+def test_scopes_stay_minimal():
+    """⚠️ 別加回 playlist-modify-public：歌單一律 public=False，那個 scope 從未使用，
+    只會讓使用者在授權頁看到「修改你的公開歌單」。"""
+    assert "playlist-modify-public" not in spotify_api.SCOPES
+    assert "playlist-modify-private" in spotify_api.SCOPES

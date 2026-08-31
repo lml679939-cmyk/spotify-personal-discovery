@@ -305,3 +305,30 @@ def test_guest_id_component_generates_with_a_csprng():
     assert "getRandomValues" in code, "沒有 CSPRNG 的產生路徑"
     assert "Math.random" not in code
     assert "Date.now" not in code
+
+
+# ── 上傳圖片的檔頭嗅探（LOW-10）──────────────────────────
+# file_uploader 的 type= 只比對副檔名、uploaded.type 是瀏覽器宣告的值，兩者都由
+# 使用者控制。叫 x.png 但內容是 EPS/JPEG2000 的檔案照樣會被對應解碼器解析。
+
+def test_sniff_reads_real_file_headers():
+    """三種格式用 Pillow 真的產生，不是拿寫死的常數自我驗證。"""
+    import io
+    from PIL import Image
+    for fmt, want in (("JPEG", "image/jpeg"), ("PNG", "image/png"), ("WEBP", "image/webp")):
+        buf = io.BytesIO()
+        Image.new("RGB", (8, 8), (200, 60, 140)).save(buf, format=fmt)
+        assert app._sniff_image_mime(buf.getvalue()) == want, fmt
+
+
+@pytest.mark.parametrize("data, label", [
+    (b"%!PS-Adobe-3.0 EPSF-3.0", "EPS"),                       # Pillow CVE 的來源之一
+    (bytes([0, 0, 0, 12]) + b"jP  ", "JPEG2000"),              # 同上
+    (b"GIF89a", "GIF"),
+    (b"<svg xmlns=", "SVG"),
+    (b"RIFF____NOPE", "RIFF 但不是 WEBP"),
+    (b"", "空檔"),
+    (bytes([0xFF, 0xD8]), "JPEG 檔頭只有一半"),
+])
+def test_sniff_rejects_anything_that_is_not_jpeg_png_webp(data, label):
+    assert app._sniff_image_mime(data) is None, label

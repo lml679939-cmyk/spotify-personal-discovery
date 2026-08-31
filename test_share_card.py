@@ -99,6 +99,8 @@ def test_module_never_imports_streamlit():
             assert (node.module or "").split(".")[0] != "streamlit"
 
 
+# ⚠️ 這兩條的網址必須是真的 Spotify CDN 形式：fetch_covers 會先過 _is_spotify_cdn
+# 白名單，隨手寫的 http://x/a 會在發請求之前就被濾掉，測試看起來像「沒打請求」。
 def test_fetch_covers_caches_and_skips_empty(monkeypatch):
     calls = []
 
@@ -109,14 +111,14 @@ def test_fetch_covers_caches_and_skips_empty(monkeypatch):
             pass
 
     monkeypatch.setattr(share_card.requests, "get",
-                        lambda url, timeout: calls.append(url) or _Resp())
+                        lambda url, timeout, allow_redirects=True: calls.append(url) or _Resp())
     share_card._COVER_CACHE.clear()
     try:
-        out = share_card.fetch_covers(["", "http://x/a", "http://x/a"])
-        assert out == {"http://x/a": b"img-bytes"}
-        assert calls == ["http://x/a"]          # 空網址不打、同網址只打一次
-        out2 = share_card.fetch_covers(["http://x/a"])
-        assert out2 == {"http://x/a": b"img-bytes"}
+        out = share_card.fetch_covers(["", "https://i.scdn.co/image/a", "https://i.scdn.co/image/a"])
+        assert out == {"https://i.scdn.co/image/a": b"img-bytes"}
+        assert calls == ["https://i.scdn.co/image/a"]          # 空網址不打、同網址只打一次
+        out2 = share_card.fetch_covers(["https://i.scdn.co/image/a"])
+        assert out2 == {"https://i.scdn.co/image/a": b"img-bytes"}
         assert len(calls) == 1                  # 第二輪走快取
     finally:
         share_card._COVER_CACHE.clear()
@@ -125,15 +127,32 @@ def test_fetch_covers_caches_and_skips_empty(monkeypatch):
 def test_fetch_covers_failure_not_cached(monkeypatch):
     calls = []
 
-    def _boom(url, timeout):
+    def _boom(url, timeout, allow_redirects=True):
         calls.append(url)
         raise OSError("network down")
 
     monkeypatch.setattr(share_card.requests, "get", _boom)
     share_card._COVER_CACHE.clear()
     try:
-        assert share_card.fetch_covers(["http://x/b"]) == {"http://x/b": None}
-        share_card.fetch_covers(["http://x/b"])
+        assert share_card.fetch_covers(["https://i.scdn.co/image/b"]) == {"https://i.scdn.co/image/b": None}
+        share_card.fetch_covers(["https://i.scdn.co/image/b"])
         assert len(calls) == 2                  # 失敗不進快取，下次會重試
     finally:
         share_card._COVER_CACHE.clear()
+
+
+# ── 封面只抓 Spotify CDN（LOW-8）─────────────────────────
+@pytest.mark.parametrize("url, allowed", [
+    ("https://i.scdn.co/image/ab67616d0000b273abc", True),
+    ("https://mosaic.scdn.co/640/abc", True),
+    ("https://scdn.co/image/abc", True),
+    ("http://i.scdn.co/image/abc", False),          # 非 https
+    ("https://evil-scdn.co/image/abc", False),      # ⚠️ 網域字尾偽裝：endswith("scdn.co") 會放行
+    ("https://scdn.co.evil.com/x", False),
+    ("https://169.254.169.254/latest/meta-data/", False),   # 雲端 metadata 端點
+    ("https://localhost:8501/admin", False),
+    ("", False),
+    ("not a url", False),
+])
+def test_only_spotify_cdn_urls_are_fetched(url, allowed):
+    assert share_card._is_spotify_cdn(url) is allowed, url

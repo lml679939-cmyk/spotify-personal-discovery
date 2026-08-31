@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（43）+ `test_styles.py`（14）+ `test_app.py`（57）+ `test_ratelimit.py`（24）+ `test_db.py`（31，純邏輯＋假 conn/假池子，不需 DB）+ `test_share_card.py`（23，純邏輯＋Pillow 渲染，不發網路），共 317 tests
+- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（44）+ `test_styles.py`（14）+ `test_app.py`（65）+ `test_ratelimit.py`（24）+ `test_db.py`（31，純邏輯＋假 conn/假池子，不需 DB）+ `test_share_card.py`（33，純邏輯＋Pillow 渲染，不發網路），共 336 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 317 tests，改任何 .py 都要跑
+python -m pytest -q                     # 336 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -960,6 +960,31 @@ select grantee, table_name, privilege_type from information_schema.role_table_gr
  where table_schema = 'public' and grantee in ('anon', 'authenticated');
 ```
 
+### 資安硬化四則（2026-08-31，LOW-7～10）
+
+- **Spotify scope 最小化**：拿掉從未使用的 `playlist-modify-public`（歌單一律
+  `public: False`）。⚠️ 別加回去——它只會讓使用者在授權頁看到「修改你的公開歌單」。
+  舊 token 仍帶舊 scope，重新登入才收斂。有測試釘住。
+- **封面只抓 Spotify CDN**（`share_card._is_spotify_cdn`）：`fetch_covers()` 是全站唯一
+  會對「資料裡帶來的網址」發請求的地方，鎖住它就沒有 SSRF 的餘地；並加
+  `allow_redirects=False`（白名單只驗第一個網址，跟著轉址走等於白驗）。
+  ⚠️ **不能寫成 `endswith("scdn.co")`**——`evil-scdn.co` 會過關，要比對帶點的 `.scdn.co`。
+  ⚠️ 測試裡的假網址必須是真的 CDN 形式，否則會在發請求前就被濾掉（踩過一次）。
+- **元件只收父框架的訊息**（`e.source !== window.parent` 就忽略）。
+  ⚠️ 回傳端**刻意維持 `targetOrigin: "*"`**：Streamlit Cloud 把 app 包在巢狀 iframe 裡，
+  父框架 origin 不是固定可推得的，寫死會弄壞元件——而那會連帶弄壞 OAuth 綁定與訪客身分。
+- **上傳圖片以檔頭判定格式**（`app._sniff_image_mime`）：`file_uploader(type=...)` 只比對
+  副檔名、`uploaded.type` 是瀏覽器宣告的值，兩者都由使用者控制。
+  ⚠️ 刻意用**純位元組比對、不丟給 PIL 判斷**——那等於為了驗證先解析一次未知內容，
+  正好是要避開的那一步。⚠️ 讀檔用 `getvalue()` 不用 `read()`（後者會把位置移到結尾，
+  生成時就讀到空的）。實測：Pillow 真的產生的 JPEG/PNG/WEBP 全數認得，
+  EPS／JPEG2000／GIF／SVG／半截檔頭全數擋下。
+
+**`SECURITY.md` 已改寫成威脅模型**（LOW-11）：資產清單、角色、信任邊界、**10 條安全不變
+條件**、攻擊面對照表、外部資料流。舊版寫的 `ip-api.com` 是錯的（實際是 `ipwho.is` +
+`open-meteo`），且完全沒提 Supabase 與訪客身分——拿那份去做 AI 資安掃描會直接略過最敏感
+的部分。⚠️ **改了行為就要同步更新它**，它是掃描工具的檢查依據。
+
 ### 使用者回饋（👍/👎/🎧，2026-08，兩種模式都有）
 - 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：喜歡／不合／早就聽過
   （標籤是 `:material/thumb_up:` 等，對照表 `_FB_STATE_BY_LABEL`，見「圖示系統」）。
@@ -1363,7 +1388,7 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
-| `test_*.py`（7 個） | `test_recommend`(125) / `test_spotify_api`(43) / `test_styles`(14) / `test_app`(57) / `test_ratelimit`(24) / `test_db`(31) / `test_share_card`(23) | 改對應模組時同步 |
+| `test_*.py`（7 個） | `test_recommend`(125) / `test_spotify_api`(44) / `test_styles`(14) / `test_app`(65) / `test_ratelimit`(24) / `test_db`(31) / `test_share_card`(33) | 改對應模組時同步 |
 | `share_card.py` | **IG 限動分享圖卡**（1080×1920 PNG，三種樣式）：純邏輯、不 import streamlit、時間由參數傳入。見「IG 限動分享圖卡」段 | 偶爾 |
 | `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入、**連線池**（`get_pool`/`connection()`，見「DB 連線」段）。**Phase 1+2 已上線**（`_persist_*` helpers）；**Phase 5 加 `guest_user_key()`**（訪客 per-browser 假名鍵）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
 | `guest_id_component/` | **Phase 5 自建 Streamlit 雙向元件**（vanilla JS、零第三方）：讀/生成瀏覽器 localStorage 匿名 UUID 回傳 Python，撐訪客 per-browser 身分。keyed＋`position:absolute` 隱形（仍執行、零版面）。⚠️ 回傳非同步（首輪 None）；⚠️ 雲端巢狀 iframe 已驗可行（見 `FEEDBACK_PERSISTENCE.md` Phase 5 spike） | 否 |

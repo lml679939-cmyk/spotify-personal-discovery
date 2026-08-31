@@ -166,6 +166,28 @@ def _rate_key() -> str:
     return f"s:{st.session_state['rl_session_id']}"
 
 
+def _sniff_image_mime(data: bytes) -> str | None:
+    """看**實際內容**判斷圖片格式，回真正的 MIME；認不出來回 None。
+
+    ⚠️ `st.file_uploader(type=[...])` 只比對副檔名、`uploaded.type` 是**瀏覽器宣告的**
+    值——兩者都由使用者控制。叫 `x.png` 但內容是 EPS/JPEG2000 的檔案照樣會被對應的
+    解碼器解析（requirements.txt 把 Pillow 釘在 12.3.0 就是為了那批解析器 CVE）。
+    這裡在餵給下游之前先用檔頭確認一次。
+
+    刻意用純位元組比對、**不丟給 PIL 判斷**：那等於為了驗證而先解析一次未知內容，
+    正好是想避開的那一步。
+    """
+    if not data:
+        return None
+    if data[:3] == bytes([0xFF, 0xD8, 0xFF]):                                  # JPEG
+        return "image/jpeg"
+    if data[:8] == bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]):    # PNG
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":                          # WebP
+        return "image/webp"
+    return None
+
+
 def _human_wait(sec: int) -> str:
     """秒數 → 人看得懂的粗略時間。全站閘門的等待可能長達數小時，
     照秒印會變成「請等 41231 秒」這種讓人以為壞掉的訊息。"""
@@ -1111,7 +1133,14 @@ with col2:
         label_visibility="collapsed",
     )
     if uploaded:
-        st.image(uploaded, width="stretch")
+        # ⚠️ 用 getvalue() 不用 read()：後者會把讀取位置移到結尾，等一下生成時就讀到空的
+        if _sniff_image_mime(uploaded.getvalue()):
+            st.image(uploaded, width="stretch")
+        else:
+            st.warning(
+                "這個檔案的內容看起來不是 JPEG／PNG／WebP 圖片（副檔名不算數），已略過。",
+                icon=":material/image_not_supported:",
+            )
 
 # ══ 投射問題（本站特色，從頁面最底下提到這裡）═══════════
 if "projective_q" not in st.session_state:
@@ -1440,11 +1469,16 @@ if _clicked:
                         if uploaded.size > 10 * 1024 * 1024:
                             st.warning(f"圖片過大（{uploaded.size / 1024 / 1024:.1f} MB），請上傳 10 MB 以內的圖片。")
                         else:
-                            img_bytes = uploaded.read()
-                            mime = uploaded.type or "image/jpeg"
-                            img_ctx = analyze_image(_gemini_key(), img_bytes, mime)
-                            context_parts.append(f"圖片分析：{img_ctx}")
-                            st.write(f":material/palette: {img_ctx}")
+                            img_bytes = uploaded.getvalue()
+                            # ⚠️ 用檔頭嗅探出來的 MIME，不要用 uploaded.type
+                            #    （那是瀏覽器宣告的，使用者可以任意指定）
+                            mime = _sniff_image_mime(img_bytes)
+                            if mime is None:
+                                st.write(":material/image_not_supported: 圖片格式無法辨識，略過")
+                            else:
+                                img_ctx = analyze_image(_gemini_key(), img_bytes, mime)
+                                context_parts.append(f"圖片分析：{img_ctx}")
+                                st.write(f":material/palette: {img_ctx}")
                     except Exception as e:
                         st.warning(f"圖片分析失敗：{e}")
 

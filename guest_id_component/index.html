@@ -59,6 +59,11 @@
   }
   var delivered = false;
   window.addEventListener("message", function (e) {
+    // 只收父框架（Streamlit）的訊息，別的 frame 觸發不了這支元件。
+    // ⚠️ 回傳端刻意維持 targetOrigin "*"：Streamlit Cloud 把 app 包在巢狀 iframe 裡，
+    //    父框架的 origin 不是固定可推得的，寫死會把元件弄壞（而那會連帶弄壞 OAuth
+    //    綁定與訪客身分）。值只往 window.parent 送、不外流，風險本來就極低。
+    if (e.source !== window.parent) { return; }
     if (!e.data || e.data.type !== "streamlit:render") { return; }
     if (delivered) { return; }          // 只回一次，避免每次 render 都觸發 rerun
     delivered = true;
