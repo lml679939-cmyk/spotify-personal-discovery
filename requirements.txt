@@ -38,6 +38,12 @@ Pillow==12.3.0           # 12.2.0 以前有 13 個 CVE，多個在影像解析�
 psycopg[binary]==3.3.4   # db.py 的跨 session 持久化（Supabase Postgres）。[binary]＝免裝系統
                          # libpq 就能連線。db.py 延遲 import psycopg，Streamlit Secrets 沒設
                          # SUPABASE_DB_URL 時完全不會用到（db.is_enabled() False → 全 no-op）。
+psycopg-pool==3.3.1      # db.get_pool() 的連線池（MED-4）。⚠️ 它**不含在** psycopg[binary] 裡，
+                         # 是獨立套件——雖然也可以寫成 psycopg[binary,pool]，但那樣只釘得住
+                         # psycopg、pool 的版本會浮動，違反本檔的釘版策略，所以分開明寫。
+                         # 為什麼要池子：Streamlit 每位使用者的 session 是同一行程裡的不同
+                         # 執行緒，共用一條連線會讓交易邊界互相污染（A 的 commit 提交 B 的
+                         # 半成品；B 出錯讓交易 aborted 則 A 一起失敗）。見 CLAUDE.md。
 
 # ── 傳遞依賴的安全下限（不是直接依賴，故用 >= 避免版本解析衝突）──
 urllib3>=2.7.0           # 2.6.3 以前有 PYSEC-2026-141/142（跨來源轉址洩漏標頭、

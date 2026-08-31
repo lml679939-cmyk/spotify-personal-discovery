@@ -6,6 +6,10 @@
 純邏輯請放 recommend.py + test_recommend.py，這裡只測需要 Spotify 資料結構的部分。
 """
 
+import hashlib
+import hmac
+import time
+
 import pytest
 
 import spotify_api
@@ -411,3 +415,48 @@ def test_repair_still_strict_no_top_result_fallback():
     # 幻覺補救維持嚴格比對：LLM 給的歌手名不可信，退而取第一筆會補到別人
     sp = FakeCatalogSpotify(artist_name="Totally Other Band")
     assert spotify_api.repair_hallucinated_track("X", "LLM 亂編的歌手", set(), sp=sp) is None
+
+
+# ── 拿不到瀏覽器祕密時要 fail closed（MED-6）──────────────
+# 舊版的失效模式：_browser_secret() 回空字串 → 用**空金鑰**簽 HMAC。空金鑰的簽章
+# 攻擊者也算得出來，於是 compare_digest 兩邊相符、state 看起來驗過了，實際上零綁定
+# 效果（等同沒有 state），授權碼注入重新成立——而且整個過程完全無聲。
+
+def test_sign_state_refuses_to_sign_without_a_browser_secret(browser):
+    """做成例外，是為了讓「用空金鑰簽章」在任何程式路徑上都不可能發生。"""
+    browser({})                                   # 有 context 但沒有 XSRF cookie
+    with pytest.raises(spotify_api._NoBrowserSecret):
+        spotify_api._sign_state("nonce", 1787211642)
+    browser(None)                                 # 連 st.context 都取不到
+    with pytest.raises(spotify_api._NoBrowserSecret):
+        spotify_api._sign_state("nonce", 1787211642)
+
+
+def test_state_forged_with_an_empty_secret_is_rejected(browser):
+    """核心迴歸：舊版會接受這個 state（兩端都用空金鑰＝簽章必然相符）。"""
+    issued_at = int(time.time())
+    nonce = "attacker_nonce"
+    forged = hmac.new(b"", f"{issued_at}.{nonce}".encode(), hashlib.sha256).hexdigest()
+    browser({})                                   # 受害者這邊也拿不到 cookie
+    assert spotify_api._verify_oauth_state(f"{issued_at}.{nonce}.{forged}") is False
+
+
+def test_get_login_url_returns_none_when_state_cannot_be_bound(browser):
+    """⚠️ 不能退而發一個沒帶 state 的網址——那等於把防護整個關掉，
+    而且使用者完全看不出來。寧可少一種登入方式（訪客模式仍可用）。"""
+    browser({})
+    assert spotify_api.get_login_url() is None
+    browser(None)
+    assert spotify_api.get_login_url() is None
+
+
+def test_get_login_url_still_carries_state_in_the_normal_case(browser, monkeypatch):
+    """正常路徑不能被上面那道防線誤傷。"""
+    monkeypatch.setattr(spotify_api, "_get_credential", lambda k: {
+        "SPOTIFY_CLIENT_ID": "cid",
+        "SPOTIFY_CLIENT_SECRET": "csec",
+        "SPOTIFY_REDIRECT_URI": "https://example.test/",
+    }[k])
+    browser({"_streamlit_xsrf": _xsrf_cookie(_TOKEN_A, "c7a369ce")})
+    url = spotify_api.get_login_url()
+    assert url and "state=" in url

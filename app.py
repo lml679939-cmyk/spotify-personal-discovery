@@ -5,6 +5,7 @@ SoundCurator - Web UI
 import ipaddress
 import os
 import random
+import re
 import secrets
 import sys
 import time
@@ -70,17 +71,33 @@ _GUEST_ID_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_
 _guest_id_component = components.declare_component("sc_guest_id", path=_GUEST_ID_DIR)
 
 
+# 合法的訪客匿名代號＝ crypto.randomUUID() 的正規形式（小寫 v4）。
+# ⚠️ 這個值**完全由瀏覽器端控制**（localStorage 可以任意改），是本站少數幾個
+#    跨越信任邊界的輸入之一，所以進到伺服器一定要驗：
+#    ① 形式不對就當作沒有 id——不要拿去 HMAC，那等於讓人自訂身分命名空間；
+#    ② 正規形式順帶把長度鎖死在 36 字元，擋掉「塞超長字串、每次 render 都往伺服器送」；
+#    ③ 只收小寫：大小寫都收的話，同一個邏輯 id 會算出兩把不同的 user_key。
+# 元件端（guest_id_component/index.html）也用同一條規則做自我修復，但那只是體驗，
+# **這裡才是真正的信任邊界**——攻擊者可以完全繞過我們的 JS。
+_GUEST_ID_RE = re.compile(
+    r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
+)
+
+
 def _guest_local_id() -> str | None:
-    """訪客瀏覽器 localStorage 的匿名 UUID；讀不到／尚未回傳／無痕 → None。
+    """訪客瀏覽器 localStorage 的匿名 UUID；讀不到／尚未回傳／無痕／**形式不合法** → None。
 
     ⚠️ 回傳是**非同步**（見 5.0 spike）：首次 render 元件回 None，元件 postback 觸發 rerun 後才有值。
     ⚠️ 這會在呼叫處渲染一個高度 0 的隱形 iframe，所以只在訪客流程裡呼叫。
     """
     try:
         # key＝讓 styles 用 .st-key-guest_id_probe 把它移出版面流（隱形、零 footprint）
-        return _guest_id_component(default=None, key="guest_id_probe") or None
+        raw = _guest_id_component(default=None, key="guest_id_probe")
     except Exception:
         return None
+    if not isinstance(raw, str) or not _GUEST_ID_RE.match(raw):
+        return None      # 含 None（首輪還沒回來）與任何被竄改過的值
+    return raw
 
 
 def _ensure_guest_uk() -> None:
@@ -119,6 +136,28 @@ def _rate_key() -> str:
     if "rl_session_id" not in st.session_state:
         st.session_state["rl_session_id"] = secrets.token_hex(8)
     return f"s:{st.session_state['rl_session_id']}"
+
+
+def _human_wait(sec: int) -> str:
+    """秒數 → 人看得懂的粗略時間。全站閘門的等待可能長達數小時，
+    照秒印會變成「請等 41231 秒」這種讓人以為壞掉的訊息。"""
+    if sec < 90:
+        return f"{sec} 秒"
+    if sec < 3600:
+        return f"約 {round(sec / 60)} 分鐘"
+    return f"約 {round(sec / 3600)} 小時"
+
+
+def _rate_limit_warning(why: str, wait: int) -> str:
+    """被節流擋下時給使用者的說明。四種原因要講不同的話——「今天用完了」和
+    「現在人多」對使用者的下一步完全不同（一個是明天再來，一個是等幾分鐘）。"""
+    if why == "global_day":
+        return "今天全站的 AI 額度已經用完了（所有使用者共用同一份免費配額），明天會逐步恢復。"
+    if why == "global_hour":
+        return f"現在同時使用的人比較多，{_human_wait(wait)}後會有名額釋出，請稍後再試。"
+    if why == "daily":
+        return "今日的生成次數已用完，額度會在 24 小時內逐步恢復。"
+    return f"生成太頻繁了，請等 {wait} 秒再試。"
 
 
 def _gemini_key() -> str | None:
@@ -326,14 +365,27 @@ def show_login_required() -> None:
     )
 
     if has_spotify_creds:
-        st.link_button(
-            "用 Spotify 登入",
-            get_login_url(),   # 已帶上綁定本瀏覽器的 state，見 spotify_api._make_oauth_state()
-            icon=":material/headphones:",
-            type="secondary",
-            width="stretch",
-        )
-        st.caption(":material/lock: Token 只存在瀏覽器分頁記憶體，關掉就消失。")
+        # 已帶上綁定本瀏覽器的 state，見 spotify_api._make_oauth_state()。
+        # ⚠️ 綁不了（拿不到 XSRF cookie）時回 None——**絕對不要退而發一個沒有 state 的網址**，
+        #    那等於把授權碼注入（login CSRF）的防護整個關掉，而且使用者完全看不出來。
+        #    寧可少一種登入方式（訪客模式仍可用），也不要提供一個沒有防護的登入。
+        _login_url = get_login_url()
+        if _login_url:
+            st.link_button(
+                "用 Spotify 登入",
+                _login_url,
+                icon=":material/headphones:",
+                type="secondary",
+                width="stretch",
+            )
+            st.caption(":material/lock: Token 只存在瀏覽器分頁記憶體，關掉就消失。")
+        else:
+            st.warning(
+                "無法建立安全的登入連線——瀏覽器沒有回傳本站需要的 Cookie。"
+                "請允許本站的 Cookie（或關閉會擋 Cookie 的擴充功能）後重新整理，"
+                "或直接使用上方的訪客模式。",
+                icon=":material/lock:",
+            )
 
         # 授權名單的說明只在真的登入失敗時才出現，平常不佔首頁版面
         auth_err = st.session_state.get("spotify_auth_error")
@@ -680,8 +732,17 @@ def _effective_uk() -> str | None:
     return st.session_state.get("persist_uk")
 
 
-def _persist_fail() -> None:
-    db.reset_conn()   # 死連線自癒：下次 get_conn 會重連
+def _persist_fail(exc: Exception | None = None) -> None:
+    """DB 操作失敗的統一出口：一律靜默降級成 session 級，絕不讓生成/回饋壞掉。
+
+    ⚠️ **不要在這裡重置連線**——死連線由連線池的 check 自動汰換（見 db.get_pool），
+    在這裡整池關掉反而會把其他使用者正在用的好連線一起丟掉，那正是舊版單一連線的失敗模式。
+    只把例外**型別**印到 stderr（Manage app 撈得到）：DB 問題以前是 100% 靜默的，
+    症狀看起來像「偶發、重試就好」，很難追回根因。
+    ⚠️ 只印型別不印訊息——例外訊息可能含連線字串或資料內容。
+    """
+    if exc is not None:
+        print(f"[DB] {type(exc).__name__}", file=sys.stderr, flush=True)
 
 
 def _persist_sync() -> None:
@@ -693,25 +754,25 @@ def _persist_sync() -> None:
     if not uk or st.session_state.get("persist_synced"):
         return
     try:
-        conn = db.get_conn()
-        if conn is None:
-            return
-        if not db.has_consent(conn, uk):
-            st.session_state["persist_needs_consent"] = True
-            return
-        fb = st.session_state.setdefault("track_feedback", {})
-        for e in db.load_feedback(conn, uk):
-            k = "fb::" + "||".join(_track_key(e["title"], e["artist"]))
-            fb.setdefault(k, {"title": e["title"], "artist": e["artist"], "state": e["state"]})
-        hist = db.load_history(conn, uk)
-        if hist:
-            st.session_state["recommend_history"] = (
-                hist + st.session_state.get("recommend_history", [])
-            )[-HISTORY_KEEP * 4:]
-        st.session_state["persist_synced"] = True
-        st.session_state["persist_needs_consent"] = False
-    except Exception:
-        _persist_fail()
+        with db.connection() as conn:
+            if conn is None:
+                return
+            if not db.has_consent(conn, uk):
+                st.session_state["persist_needs_consent"] = True
+                return
+            fb = st.session_state.setdefault("track_feedback", {})
+            for e in db.load_feedback(conn, uk):
+                k = "fb::" + "||".join(_track_key(e["title"], e["artist"]))
+                fb.setdefault(k, {"title": e["title"], "artist": e["artist"], "state": e["state"]})
+            hist = db.load_history(conn, uk)
+            if hist:
+                st.session_state["recommend_history"] = (
+                    hist + st.session_state.get("recommend_history", [])
+                )[-HISTORY_KEEP * 4:]
+            st.session_state["persist_synced"] = True
+            st.session_state["persist_needs_consent"] = False
+    except Exception as e:
+        _persist_fail(e)
 
 
 def _persist_feedback(track: dict, state: str | None) -> None:
@@ -735,22 +796,22 @@ def _persist_feedback(track: dict, state: str | None) -> None:
     title = track.get("name") or track.get("title", "")
     artist = track.get("artist", "")
     try:
-        conn = db.get_conn()
-        if conn is None:
-            return
-        if state:
-            _fame = track.get("fame")
-            db.upsert_feedback(
-                conn, uk, title, artist, state,
-                fame=_fame if isinstance(_fame, int) else None,
-                is_discovery=bool(track.get("_discovery")),
-                reason=track.get("reason") or None,
-                ctx=st.session_state.get("last_gen_ctx") or {},
-            )
-        else:
-            db.delete_feedback(conn, uk, title, artist)
-    except Exception:
-        _persist_fail()
+        with db.connection() as conn:
+            if conn is None:
+                return
+            if state:
+                _fame = track.get("fame")
+                db.upsert_feedback(
+                    conn, uk, title, artist, state,
+                    fame=_fame if isinstance(_fame, int) else None,
+                    is_discovery=bool(track.get("_discovery")),
+                    reason=track.get("reason") or None,
+                    ctx=st.session_state.get("last_gen_ctx") or {},
+                )
+            else:
+                db.delete_feedback(conn, uk, title, artist)
+    except Exception as e:
+        _persist_fail(e)
 
 
 def _persist_history(found: list[dict]) -> None:
@@ -758,16 +819,16 @@ def _persist_history(found: list[dict]) -> None:
     if not uk or st.session_state.get("persist_needs_consent"):
         return
     try:
-        conn = db.get_conn()
-        if conn is None:
-            return
-        db.upsert_history(conn, uk, [
-            {"title": t.get("name") or t.get("title", ""), "artist": t.get("artist", "")}
-            for t in found
-        ])
-        db.trim_history(conn, uk)
-    except Exception:
-        _persist_fail()
+        with db.connection() as conn:
+            if conn is None:
+                return
+            db.upsert_history(conn, uk, [
+                {"title": t.get("name") or t.get("title", ""), "artist": t.get("artist", "")}
+                for t in found
+            ])
+            db.trim_history(conn, uk)
+    except Exception as e:
+        _persist_fail(e)
 
 
 def _persist_playlist(*, rating: int | None = None, saved: bool = False,
@@ -787,16 +848,16 @@ def _persist_playlist(*, rating: int | None = None, saved: bool = False,
             return          # 登入未同意 → 不寫
         uk = "anon"         # 訪客未同意（或 id 未解析）→ 匿名聚合
     try:
-        conn = db.get_conn()
-        if conn is None:
-            return
-        db.upsert_playlist_feedback(
-            conn, uk, gen_id, rating=rating, saved=saved, copied=copied,
-            num_songs=len(st.session_state.get("found") or []),
-            ctx=st.session_state.get("last_gen_ctx") or {},
-        )
-    except Exception:
-        _persist_fail()
+        with db.connection() as conn:
+            if conn is None:
+                return
+            db.upsert_playlist_feedback(
+                conn, uk, gen_id, rating=rating, saved=saved, copied=copied,
+                num_songs=len(st.session_state.get("found") or []),
+                ctx=st.session_state.get("last_gen_ctx") or {},
+            )
+    except Exception as e:
+        _persist_fail(e)
 
 
 # 歌單層級 3 段滿意度：文獻上「拿到歌單當下答得出的是整份合不合味、不是逐首喜不喜歡」
@@ -863,13 +924,13 @@ def _render_consent_banner() -> None:
         if st.button(btn_label, icon=":material/check_circle:", key="consent_btn"):
             uk2 = _effective_uk()
             try:
-                conn = db.get_conn()
-                if conn is not None and uk2:
-                    db.set_consent(conn, uk2)
-                    st.session_state["persist_needs_consent"] = False
-                    st.session_state["persist_synced"] = False   # 觸發下一輪讀回
-            except Exception:
-                _persist_fail()
+                with db.connection() as conn:
+                    if conn is not None and uk2:
+                        db.set_consent(conn, uk2)
+                        st.session_state["persist_needs_consent"] = False
+                        st.session_state["persist_synced"] = False   # 觸發下一輪讀回
+            except Exception as e:
+                _persist_fail(e)
             st.rerun()
 
 
@@ -888,11 +949,11 @@ def _render_persist_sidebar() -> None:
         if st.button("刪除我在本站的所有資料", icon=":material/delete:", width="stretch"):
             uk2 = _effective_uk()
             try:
-                conn = db.get_conn()
-                if conn is not None and uk2:
-                    db.delete_all(conn, uk2)
-            except Exception:
-                _persist_fail()
+                with db.connection() as conn:
+                    if conn is not None and uk2:
+                        db.delete_all(conn, uk2)
+            except Exception as e:
+                _persist_fail(e)
             for _k in ("track_feedback", "recommend_history", "persist_synced"):
                 st.session_state.pop(_k, None)
             for _wk in [w for w in st.session_state if isinstance(w, str) and w.startswith("w_fb::")]:
@@ -1224,14 +1285,17 @@ with st.expander(f"關於你　·　{_traits_sum}", expanded=False,
 # ══ 生成按鈕：放在所有偏好設定之後（使用者填完再送出，2026-08-23 從表單上方移到這裡）═══
 generate_slot = st.container()   # 就在此建，按鈕/狀態/進度都渲染在「關於你」下方
 # 節流狀態要在建立按鈕「之前」算好——按鈕的 disabled 參數當下就要定
-_rl_ok, _rl_wait, _rl_left = ratelimit.status(_rate_key(), time.time())
-_rl_exhausted = not _rl_ok and not _rl_wait
+_rl_ok, _rl_why, _rl_wait, _rl_left = ratelimit.peek(_rate_key(), time.time())
+_rl_exhausted = _rl_why == "daily"
 
 # ⚠️ 冷卻中**不要**把按鈕 disable：按鈕的文字與 disabled 都是「渲染當下」的快照，
 # Streamlit 沒有重跑就不會更新。實測 20 秒冷卻早就過了，畫面還停在「請稍候 6 秒」
 # 而且點不動——使用者會以為壞了。改成讓他點得下去，由 consume() 用當下的時間
 # 回一個準確的秒數；點擊本身就會觸發重跑，狀態永遠是新的。
 # 每日上限則相反：它持續 24 小時，disable 不會有卡住的問題，而且明確擋住比較清楚。
+# ⚠️ **全站閘門（global_*）跟冷卻同一邊，不要 disable**：它是暫時的，而且被它擋下
+# 完全不扣個人額度（見 ratelimit.acquire 的順序保證），讓使用者點得下去反而能拿到
+# 當下最準確的等待時間。
 _clicked = generate_slot.button(
     "今日次數已用完" if _rl_exhausted else "生成推薦歌單",
     icon=":material/hourglass_top:" if _rl_exhausted else ":material/auto_awesome:",
@@ -1248,6 +1312,15 @@ if _rl_exhausted:
     _status_lines.append(
         ":material/traffic: 本站的 AI 由站方自備、所有人共用同一份免費配額，因此設有每日上限。"
         "額度會在 24 小時內逐步恢復。"
+    )
+elif _rl_why == "global_day":
+    _status_lines.append(
+        ":material/traffic: 今天全站的 AI 額度已經用完了（所有使用者共用同一份免費配額），"
+        "明天會逐步恢復。"
+    )
+elif _rl_why == "global_hour":
+    _status_lines.append(
+        f":material/groups: 現在使用的人比較多，{_human_wait(_rl_wait)}後會有名額釋出。"
     )
 elif _rl_wait:
     _status_lines.append(f":material/hourglass_top: 剛生成過，約 {_rl_wait} 秒後可以再按一次。")
@@ -1266,12 +1339,10 @@ if _clicked:
         st.error("請至少啟用自動偵測、輸入文字，或上傳圖片其中一個。")
     # ⚠️ 真的要送出之前再扣一次額度，不能只信上面的 status()：那是唯讀的，
     # 跟這裡之間使用者可能已經多點了幾下（按鈕的 disabled 只是前端狀態）
-    elif not (_rl := ratelimit.consume(_rate_key(), time.time()))[0]:
-        st.warning(
-            f"生成太頻繁了，請等 {_rl[1]} 秒再試。" if _rl[1]
-            else "今日的生成次數已用完，額度會在 24 小時內逐步恢復。",
-            icon=":material/traffic:",
-        )
+    # ⚠️ acquire() 一次判定全站閘門＋個人額度，且保證「有扣就一定有生成」。
+    #    不要退回 consume()——那只看個人額度，全站上限等於沒有。
+    elif not (_rl := ratelimit.acquire(_rate_key(), time.time()))[0]:
+        st.warning(_rate_limit_warning(_rl[1], _rl[2]), icon=":material/traffic:")
     else:
         # ⚠️ 清空舊結果一定要放在這裡（確定要生成之後），不能放在 if _clicked 的開頭：
         # 那樣的話「輸入沒填」或「被冷卻擋下」也會把使用者上一份歌單清掉——

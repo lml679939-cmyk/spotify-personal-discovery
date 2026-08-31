@@ -2,16 +2,19 @@
 
 分層原則（為了可單元測試、且 Supabase 沒設好時 import 本模組也不會炸）：
   - **純邏輯**（user_key 雜湊、key_str、params 組裝、row→entry 映射）不碰網路/DB，直接 pytest。
-  - **DB 函式**都收一個 psycopg 風格的 `conn`（可注入假物件測試）；真正的連線在 `get_conn()`
-    **延遲載入 psycopg**——本模組頂層不 import psycopg，所以雲端還沒裝 psycopg 也能 import。
+  - **DB 函式**都收一個 psycopg 風格的 `conn`（可注入假物件測試）；真正的連線由
+    `connection()` 從 `get_pool()` 的連線池借出，**psycopg / psycopg_pool 都是延遲載入**
+    ——本模組頂層不 import 它們，所以雲端還沒裝也能 import 本模組。
+    ⚠️ 每次操作都要走 `with connection() as conn:`，**不要把連線抓出來長期共用**：
+    交易邊界是連線層級的，共用會讓不同使用者的交易互相污染（見「連線池」段的驗證數據）。
   - 設定（連線字串、HMAC 祕密）從 env 讀，缺了才退而問 `st.secrets`（延遲 import streamlit）。
 
 呼叫端（app.py，Phase 2）務必把每個 DB 函式包在 try/except 裡：**DB 壞掉一律降級成 session 級，
 絕不讓生成失敗**（比照 spotify_api.append_to_persistent_history 的態度）。
 
-⚠️ Phase 2 接上 app.py 之前，要把 `psycopg[binary]==<版本>` 加進 requirements.txt（照 == 釘版紀律），
-並在 Streamlit Secrets 設 `SUPABASE_DB_URL`（Supabase 的 **pooler / Transaction mode** 連線字串，
-serverless 別用直連 5432）與 `PERSIST_HMAC_SECRET`。
+依賴：`psycopg[binary]==<版本>` ＋ `psycopg-pool==<版本>`（照 == 釘版紀律；⚠️ pool 是**獨立套件**，
+`psycopg[binary]` 裡沒有）。Streamlit Secrets 要設 `SUPABASE_DB_URL`（Supabase 的
+**pooler / Transaction mode** 連線字串，serverless 別用直連 5432）與 `PERSIST_HMAC_SECRET`。
 """
 from __future__ import annotations
 
@@ -19,6 +22,8 @@ import hashlib
 import hmac
 import json
 import os
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from recommend import _track_key_from  # 曲目正規化的單一真相來源
@@ -252,33 +257,87 @@ def is_enabled() -> bool:
     return bool(url and secret)
 
 
-_conn = None
+# ── 連線池 ──────────────────────────────────────────────
+# ⚠️ 舊版是「一條 module-global 連線、全站共用」。psycopg3 的連線本身有內部鎖不會 crash，
+# 但**交易邊界是連線層級的**，而 Streamlit 每位使用者的 session 是同一行程裡的不同執行緒：
+#   · A 的 commit() 會順手提交 B 還沒寫完的語句；
+#   · B 的語句一報錯讓交易進入 aborted 狀態，A 的寫入也會跟著失敗。
+# ＝跨使用者的完整性耦合。更麻煩的是 reset_conn() 那個「死連線自癒」補丁會讓症狀看起來像
+# 「偶發、重試就好」，很難從症狀追回根因。
+# 連線池讓每個 with 區塊拿到自己的連線＝自己的交易，彼此不再互相影響。
+POOL_MAX = 5           # Supabase 免費方案的 pooler 連線數有限，Streamlit Cloud 單行程也用不到更多
+POOL_TIMEOUT = 3.0     # 借不到就放棄：DB 掛掉時要快速降級成 session 級，不能把頁面卡住
+POOL_MAX_IDLE = 120.0  # 閒置超過就自己收掉（pooler 本來也會關，讓池子先手比較乾淨）
+
+_pool = None
+_POOL_LOCK = threading.Lock()
 
 
-def get_conn():
-    """快取的 psycopg 連線；`SUPABASE_DB_URL` 沒設回 None（呼叫端據此降級成 session 級）。
+def get_pool():
+    """快取的連線池；`SUPABASE_DB_URL` 沒設回 None（呼叫端據此降級成 session 級）。
 
-    ⚠️ psycopg 在此才 import。⚠️ 連線務必用 Supabase 的 pooler 字串（見檔頭）；Streamlit 多執行緒
-    重跑下若出現連線衝突，Phase 2 再換成 psycopg_pool 連線池。
+    ⚠️ psycopg_pool 在此才 import（同 psycopg，雲端沒裝也要能 import 本模組）。
+    ⚠️ 連線字串務必用 Supabase 的 pooler / Transaction mode。
+
+    `min_size=0` ＝ 不預先開連線，所以 DB 沒設好或冷啟動時完全零成本。
+    `check` 會在借出前驗一次連線——被 pooler 關掉的閒置連線由池子自動汰換，
+    **這正是舊版 reset_conn() 想手動做的事**，而且不會把其他好的連線一起丟掉。
     """
-    global _conn
-    if _conn is not None:
-        return _conn
+    global _pool
+    if _pool is not None:
+        return _pool
     url, _ = _config()
     if not url:
         return None
-    import psycopg  # 延遲載入
-    _conn = psycopg.connect(url)
-    return _conn
+    with _POOL_LOCK:
+        if _pool is not None:          # double-check：兩條執行緒同時進來只能建出一個池
+            return _pool
+        from psycopg_pool import ConnectionPool   # 延遲載入
+        _pool = ConnectionPool(
+            url,
+            min_size=0,
+            max_size=POOL_MAX,
+            timeout=POOL_TIMEOUT,
+            max_idle=POOL_MAX_IDLE,
+            check=ConnectionPool.check_connection,
+            open=True,                 # 3.2+ 不明寫會有 deprecation warning
+        )
+    return _pool
 
 
-def reset_conn() -> None:
-    """丟棄快取的連線，下次 get_conn() 會重連。呼叫端在 DB 操作失敗時呼叫——
-    pooler 會關閉閒置連線，快取到一條死連線的話不重置就會一直失敗（整個行程都降級）。"""
-    global _conn
+@contextmanager
+def connection():
+    """借一條連線來用，離開區塊自動歸還（正常結束 commit、有例外 rollback）。
+
+    DB 未啟用時 yield None，呼叫端據此降級成 session 級：
+
+        with db.connection() as conn:
+            if conn is None:
+                return
+            db.upsert_feedback(conn, uk, ...)
+
+    ⚠️ 區塊內請維持現有 db.* 函式「自己 commit」的寫法（它們本來就有）——離開區塊時的
+    commit 只是保險。區塊內提早 return 會被當成例外路徑而 rollback，但那時該寫的已經 commit 了。
+    """
+    pool = get_pool()
+    if pool is None:
+        yield None
+        return
+    with pool.connection() as conn:
+        yield conn
+
+
+def close_pool() -> None:
+    """關閉並丟棄連線池。
+
+    ⚠️ 正式流程**不需要**呼叫這個：死連線由 `check` 自動汰換，而在這裡整池關掉
+    等於把其他使用者正在用的好連線一起丟掉——那正是舊版單一連線的失敗模式。
+    存在的理由是測試與行程收尾。
+    """
+    global _pool
     try:
-        if _conn is not None:
-            _conn.close()
+        if _pool is not None:
+            _pool.close()
     except Exception:
         pass
-    _conn = None
+    _pool = None

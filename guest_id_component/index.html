@@ -8,20 +8,45 @@
 (function () {
   "use strict";
   var KEY = "sc_guest_id";
+  // 只接受 crypto.randomUUID() 的正規形式（小寫 v4）。Python 端會用同一條規則再驗一次
+  // ——這裡驗是為了「自我修復」（舊值/被改過的值換成新的），那裡驗才是真正的信任邊界。
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   function post(type, extra) {
     var msg = { isStreamlitMessage: true, type: type };
     if (extra) { for (var k in extra) { msg[k] = extra[k]; } }
     window.parent.postMessage(msg, "*");
   }
+  function newId() {
+    // ⚠️ 這個 id 就是訪客的身分憑證——誰持有誰就是他。所以**一定要用 CSPRNG**：
+    //    舊版的 Date.now()+Math.random() 兩者都可預測，等於別人可以枚舉出訪客的
+    //    身分、讀到他的回饋與歷史。
+    // randomUUID 需要 secure context（https）；getRandomValues 不需要，所以本機
+    // http 開發會走下面這條，一樣是密碼學等級的亂數。
+    var c = window.crypto;
+    if (c && typeof c.randomUUID === "function") { return c.randomUUID(); }
+    if (c && typeof c.getRandomValues === "function") {
+      var b = new Uint8Array(16);
+      c.getRandomValues(b);
+      b[6] = (b[6] & 0x0f) | 0x40;                 // version 4
+      b[8] = (b[8] & 0x3f) | 0x80;                 // variant 10x
+      var h = [];
+      for (var i = 0; i < 16; i++) { h.push((b[i] + 0x100).toString(16).slice(1)); }
+      return h.slice(0, 4).join("") + "-" + h.slice(4, 6).join("") + "-" +
+             h.slice(6, 8).join("") + "-" + h.slice(8, 10).join("") + "-" +
+             h.slice(10, 16).join("");
+    }
+    return null;   // 連 CSPRNG 都沒有就不要發身分——降級成 session 級，比給一個猜得到的好
+  }
+
   function readOrCreate() {
     try {
       var id = window.localStorage.getItem(KEY);
-      if (!id) {
-        id = (window.crypto && crypto.randomUUID)
-          ? crypto.randomUUID()
-          : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
-        window.localStorage.setItem(KEY, id);
-      }
+      if (id && UUID_RE.test(id)) { return id; }
+      // 沒有、或形式不對（舊版可預測的 fallback 值／被人手動改過）→ 換一個新的。
+      // 這會讓極少數持有舊格式 id 的瀏覽器「重置一次」訪客身分，是刻意的取捨：
+      // 繼續沿用一個可預測的 id 比重置一次糟糕得多。
+      id = newId();
+      if (id) { window.localStorage.setItem(KEY, id); }
       return id;
     } catch (e) {
       return null;

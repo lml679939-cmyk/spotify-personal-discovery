@@ -13,7 +13,7 @@
 - **主要入口**：`app.py`（Streamlit UI 層）
 - **模組拆分**：`recommend.py`（prompt/Gemini/去重，無 Streamlit 依賴、可單元測試）、`spotify_api.py`（OAuth/搜尋/歌單/歷史）
 - **樣式集中管理**：`styles.py`（Y2K/Retro Pop 主題）
-- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（32）+ `test_styles.py`（14）+ `test_app.py`（40）+ `test_ratelimit.py`（13）+ `test_db.py`（28，純邏輯＋假 conn，不需 DB）+ `test_share_card.py`（23，純邏輯＋Pillow 渲染，不發網路），共 275 tests
+- **測試**：`test_recommend.py`（125）+ `test_spotify_api.py`（36）+ `test_styles.py`（14）+ `test_app.py`（55）+ `test_ratelimit.py`（24）+ `test_db.py`（31，純邏輯＋假 conn/假池子，不需 DB）+ `test_share_card.py`（23，純邏輯＋Pillow 渲染，不發網路），共 308 tests
   ⚠️ `test_app.py` 會 import `app.py`＝把登入頁渲染一遍（約 5s，不發網路請求）。純邏輯請放 `recommend.py`。
 - **語言**：Python 3.12+
 - **框架**：Streamlit >= 1.57（`st.expander(key=...)` 需要）
@@ -27,7 +27,7 @@
 **跑起來**
 ```powershell
 streamlit run app.py                    # 本機開發（.env 要有 GEMINI_API_KEY / SPOTIFY_*）
-python -m pytest -q                     # 275 tests，改任何 .py 都要跑
+python -m pytest -q                     # 308 tests，改任何 .py 都要跑
 ```
 ⚠️ 改了 `styles.py` / `recommend.py` / `spotify_api.py` **要重啟 streamlit**，
 只存檔重整瀏覽器沒用（見「啟動開發伺服器」）。
@@ -83,7 +83,7 @@ python -m pytest -q                     # 275 tests，改任何 .py 都要跑
 | 設定 | 衝突 | 症狀 |
 |---|---|---|
 | `image: …python:1-3.11-bookworm` | 專案要求 **Python 3.12+** | `test_app.py` 有幾條測試依賴 3.12 才把 `203.0.113.x` / `2001:db8::` 算成 private，在 3.11 上會失敗——乾淨的 checkout 卻看到紅色測試 |
-| `postAttachCommand` 帶 `--server.enableXsrfProtection false` | 關掉 XSRF＝拿不到 `_streamlit_xsrf` cookie | `_browser_secret()` 回空字串 → **OAuth state 綁定失效**（見「OAuth state」的限制段）＋**節流桶退回 per-session 隨機 id**（重整就能洗掉額度）。兩道防線都靜默降級，不會報錯 |
+| `postAttachCommand` 帶 `--server.enableXsrfProtection false` | 關掉 XSRF＝拿不到 `_streamlit_xsrf` cookie | `_browser_secret()` 回空字串 → **Spotify 登入直接被擋下**（2026-08-31 起 fail closed，會顯示「無法建立安全的登入連線」；舊版是靜默失去綁定效果）＋**節流桶退回 per-session 隨機 id**（重整就能洗掉額度，這條仍是靜默降級）。容器裡想測方式二登入就得拿掉那個 flag |
 
 要在容器裡認真開發就先把 image 換成 3.12、拿掉那個 XSRF flag；只是隨手跑一下就
 知道上面兩件事即可。**別因為容器裡測試紅就去改測試或改 `_client_ip()` 的邏輯。**
@@ -210,8 +210,19 @@ state = 時間戳.nonce.HMAC-SHA256(瀏覽器祕密, "時間戳.nonce")
 - 攻擊者的 state 是用**攻擊者的**瀏覽器祕密簽的，到受害者瀏覽器就驗不過，攻擊失效。
 - 產生授權網址一律走 `get_login_url()`，不要自己 `_get_auth_manager().get_authorize_url()`
   ——那樣就不會帶 state。
-- 限制：cookie 取不到時 `_browser_secret()` 回空字串，兩端都空則簽章仍相符＝沒有綁定效果
-  （Streamlit Cloud 預設 `enableXsrfProtection=true`，實務上都拿得到）。
+- ⚠️ **拿不到 cookie 時一律 fail closed**（2026-08-31 修，MED-6）。舊版的失效模式是：
+  `_browser_secret()` 回空字串 → 用**空金鑰**簽 HMAC，而空金鑰的簽章攻擊者也算得出來，
+  兩端都空時 `compare_digest` 回 True ＝ state 看起來驗過了、實際上零綁定效果（等同沒有
+  state），授權碼注入重新成立，**而且完全無聲**。實測確認舊版會接受偽造的 state。
+  現在：`_sign_state()` 遇到空祕密**拋 `_NoBrowserSecret`**——這是為了讓「用空金鑰簽章」
+  在任何程式路徑上都不可能發生，不是只在某個呼叫點加 if。`_verify_oauth_state()` 接住回
+  False（fail closed），`get_login_url()` 接住回 **None** 並印 `[AUTH]` 到 stderr。
+- ⚠️ **`get_login_url()` 回 None 時不要退而發一個沒帶 state 的網址**——那正是這道防線要擋的
+  攻擊。登入頁改成顯示「無法建立安全的登入連線」，寧可少一種登入方式（訪客模式仍可用）。
+  Streamlit Cloud 預設 `enableXsrfProtection=true`，實務上拿得到，正常使用者不會看到這個。
+- 未做：nonce 沒有記錄，所以 state 在 TTL 內可重放。判斷不值得做——攻擊者看不到受害者送往
+  Spotify 的 state，而且重放 state 本身沒有用（還得要一個沒用過的 `code`）。要做得付出
+  per-process 狀態的代價，換不到實際的防護。
 
 #### `?error=` 一律走白名單
 `?error=` 是網址參數＝完全由攻擊者控制。登入頁用 `st.warning()` 呈現，而 Streamlit 的
@@ -248,6 +259,36 @@ Spotify Client ID（所有人共用同一份速率限制）。一次 15 首的�
   `if _clicked:` 開頭——否則被冷卻擋下時會順手把使用者上一份歌單清掉（實測過這個症狀）。
 - **額度是逐格恢復不是到點清零**：每一次呼叫各自滿 24 小時才回來，所以釋放速率
   ＝當初的消耗速率。有測試釘住這條，很容易誤以為是「過 24 小時全部恢復」。
+- **兩道關卡：per-browser 額度 ＋ 全站閘門**（2026-08-31 加，HIGH-2）。前者擋隨手亂點、
+  清 cookie 就能繞（設計取捨）；後者擋最壞情況、**不看使用者身分所以繞不掉**：
+  `GLOBAL_HOURLY_MAX=150` ／ `GLOBAL_DAILY_MAX=400` 滾動窗。
+  沒有它的話，換 cookie 的腳本可以在幾分鐘內把共用的 Gemini 配額燒光、
+  並讓 Spotify 回 429（`Retry-After` 實測 6 小時）——對所有使用者。
+  實測：每 2 秒換一個新 cookie 連跑 6 小時共 10,800 次嘗試，**只有 400 次通過**。
+- ⚠️ **生成流程一律走 `ratelimit.acquire()`，不要用 `consume()`**——後者只看個人額度，
+  全站上限等於沒有（`consume()` 保留原始語意是因為被既有測試釘住，有測試標記這個差別）。
+- ⚠️ **兩道關卡必須在同一個鎖內判定，且先看全站、通過才扣個人額度**（`acquire()` 的順序保證
+  「有扣就一定有生成」）。拆成兩次呼叫會產生兩種都很難查的錯：被全站擋下卻扣掉使用者的
+  個人額度（他什麼都沒拿到卻少一次），或先扣了全站名額才發現使用者還在冷卻中（名額浪費、
+  全站計數虛高）。兩條測試各釘一個方向。
+- ⚠️ **全站閘門跟冷卻同一邊、不要 disable 按鈕**；等待秒數要過 `_human_wait()`——
+  日窗的等待是小時級，照秒印會變成「請等 41231 秒」，看起來像壞了。
+  四種原因（`global_day`／`global_hour`／`daily`／`cooldown`）的文案不能共用一句：
+  「今天用完了」和「現在人多」對使用者的下一步完全不同。
+- ⚠️ `GLOBAL_*` 這兩個數字**應該跟著實際的 Gemini RPD 配額調**。目前值的取法：
+  HOURLY 150 ＝ 課堂演示（30 人各 5 次）碰不到，但攻擊者要跑好幾小時；
+  DAILY 400 ＝ 相當於 10 位重度使用者（per-browser 上限 40）。
+  配額若低於 400 次生成所需，DAILY 就該往下調到配額之內，讓使用者看到誠實的
+  「今天用完了」，而不是撞上 Gemini 的 429。
+- ⚠️ 全站計數是 **per-process**，重啟就歸零（同 `_BUCKETS`）。Streamlit Cloud 單行程，可接受。
+- ⚠️ **桶子表滿了不能 `clear()`**（2026-08-31 修，High-3）：舊版 `MAX_BUCKETS` 滿了就整批丟掉，
+  攻擊者換 cookie 造 5000 個新桶（成本近乎零）就能把**全體使用者**的冷卻與每日額度一次歸零、
+  且可反覆做＝節流可以被外部關掉。改成 `_evict()` 兩段式：① 先丟整桶過期的（零損失）
+  ② 還是超過才丟**有效時間戳最少**的桶。**⚠️ 這裡不能用 LRU**——洪水送進來的全是新桶，
+  LRU 會優先踢掉累積最久、最接近上限的老使用者＝正好踢錯人；而「握有額度最少」的排序
+  會先丟掉攻擊者那些各只有 1 筆的桶，對他毫無幫助（他本來就在換 cookie）。
+  驗證：3 波各 5050 個全新 cookie 灌完，100 位已用完額度的使用者仍 100/100 被擋住。
+  三條測試釘住（`test_ratelimit.py` 的「桶子淘汰」段）。
 - **這道防線擋的是意外與隨手亂點，不是有決心的攻擊者**：清 cookie／無痕／寫腳本都能繞。
   真正擋得住的（登入驗證、WAF、IP 信譽）Streamlit Cloud 免費方案都沒有。
 
@@ -802,6 +843,20 @@ UUID**，同意後就能跨 session 記住訪客的回饋/歷史/歌單評分。
   → `_ensure_guest_uk()` 算 `db.guest_user_key(uuid)=HMAC(secret,"guest:"+uuid)`，快取進 `st.session_state["guest_uk"]`。
   DB 只存雜湊，原始 UUID 只在瀏覽器。⚠️ 元件回傳**非同步**（首輪 None、postback 後 rerun 才有值）。
   ⚠️ 讀不到 id（無痕）**不退固定字串**、只降 session 級（同 `_rate_key()` 那課）。
+- ⚠️ **這個 id 是訪客的身分憑證（誰持有誰就是他），而且完全由瀏覽器端控制**——是本站少數
+  跨越信任邊界的輸入之一。2026-08-31（MED-5）補上兩道：
+  ① **產生端一定要 CSPRNG**：舊版在 `crypto.randomUUID` 不可用時退回
+     `Date.now()+Math.random()`＝**可預測**，等於別人可以枚舉訪客身分、讀到他的回饋與歷史。
+     改成 `randomUUID` →（非 https 時）`getRandomValues` 手組 v4 → 都沒有就回 `null`
+     降級 session 級。**別再為了「至少有個 id」退回非密碼學亂數。**
+  ② **接收端一定要驗形式**：`app._GUEST_ID_RE` 只收正規小寫 v4 UUID。
+     形式不對就當作沒有 id，不要拿去 HMAC（那等於讓人自訂身分命名空間）；
+     正規形式順帶把長度鎖死在 36 字元（擋「塞超長字串每次 render 都送」），
+     且只收小寫（大小寫都收會讓同一個邏輯 id 算出兩把 user_key）。
+     ⚠️ regex 用 `\Z` 不是 `$`——`$` 會放行尾端帶換行的值，有測試釘住。
+  元件端的 JS 也用同一條規則做「自我修復」（舊格式/被改過的值換一個新的），但
+  **那只是體驗，Python 端才是真正的信任邊界**：攻擊者可以完全繞過我們的 JS。
+  驗證：把 `newId()` 抽出來用 Node 真的跑，兩條路徑各 5000 次全數是合格 v4 UUID、無重複。
 - **統一路徑**：`_effective_uk()`＝登入 `persist_uk` 或訪客 `guest_uk`；登入的 `_persist_feedback/_persist_history/
   _persist_playlist/_persist_sync/_render_consent_banner/_render_persist_sidebar` 全改吃它，訪客自動沿用同一套。
 - **同意閘**：訪客同意卡走同一個 `_render_consent_banner`。文案**以好處領頭**（「要不要讓推薦越用越準？
@@ -818,6 +873,43 @@ UUID**，同意後就能跨 session 記住訪客的回饋/歷史/歌單評分。
 - **⚠️ 呼叫順序**：`_ensure_guest_uk()` 必須在 `_persist_sync()` **之前**（先解析出 `guest_uk` 才查得到同意）。
 - **已上線**（push＋Reboot＋正式站驗過，2026-08-30）。**「忘記我」的 localStorage 輪替＝決定不做**（使用者拍板；
   刪除鍵已清 DB 資料＝隱私責任已盡，輪替只是體驗、價值不足，別再重提）。
+
+### DB 連線：一律走連線池，不要共用單一連線（2026-08-31 修，MED-4）
+
+**症狀**：DB 寫入偶爾失敗，重試又好了，追不到根因。
+
+**真正原因**：舊版 `db.get_conn()` 是一條 module-global 連線、全站共用。psycopg3 的連線本身
+有內部鎖不會 crash，但**交易邊界是連線層級的**，而 Streamlit 每位使用者的 session 是同一
+行程裡的不同執行緒——① A 的 `commit()` 會順手提交 B 還沒寫完的語句 ② B 的語句一報錯讓交易
+進入 aborted 狀態，**A 的寫入也會跟著失敗**。而 `reset_conn()` 那個「死連線自癒」補丁正好
+把症狀偽裝成「偶發、重試就好」。
+
+**量法（對真實 Supabase，唯讀、不寫任何一列）**：同一順序跑兩次，只換連線取得方式——
+A 送 `select 1/0`、緊接著 B 送 `select 1`：
+
+| 連線方式 | A（壞語句） | B（好語句） |
+|---|---|---|
+| 單一全域連線 | DivisionByZero | **FAILED → InFailedSqlTransaction** |
+| `db.connection()` 連線池 | DivisionByZero | OK → 1 |
+
+**做法**：`db.get_pool()` 建 `psycopg_pool.ConnectionPool`（`min_size=0` 冷啟動零成本、
+`max_size=5`、`timeout=3` 快速降級、`check=check_connection` 借出前驗連線），呼叫端一律：
+
+```python
+with db.connection() as conn:
+    if conn is None:      # DB 未啟用 → 安靜降級成 session 級
+        return
+    db.upsert_feedback(conn, uk, ...)
+```
+
+- ⚠️ **`psycopg-pool` 是獨立套件**，`psycopg[binary]` 裡沒有，requirements.txt 另外釘版。
+- ⚠️ **失敗時不要重置連線**（`_persist_fail()` 已改）：死連線由池子的 `check` 自動汰換，
+  在那裡整池關掉反而會把其他使用者正在用的好連線一起丟掉＝重演舊版的失敗模式。
+  `close_pool()` 只給測試與行程收尾用。
+- ⚠️ `_persist_fail()` 現在會把例外**型別**印成 `[DB] XxxError` 到 stderr（Manage app 撈得到）。
+  以前 DB 問題是 100% 靜默的。**只印型別不印訊息**——訊息可能含連線字串或資料內容。
+- db.* 那些函式仍收 `conn` 參數、自己 `commit()`（28 條假 conn 測試靠這個），沒有改。
+- 區塊內提早 `return` 會被當成例外路徑而 rollback，但那時該寫的已經 commit 了。
 
 ### 使用者回饋（👍/👎/🎧，2026-08，兩種模式都有）
 - 曲目卡下方三顆 `st.pills` 單選（再點一次取消）：喜歡／不合／早就聽過
@@ -1222,9 +1314,9 @@ ImportError: cannot import name 'OVERGEN_FACTOR' from 'recommend'
 | `recommend.py` | prompt / Gemini / JSON 解析 / `curate_tracks()` 驗證鏈（純邏輯，無 Streamlit） | 是 |
 | `spotify_api.py` | OAuth / 搜尋 / 歌單 / 跨 session 歷史 | 偶爾 |
 | `styles.py` | Y2K 主題 CSS / SVG / HTML helpers | 偶爾 |
-| `test_*.py`（7 個） | `test_recommend`(125) / `test_spotify_api`(32) / `test_styles`(14) / `test_app`(40) / `test_ratelimit`(13) / `test_db`(28) / `test_share_card`(23) | 改對應模組時同步 |
+| `test_*.py`（7 個） | `test_recommend`(125) / `test_spotify_api`(36) / `test_styles`(14) / `test_app`(55) / `test_ratelimit`(24) / `test_db`(31) / `test_share_card`(23) | 改對應模組時同步 |
 | `share_card.py` | **IG 限動分享圖卡**（1080×1920 PNG，三種樣式）：純邏輯、不 import streamlit、時間由參數傳入。見「IG 限動分享圖卡」段 | 偶爾 |
-| `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入。**Phase 1+2 已上線**（`_persist_*` helpers）；**Phase 5 加 `guest_user_key()`**（訪客 per-browser 假名鍵）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
+| `db.py` | 跨 session 持久化層（Supabase Postgres：回饋＋歷史＋**歌單層級訊號**＋同意）。純邏輯可測、psycopg 延遲載入、**連線池**（`get_pool`/`connection()`，見「DB 連線」段）。**Phase 1+2 已上線**（`_persist_*` helpers）；**Phase 5 加 `guest_user_key()`**（訪客 per-browser 假名鍵）；`db.is_enabled()` False（Secrets 未設）時全 no-op、行為不變 | 見 `FEEDBACK_PERSISTENCE.md` |
 | `guest_id_component/` | **Phase 5 自建 Streamlit 雙向元件**（vanilla JS、零第三方）：讀/生成瀏覽器 localStorage 匿名 UUID 回傳 Python，撐訪客 per-browser 身分。keyed＋`position:absolute` 隱形（仍執行、零版面）。⚠️ 回傳非同步（首輪 None）；⚠️ 雲端巢狀 iframe 已驗可行（見 `FEEDBACK_PERSISTENCE.md` Phase 5 spike） | 否 |
 | `FEEDBACK_PERSISTENCE.md` | 回饋＋歷史持久化（資料庫版）規格／計畫（含 **Phase 5 訪客 per-browser** 段） | 動工前讀 |
 | `ratelimit.py` | 生成請求節流（純邏輯，時間由參數傳入） | 偶爾 |

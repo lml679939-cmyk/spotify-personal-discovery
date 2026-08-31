@@ -4,7 +4,10 @@ DB 函式收一個 psycopg 風格的假 conn（記錄 execute、供 canned fetch
 SQL/參數、rows 怎麼映射」這一層——真正的 SQL 正確性等 Supabase 開好後手動整合測。
 """
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
+
+import pytest
 
 import db
 from recommend import _track_key_from
@@ -250,27 +253,83 @@ def test_hmac_secret_from_config(monkeypatch):
     assert db.hmac_secret() == "sek"
 
 
-def test_get_conn_none_without_url(monkeypatch):
+# ── 連線池（MED-4）────────────────────────────────────────
+# 舊版是一條 module-global 連線、全站共用：交易邊界是連線層級的，所以 A 的 commit 會
+# 提交 B 還沒寫完的語句，B 出錯讓交易 aborted 則 A 的寫入也一起失敗（跨使用者耦合）。
+# 以下測試釘住「每個 with 區塊拿到自己的連線、而且一定還得回去」。
+
+class _FakePool:
+    """記錄借還的假池子（真的 ConnectionPool 需要能連上的 DB）。"""
+
+    def __init__(self):
+        self.handed, self.returned = [], []
+
+    @contextmanager
+    def connection(self):
+        conn = object()
+        self.handed.append(conn)
+        try:
+            yield conn
+        finally:
+            self.returned.append(conn)
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_pool():
+    db._pool = None
+    yield
+    db._pool = None
+
+
+def test_get_pool_none_without_url(monkeypatch):
     monkeypatch.setattr(db, "_config", lambda: (None, None))
-    db._conn = None
-    assert db.get_conn() is None
+    assert db.get_pool() is None
 
 
-def test_reset_conn_closes_and_clears():
-    class _C:
+def test_connection_yields_none_when_db_disabled(monkeypatch):
+    """Secrets 沒設時要安靜降級成 session 級，不能拋錯。"""
+    monkeypatch.setattr(db, "get_pool", lambda: None)
+    with db.connection() as conn:
+        assert conn is None
+
+
+def test_each_block_borrows_its_own_connection(monkeypatch):
+    """MED-4 的核心性質：兩個區塊不能拿到同一個連線物件。"""
+    pool = _FakePool()
+    monkeypatch.setattr(db, "get_pool", lambda: pool)
+    with db.connection() as a:
+        with db.connection() as b:
+            assert a is not b, "共用連線＝交易邊界互相污染，正是這次要修掉的問題"
+    assert len(pool.handed) == 2
+    # 巢狀時歸還是 LIFO（returned 會是 [b, a]），所以比集合不比順序
+    assert set(pool.returned) == set(pool.handed), "離開區塊一定要還回池子"
+
+
+def test_connection_returns_to_pool_even_when_the_block_raises(monkeypatch):
+    """不還回去的話，幾次例外就能把池子榨乾＝DB 功能整個停擺。"""
+    pool = _FakePool()
+    monkeypatch.setattr(db, "get_pool", lambda: pool)
+    with pytest.raises(RuntimeError):
+        with db.connection() as _conn:
+            raise RuntimeError("boom")
+    assert pool.returned == pool.handed and len(pool.handed) == 1
+
+
+def test_close_pool_closes_and_clears():
+    class _P:
         def __init__(self):
             self.closed = False
 
         def close(self):
             self.closed = True
 
-    c = _C()
-    db._conn = c
-    db.reset_conn()
-    assert db._conn is None and c.closed is True
+    pool = _P()
+    db._pool = pool
+    db.close_pool()
+    assert db._pool is None and pool.closed is True
 
 
-def test_reset_conn_noop_when_none():
-    db._conn = None
-    db.reset_conn()          # 不應拋錯
-    assert db._conn is None
+def test_close_pool_noop_when_none():
+    db._pool = None
+    db.close_pool()          # 不應拋錯
+    assert db._pool is None

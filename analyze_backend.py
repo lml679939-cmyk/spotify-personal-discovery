@@ -53,116 +53,118 @@ def main() -> int:
     if not db.is_enabled():
         print("DB 未啟用：缺 SUPABASE_DB_URL / PERSIST_HMAC_SECRET（檢查 .env）。")
         return 1
-    conn = db.get_conn()
-    if conn is None:
-        print("連不上 DB。")
-        return 1
+    # ⚠️ 單執行緒唯讀 CLI，沒有 app 那邊的併發問題；走同一套 connection() 只是為了
+    #    共用設定與延遲載入，並確保跑完把連線還回池子。
+    with db.connection() as conn:
+        if conn is None:
+            print("連不上 DB。")
+            return 1
 
-    def q(sql: str, params=None):
-        # ⚠️ 只在有 params 時才傳給 execute——否則 psycopg 會把 SQL 裡的字面 `%`（如 like 'anon:%'）
-        # 當成占位符解析而報錯。無 params 走 execute(sql) 就把 `%` 當字面。
-        with conn.cursor() as cur:
-            if params:
-                cur.execute(sql, params)
-            else:
-                cur.execute(sql)
-            return cur.fetchall()
+        def q(sql: str, params=None):
+            # ⚠️ 只在有 params 時才傳給 execute——否則 psycopg 會把 SQL 裡的字面 `%`（如 like 'anon:%'）
+            # 當成占位符解析而報錯。無 params 走 execute(sql) 就把 `%` 當字面。
+            with conn.cursor() as cur:
+                if params:
+                    cur.execute(sql, params)
+                else:
+                    cur.execute(sql)
+                return cur.fetchall()
 
-    def rows(sql, params=None, *, empty="（無資料）"):
-        try:
-            r = q(sql, params)
-        except Exception as e:
-            print(f"  ⚠️ 查詢失敗：{e}")
-            return []
-        if not r:
-            print(f"  {empty}")
-        return r
+        def rows(sql, params=None, *, empty="（無資料）"):
+            try:
+                r = q(sql, params)
+            except Exception as e:
+                print(f"  ⚠️ 查詢失敗：{e}")
+                return []
+            if not r:
+                print(f"  {empty}")
+            return r
 
-    # ── 1) 資料概況 ─────────────────────────────────────────────
-    hr("1. 資料概況")
-    for tbl in ("consent", "feedback", "history", "playlist_feedback"):
-        n = q(f"select count(*) from {tbl}")[0][0]
-        print(f"  {tbl:20s} {n} 列")
-    sub("身分層")
-    login_n = q(f"select count(distinct user_key) from consent where {HASHED}")[0][0]
-    pf_anon = q("select count(*) from playlist_feedback where user_key = 'anon'")[0][0]
-    fb_anon_gens = q("select count(distinct user_key) from feedback where user_key like 'anon:%'")[0][0]
-    print(f"  記名身分（登入＋已同意訪客，雜湊）：{login_n}")
-    print(f"  匿名歌單評分列（anon）：{pf_anon}")
-    print(f"  匿名逐首回饋的生成數（anon:gen_id）：{fb_anon_gens}")
-    rng = q("select min(recommended_at), max(recommended_at) from history")[0]
-    print(f"  歷史時間範圍：{rng[0]} → {rng[1]}")
+        # ── 1) 資料概況 ─────────────────────────────────────────────
+        hr("1. 資料概況")
+        for tbl in ("consent", "feedback", "history", "playlist_feedback"):
+            n = q(f"select count(*) from {tbl}")[0][0]
+            print(f"  {tbl:20s} {n} 列")
+        sub("身分層")
+        login_n = q(f"select count(distinct user_key) from consent where {HASHED}")[0][0]
+        pf_anon = q("select count(*) from playlist_feedback where user_key = 'anon'")[0][0]
+        fb_anon_gens = q("select count(distinct user_key) from feedback where user_key like 'anon:%'")[0][0]
+        print(f"  記名身分（登入＋已同意訪客，雜湊）：{login_n}")
+        print(f"  匿名歌單評分列（anon）：{pf_anon}")
+        print(f"  匿名逐首回饋的生成數（anon:gen_id）：{fb_anon_gens}")
+        rng = q("select min(recommended_at), max(recommended_at) from history")[0]
+        print(f"  歷史時間範圍：{rng[0]} → {rng[1]}")
 
-    # ── 2) 歌單滿意度（playlist_feedback）────────────────────────
-    hr("2. 歌單滿意度（rating 1不太合 / 2還可以 / 3很對味）")
-    tot = q("select count(*) from playlist_feedback where rating is not null")[0][0]
-    if tot == 0:
-        print("  （還沒有評分資料。等真實流量累積再看。）")
-    else:
-        med = q("select percentile_cont(0.5) within group (order by rating), "
-                "round(avg(saved::int)*100,1) from playlist_feedback where rating is not null")[0]
-        print(f"  全體：n={tot}  中位數={med[0]}  加入率(saved)={med[1]}%")
+        # ── 2) 歌單滿意度（playlist_feedback）────────────────────────
+        hr("2. 歌單滿意度（rating 1不太合 / 2還可以 / 3很對味）")
+        tot = q("select count(*) from playlist_feedback where rating is not null")[0][0]
+        if tot == 0:
+            print("  （還沒有評分資料。等真實流量累積再看。）")
+        else:
+            med = q("select percentile_cont(0.5) within group (order by rating), "
+                    "round(avg(saved::int)*100,1) from playlist_feedback where rating is not null")[0]
+            print(f"  全體：n={tot}  中位數={med[0]}  加入率(saved)={med[1]}%")
 
-        def seg(label, expr, extra_where=""):
-            sub(f"按 {label} 切")
-            r = rows(
-                f"select {expr} as seg, count(*) n, "
-                f"percentile_cont(0.5) within group (order by rating) med, "
-                f"round(avg(saved::int)*100,1) save_pct "
-                f"from playlist_feedback where rating is not null {extra_where} "
-                f"group by {expr} order by n desc")
-            for seg_v, n, med_v, save in r:
-                if n < MIN_N:
-                    continue
-                flag = "  ⚠️n小" if n < 10 else ""
-                print(f"    {str(seg_v):18s} n={n:<4d} 中位數={med_v} 加入率={save}%{flag}")
+            def seg(label, expr, extra_where=""):
+                sub(f"按 {label} 切")
+                r = rows(
+                    f"select {expr} as seg, count(*) n, "
+                    f"percentile_cont(0.5) within group (order by rating) med, "
+                    f"round(avg(saved::int)*100,1) save_pct "
+                    f"from playlist_feedback where rating is not null {extra_where} "
+                    f"group by {expr} order by n desc")
+                for seg_v, n, med_v, save in r:
+                    if n < MIN_N:
+                        continue
+                    flag = "  ⚠️n小" if n < 10 else ""
+                    print(f"    {str(seg_v):18s} n={n:<4d} 中位數={med_v} 加入率={save}%{flag}")
 
-        seg("探索度 fame_mode", "ctx->>'fame_mode'")
-        seg("語言 lang", "ctx->>'lang'")
-        seg("曲風 genre", "ctx->>'genre'")
-        seg("新藝人% new_ratio（登入）", "ctx->>'new_ratio'")
-        seg("活力 mood_energy 分桶",
-            "case when (ctx->>'mood_energy')::int<=3 then 'low(1-3)' "
-            "when (ctx->>'mood_energy')::int>=8 then 'high(8-10)' else 'mid(4-7)' end",
-            "and ctx->>'mood_energy' is not null")
-        seg("情緒 mood_valence 分桶",
-            "case when (ctx->>'mood_valence')::int<=3 then 'low(1-3)' "
-            "when (ctx->>'mood_valence')::int>=8 then 'high(8-10)' else 'mid(4-7)' end",
-            "and ctx->>'mood_valence' is not null")
+            seg("探索度 fame_mode", "ctx->>'fame_mode'")
+            seg("語言 lang", "ctx->>'lang'")
+            seg("曲風 genre", "ctx->>'genre'")
+            seg("新藝人% new_ratio（登入）", "ctx->>'new_ratio'")
+            seg("活力 mood_energy 分桶",
+                "case when (ctx->>'mood_energy')::int<=3 then 'low(1-3)' "
+                "when (ctx->>'mood_energy')::int>=8 then 'high(8-10)' else 'mid(4-7)' end",
+                "and ctx->>'mood_energy' is not null")
+            seg("情緒 mood_valence 分桶",
+                "case when (ctx->>'mood_valence')::int<=3 then 'low(1-3)' "
+                "when (ctx->>'mood_valence')::int>=8 then 'high(8-10)' else 'mid(4-7)' end",
+                "and ctx->>'mood_valence' is not null")
 
-    # ── 3) 逐首回饋（feedback）——調選歌用 ────────────────────────
-    hr("3. 逐首回饋（👍 like / 👎 dislike / 🎧 heard）")
-    if q("select count(*) from feedback")[0][0] == 0:
-        print("  （還沒有逐首回饋。）")
-    else:
-        sub("狀態分布")
-        for st, n in rows("select state, count(*) from feedback group by state order by count(*) desc"):
-            print(f"    {st:10s} {n}")
-        sub("出圈 vs 非出圈的按讚率")
-        for disc, n, likes in rows(
-                "select is_discovery, count(*), "
-                "round(100.0*count(*) filter (where state='like')/nullif(count(*),0),1) "
-                "from feedback group by is_discovery order by is_discovery"):
-            print(f"    is_discovery={str(disc):5s} n={n:<4d} 按讚率={likes}%")
-        sub("知名度 fame 分布（被回饋的曲目）")
-        for fame, n, likes in rows(
-                "select fame, count(*), "
-                "round(100.0*count(*) filter (where state='like')/nullif(count(*),0),1) "
-                "from feedback where fame is not null group by fame order by fame"):
-            print(f"    fame={fame} n={n:<4d} 按讚率={likes}%")
-        sub(f"最常被讚/被倒讚的歌手（top {TOP}）")
-        for artist, likes, dislikes in rows(
-                "select artist, count(*) filter (where state='like') likes, "
-                "count(*) filter (where state='dislike') dislikes "
-                "from feedback group by artist "
-                "having count(*) filter (where state in ('like','dislike'))>0 "
-                "order by likes desc, dislikes asc limit %s", (TOP,)):
-            print(f"    {artist:28s} 👍{likes}  👎{dislikes}")
+        # ── 3) 逐首回饋（feedback）——調選歌用 ────────────────────────
+        hr("3. 逐首回饋（👍 like / 👎 dislike / 🎧 heard）")
+        if q("select count(*) from feedback")[0][0] == 0:
+            print("  （還沒有逐首回饋。）")
+        else:
+            sub("狀態分布")
+            for st, n in rows("select state, count(*) from feedback group by state order by count(*) desc"):
+                print(f"    {st:10s} {n}")
+            sub("出圈 vs 非出圈的按讚率")
+            for disc, n, likes in rows(
+                    "select is_discovery, count(*), "
+                    "round(100.0*count(*) filter (where state='like')/nullif(count(*),0),1) "
+                    "from feedback group by is_discovery order by is_discovery"):
+                print(f"    is_discovery={str(disc):5s} n={n:<4d} 按讚率={likes}%")
+            sub("知名度 fame 分布（被回饋的曲目）")
+            for fame, n, likes in rows(
+                    "select fame, count(*), "
+                    "round(100.0*count(*) filter (where state='like')/nullif(count(*),0),1) "
+                    "from feedback where fame is not null group by fame order by fame"):
+                print(f"    fame={fame} n={n:<4d} 按讚率={likes}%")
+            sub(f"最常被讚/被倒讚的歌手（top {TOP}）")
+            for artist, likes, dislikes in rows(
+                    "select artist, count(*) filter (where state='like') likes, "
+                    "count(*) filter (where state='dislike') dislikes "
+                    "from feedback group by artist "
+                    "having count(*) filter (where state in ('like','dislike'))>0 "
+                    "order by likes desc, dislikes asc limit %s", (TOP,)):
+                print(f"    {artist:28s} 👍{likes}  👎{dislikes}")
 
-    print("\n" + "=" * 66)
-    print("  提示：n 小的分段只是雜訊，看趨勢與大樣本；查詢範本見 FEEDBACK_PERSISTENCE.md。")
-    print("=" * 66)
-    return 0
+        print("\n" + "=" * 66)
+        print("  提示：n 小的分段只是雜訊，看趨勢與大樣本；查詢範本見 FEEDBACK_PERSISTENCE.md。")
+        print("=" * 66)
+        return 0
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -183,9 +184,24 @@ def _browser_secret() -> str:
     return raw   # 格式變了就退回原字串——保護力較弱，但不會把登入弄壞
 
 
+class _NoBrowserSecret(RuntimeError):
+    """拿不到 _streamlit_xsrf cookie ＝ 無法把 state 綁到「這個瀏覽器」。"""
+
+
 def _sign_state(nonce: str, issued_at: int) -> str:
+    """⚠️ **空祕密一律拋錯，不要照樣簽下去。**
+
+    這是本段最容易忽略的失效模式：`_browser_secret()` 取不到 cookie 時回空字串，
+    而用空金鑰簽出來的 HMAC——攻擊者也簽得出一模一樣的。兩端都空時 `compare_digest`
+    會回 True，於是 state 看起來驗過了，實際上完全沒有綁定效果＝等同沒有 state，
+    授權碼注入（login CSRF）重新成立。而且整個過程**沒有任何錯誤訊息**。
+    把它做成例外，是為了讓「用空金鑰簽章」在任何程式路徑上都不可能發生。
+    """
+    secret = _browser_secret()
+    if not secret:
+        raise _NoBrowserSecret()
     return hmac.new(
-        _browser_secret().encode(), f"{issued_at}.{nonce}".encode(), hashlib.sha256
+        secret.encode(), f"{issued_at}.{nonce}".encode(), hashlib.sha256
     ).hexdigest()
 
 
@@ -211,7 +227,11 @@ def _verify_oauth_state(state: str | None) -> bool:
     age = time.time() - issued_at
     if not -60 <= age <= _OAUTH_STATE_TTL:
         return False
-    return hmac.compare_digest(sig, _sign_state(nonce, issued_at))
+    try:
+        expected = _sign_state(nonce, issued_at)
+    except _NoBrowserSecret:
+        return False        # 驗不了就拒絕——fail closed，寧可讓使用者重登一次
+    return hmac.compare_digest(sig, expected)
 
 
 # ── Spotify 多用戶 OAuth ────────────────────────────────
@@ -232,9 +252,21 @@ def _get_auth_manager(state: str | None = None) -> SpotifyOAuth:
     )
 
 
-def get_login_url() -> str:
-    """Spotify 授權網址（已帶上綁定本瀏覽器的 state）。"""
-    return _get_auth_manager(state=_make_oauth_state()).get_authorize_url()
+def get_login_url() -> str | None:
+    """Spotify 授權網址（已帶上綁定本瀏覽器的 state）；**綁不了就回 None**。
+
+    ⚠️ 回 None 時呼叫端要顯示錯誤、**不要**退而發一個沒帶 state 的網址——
+    那正是這道防線要擋的攻擊（見 _sign_state 的說明）。寧可少一種登入方式
+    （訪客模式仍可用），也不要提供一個沒有防護的登入。
+    """
+    try:
+        state = _make_oauth_state()
+    except _NoBrowserSecret:
+        # 以前這裡是靜默降級：照樣發網址，但 state 沒有任何綁定效果。
+        print("[AUTH] 拿不到 _streamlit_xsrf cookie；拒絕發出未綁定的授權網址",
+              file=sys.stderr, flush=True)
+        return None
+    return _get_auth_manager(state=state).get_authorize_url()
 
 
 # ⚠️ ?error= 是網址參數＝完全由攻擊者控制，**絕對不能原樣存起來再回顯**。

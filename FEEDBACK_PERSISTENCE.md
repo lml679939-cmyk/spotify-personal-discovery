@@ -27,7 +27,7 @@
 - **連線字串＋祕密**放 Streamlit Secrets（跟 `GEMINI_API_KEY` 同一處）：
   - `SUPABASE_DB_URL`（pooler 連線字串）
   - `PERSIST_HMAC_SECRET`（雜湊 Spotify id 用，見「隱私」）
-- 新增依賴：`psycopg[binary]==<釘版>`（照 requirements.txt 的 `==` 釘版紀律）。
+- 新增依賴：`psycopg[binary]==<釘版>` ＋ `psycopg-pool==<釘版>`（照 requirements.txt 的 `==` 釘版紀律；⚠️ pool 是獨立套件，`psycopg[binary]` 裡沒有）。
 
 ## 身分：雜湊後的 Spotify user id
 - `user_key = HMAC-SHA256(PERSIST_HMAC_SECRET, spotify_user_id)`（`sp.current_user()["id"]`）。
@@ -196,7 +196,7 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
 - ✅ **Phase 0（已完成，使用者做）**：Supabase 專案建好、DDL 跑好（含後加的 `playlist_feedback`）、
   pooler(Session,5432) 連線字串＋`PERSIST_HMAC_SECRET` 填進 Streamlit Secrets 與本機 `.env`。**DB 已生效**。
 - ✅ **Phase 1（`db.py`，已上線）**：user_key 雜湊、key_str、feedback/history/consent/**playlist_feedback**
-  的 upsert/delete/load/trim/delete_all、`is_enabled`/`get_conn`/`reset_conn`（psycopg 延遲載入）。
+  的 upsert/delete/load/trim/delete_all、`is_enabled`/`get_pool`/`connection()`/`close_pool`（psycopg 與 psycopg_pool 皆延遲載入）。
   純邏輯＋假 conn 測試（`test_db.py`），且**對真實 Supabase 跑過整合測試**（連線/schema/中文 jsonb/
   coalesce+OR 累積/delete_all 全對）。
 - ✅ **Phase 2（`app.py` 接線，已上線並實測）**：登入算 `persist_uk`（HMAC）；`_persist_login_sync`
@@ -204,7 +204,7 @@ from playlist_feedback group by 1,2 order by save_pct desc nulls last;
   刪除鍵 `_render_persist_sidebar`（sidebar）；`_render_feedback` 變動→`_persist_feedback`（帶 `ctx`）；
   生成→`_persist_history`＋trim（與 Spotify 歌單雙寫）；**歌單層級 `_persist_playlist`（滿意度/加入行為）
   ＋`_render_playlist_rating`（3 段文字，清單之後）**。**訪客滿意度匿名收**（`user_key="anon"`）。全部
-  try/except 降級、死連線 `reset_conn()` 自癒。`psycopg[binary]==3.3.4` 進 requirements。已對真實 DB 驗過。
+  try/except 降級。**2026-08-31（MED-4）改用連線池**：舊版單一全域連線會讓不同使用者的交易互相污染（A 的 commit 提交 B 的半成品、B 出錯則 A 一起失敗），已對真實 DB 驗證前後差異，見 CLAUDE.md「DB 連線」段。`psycopg[binary]==3.3.4` ＋ `psycopg-pool==3.3.1` 進 requirements。
 - **Phase 3（待資料累積，下一步）**：拿 `feedback`/`playlist_feedback` 回頭**調演算法**（中位數、按 `ctx`
   意圖切）——這才是持久化的目的。**分析工具已就緒＝`analyze_backend.py`**（`python analyze_backend.py`），
   等真實流量累積直接跑。查詢原則見「回饋訊號設計」段。

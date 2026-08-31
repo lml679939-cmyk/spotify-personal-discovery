@@ -7,6 +7,8 @@
 純邏輯請放 recommend.py + test_recommend.py，那邊 import 是即時的。
 """
 
+import pathlib
+
 import pytest
 
 import app
@@ -193,3 +195,74 @@ def test_projective_reshuffle_guard_when_first_equals_current(monkeypatch):
     nxt, rest = app._rotate_projective([], current=pool[0])
     assert nxt == pool[1]        # 撞題的第一題被跳過
     assert rest[-1] == pool[0]   # 移到隊尾，本輪最後才會再出現
+
+
+# ── 節流訊息（HIGH-2 全站閘門）────────────────────────────
+def test_human_wait_never_prints_raw_seconds_for_long_waits():
+    """全站日窗的等待是小時級，照秒印會變成「請等 41231 秒」＝看起來像壞了。"""
+    assert app._human_wait(20) == "20 秒"
+    assert "秒" not in app._human_wait(600)          # 10 分鐘
+    assert "小時" in app._human_wait(41231)
+
+
+def test_rate_limit_warning_says_something_different_for_each_cause():
+    """四種原因對使用者的下一步完全不同，訊息不能共用一句。"""
+    msgs = {
+        why: app._rate_limit_warning(why, 3600)
+        for why in ("global_day", "global_hour", "daily", "cooldown")
+    }
+    assert len(set(msgs.values())) == 4
+    assert "明天" in msgs["global_day"]              # 今天沒救了 → 明天再來
+    assert "人比較多" in msgs["global_hour"]          # 等一下就好
+    assert "24 小時" in msgs["daily"]                # 自己的額度會慢慢回來
+
+
+# ── 訪客匿名代號的驗證（MED-5）────────────────────────────
+# localStorage 的值完全由瀏覽器端控制，是本站少數跨越信任邊界的輸入之一。
+# 元件端的 JS 也驗一次，但那只是自我修復——攻擊者可以完全繞過我們的 JS，
+# 所以 Python 這一關才是真正的邊界。
+
+_GOOD_UUID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+
+
+@pytest.mark.parametrize("bad", [
+    None,                                        # 首輪元件還沒回傳
+    "",
+    "lqk2j3-a8f7d2b1",                           # 舊版 Date.now()+Math.random() 的格式
+    "3F2504E0-4F89-41D3-9A0C-0305E82C3301",      # 大寫：同一個 id 會算出兩把 user_key
+    "3f2504e0-4f89-41d3-9a0c-0305e82c330",       # 少一碼
+    "3f2504e04f8941d39a0c0305e82c3301",          # 沒有連字號
+    _GOOD_UUID + "\ninjected",                   # ⚠️ 尾端換行：用 $ 而非 \Z 就會放行
+    "x" * 10_000,                                # 塞超長字串，每次 render 都往伺服器送
+    {"not": "a string"},
+    12345,
+])
+def test_guest_local_id_rejects_anything_but_a_canonical_uuid(monkeypatch, bad):
+    monkeypatch.setattr(app, "_guest_id_component", lambda **kw: bad)
+    assert app._guest_local_id() is None, "形式不對就該當作沒有 id（降級 session 級）"
+
+
+def test_guest_local_id_accepts_a_canonical_uuid(monkeypatch):
+    monkeypatch.setattr(app, "_guest_id_component", lambda **kw: _GOOD_UUID)
+    assert app._guest_local_id() == _GOOD_UUID
+
+
+def test_guest_local_id_survives_a_broken_component(monkeypatch):
+    def _boom(**kw):
+        raise RuntimeError("component died")
+    monkeypatch.setattr(app, "_guest_id_component", _boom)
+    assert app._guest_local_id() is None
+
+
+def test_guest_id_component_generates_with_a_csprng():
+    """⚠️ 別再退回 Date.now()／Math.random()——兩者都可預測，等於別人可以枚舉出
+    訪客身分、讀到他的回饋與歷史。這個 id 就是訪客的身分憑證。
+
+    註解裡刻意留著舊做法當教訓，所以先把整行註解剝掉再檢查（同 test_share_card
+    當初改用 AST 的理由：子字串檢查會被說明文字誤中）。
+    """
+    src = (pathlib.Path(app._GUEST_ID_DIR) / "index.html").read_text(encoding="utf-8")
+    code = "\n".join(l for l in src.splitlines() if not l.strip().startswith("//"))
+    assert "getRandomValues" in code, "沒有 CSPRNG 的產生路徑"
+    assert "Math.random" not in code
+    assert "Date.now" not in code
