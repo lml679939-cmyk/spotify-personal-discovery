@@ -11,4 +11,8 @@ venv/
 .streamlit/secrets.toml
 
 # Claude Code local settings
-.claude/
+# ⚠️ 要寫 `.claude/*`（排除內容）而不是 `.claude/`（排除目錄本身）——目錄被排除時
+#    git 根本不會進去看，底下的 `!` 反向規則永遠不會生效。
+.claude/*
+# ……但專案自己的 skill 要進版控（換台機器／重新 clone 都還在）
+!.claude/skills/
