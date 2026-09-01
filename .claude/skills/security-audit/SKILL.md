@@ -106,3 +106,4 @@ Manage app 日誌裡看得到（`[AUTH]` 洗版），本機和測試都完全正
 | `references/sweeps.md` | 步驟 2，實際執行掃描時 |
 | `references/stack-traps.md` | 步驟 1／4／5，判斷這個技術堆疊的行為時。**動到 OAuth、身分、DB、節流之前先讀** |
 | `references/verify-recipes.md` | 步驟 4，要證明發現為真或修法有效時 |
+| `references/eval-plan.md` | **只在要驗證這個 skill 本身有沒有效時**才讀。平常做稽核用不到 |
